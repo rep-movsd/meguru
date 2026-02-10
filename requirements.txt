@@ -1,0 +1,5 @@
+textual>=0.50.0
+pandas>=2.0.0
+numpy>=1.24.0
+yfinance>=0.2.40
+pytest>=8.0.0
