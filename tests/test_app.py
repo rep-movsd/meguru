@@ -10,11 +10,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# Import from app module
+# Import from backend module
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from app import (
+from backend import (
     SeasonalRow,
     sanitize_symbol,
     parse_symbols,
@@ -24,7 +24,6 @@ from app import (
     get_first_monday,
     compute_window_return,
     generate_seasonal_data,
-    seasonal_to_frame,
     detect_runs,
     build_run_map,
     RunInfo,
@@ -385,13 +384,6 @@ class TestSeasonalRow:
         row = SeasonalRow(label="Week 1")
         assert row.trend_pct is None
 
-    def test_trend_sort_key(self):
-        row1 = SeasonalRow(label="Week 1")
-        row1.year_returns = {2022: 1.5, 2023: 2.0, 2024: 3.0}  # 100% green
-        row2 = SeasonalRow(label="Week 2")
-        row2.year_returns = {2022: 1.5, 2023: -0.5, 2024: 2.0}  # 67% green
-        assert row1.trend_sort_key > row2.trend_sort_key
-
 
 # ============================================================================
 # Tests: generate_seasonal_data
@@ -423,52 +415,6 @@ class TestGenerateSeasonalData:
         # Should have data for years in the sample
         row = result[0]
         assert len(row.year_returns) == 3
-
-
-# ============================================================================
-# Tests: seasonal_to_frame
-# ============================================================================
-
-
-class TestSeasonalToFrame:
-    def test_empty_list(self):
-        result = seasonal_to_frame([], [2022, 2023, 2024])
-        assert result.empty
-
-    def test_single_row(self, sample_seasonal_row):
-        years = [2022, 2023, 2024]
-        result = seasonal_to_frame([sample_seasonal_row], years)
-        assert len(result) == 1
-        assert result.iloc[0]["Period"] == "Week 1"
-        # Values are stored with sign preserved
-        assert result.iloc[0]["Return 2022 %"] == 1.5
-        assert result.iloc[0]["Return 2023 %"] == -0.5
-        assert result.iloc[0]["Return 2024 %"] == 2.0
-        # average is computed from raw values (1.5 - 0.5 + 2.0)/3 = 1.0, then abs() applied
-        assert abs(result.iloc[0]["Average Return %"] - 1.0) < 0.01
-        assert result.iloc[0]["Trend Likelihood %"] == 67  # 2/3 green
-        assert result.iloc[0]["Trend Direction"] == "Bull"
-
-    def test_output_columns(self, sample_seasonal_row):
-        years = [2022, 2023, 2024]
-        result = seasonal_to_frame([sample_seasonal_row], years)
-        expected_cols = ["Period", "Trend Likelihood %", "Trend Direction", "Expected Value %", "Average Return %", "Return 2022 %", "Return 2023 %", "Return 2024 %"]
-        assert list(result.columns) == expected_cols
-
-    def test_none_values_preserved(self):
-        row = SeasonalRow(label="Week 1")
-        row.year_returns = {2022: 1.5, 2023: None, 2024: 2.5}
-        years = [2022, 2023, 2024]
-        result = seasonal_to_frame([row], years)
-        assert result.iloc[0]["Return 2023 %"] is None
-
-    def test_bearish_trend(self):
-        row = SeasonalRow(label="Week 1")
-        row.year_returns = {2022: -1.5, 2023: -0.5, 2024: 2.0}
-        years = [2022, 2023, 2024]
-        result = seasonal_to_frame([row], years)
-        assert result.iloc[0]["Trend Likelihood %"] == 67  # 2/3 red
-        assert result.iloc[0]["Trend Direction"] == "Bear"
 
 
 # ============================================================================
