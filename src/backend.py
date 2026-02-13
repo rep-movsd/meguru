@@ -679,6 +679,541 @@ def simulate_all_years(
 
 
 # =============================================================================
+# Sliding Window Detection
+# =============================================================================
+
+@dataclass
+class SlidingWindow:
+    """A detected investment window from sliding window analysis."""
+    start_day: int  # Day of year (1-366)
+    end_day: int    # Day of year (1-366), inclusive
+    length: int     # Number of days
+    avg_return: float  # Average return % across years
+    win_rate: float    # Fraction of years with positive return (0-1)
+    score: float       # avg_return * win_rate
+    yield_per_day: float  # avg_return / length (basis points per day)
+    year_returns: dict[int, float | None]  # Per-year returns
+    
+    @property
+    def start_date_str(self) -> str:
+        """Convert start_day to 'Mon-DD' format."""
+        # Use a non-leap year as reference
+        ref_date = dt.date(2023, 1, 1) + dt.timedelta(days=self.start_day - 1)
+        return f"{calendar.month_abbr[ref_date.month]}-{ref_date.day}"
+    
+    @property
+    def end_date_str(self) -> str:
+        """Convert end_day to 'Mon-DD' format."""
+        ref_date = dt.date(2023, 1, 1) + dt.timedelta(days=self.end_day - 1)
+        return f"{calendar.month_abbr[ref_date.month]}-{ref_date.day}"
+
+
+def day_of_year(month: int, day: int) -> int:
+    """Convert month/day to day of year (1-366)."""
+    ref_date = dt.date(2023, 1, 1)
+    target = dt.date(2023, month, day)
+    return (target - ref_date).days + 1
+
+
+def date_from_day_of_year(doy: int) -> tuple[int, int]:
+    """Convert day of year to (month, day)."""
+    ref_date = dt.date(2023, 1, 1) + dt.timedelta(days=doy - 1)
+    return ref_date.month, ref_date.day
+
+
+@dataclass
+class YearlyReturnsCache:
+    """
+    Precomputed cumulative returns for efficient window calculations.
+    
+    For each year, stores cumulative product of (1 + daily_return) indexed by day of year.
+    This allows O(1) calculation of any window's return via: cum[end] / cum[start-1] - 1
+    """
+    years: list[int]
+    # cum_returns[year][doy] = cumulative product from day 1 to day doy
+    # return for window [start, end] = cum[end] / cum[start-1] - 1
+    cum_returns: dict[int, dict[int, float]]
+    # Valid range for each year (first and last day with data)
+    valid_ranges: dict[int, tuple[int, int]]
+    
+    def get_return(self, year: int, start_doy: int, end_doy: int) -> float | None:
+        """Get return for a window in O(1) time, using nearest trading days."""
+        if year not in self.cum_returns:
+            return None
+        
+        year_data = self.cum_returns[year]
+        valid_start, valid_end = self.valid_ranges.get(year, (366, 0))
+        
+        # Check if window is roughly within valid range
+        if start_doy < valid_start - 5 or end_doy > valid_end + 5:
+            return None
+        
+        # Find nearest trading day for end_doy (search nearby)
+        actual_end = self._find_nearest_day(year_data, end_doy, valid_start, valid_end)
+        if actual_end is None:
+            return None
+        
+        # Find nearest trading day for start_doy - 1
+        if start_doy == 1:
+            start_cum = 1.0
+        else:
+            actual_start_prev = self._find_nearest_day(year_data, start_doy - 1, valid_start, valid_end)
+            if actual_start_prev is None:
+                return None
+            start_cum = year_data[actual_start_prev]
+        
+        end_cum = year_data[actual_end]
+        
+        if start_cum == 0:
+            return None
+        
+        return (end_cum / start_cum - 1) * 100
+    
+    def _find_nearest_day(self, year_data: dict[int, float], target_doy: int, valid_start: int, valid_end: int) -> int | None:
+        """Find nearest trading day to target within a few days."""
+        # Check exact match first
+        if target_doy in year_data:
+            return target_doy
+        
+        # Search nearby (up to 5 days in each direction)
+        for offset in range(1, 6):
+            # Check before
+            if target_doy - offset >= valid_start and (target_doy - offset) in year_data:
+                return target_doy - offset
+            # Check after
+            if target_doy + offset <= valid_end and (target_doy + offset) in year_data:
+                return target_doy + offset
+        
+        return None
+
+
+def build_returns_cache(df: pd.DataFrame, years: list[int]) -> YearlyReturnsCache:
+    """
+    Build precomputed returns cache for efficient window scoring.
+    
+    This is O(years × trading_days) but only done once.
+    """
+    cum_returns: dict[int, dict[int, float]] = {}
+    valid_ranges: dict[int, tuple[int, int]] = {}
+    
+    for year in years:
+        year_start = pd.Timestamp(year=year, month=1, day=1)
+        year_end = pd.Timestamp(year=year, month=12, day=31)
+        
+        year_data = df.loc[year_start:year_end].copy()
+        if year_data.empty:
+            continue
+        
+        # Calculate daily returns
+        year_data = year_data.sort_index()
+        closes = year_data["Close"].values
+        
+        if len(closes) < 2:
+            continue
+        
+        # Build cumulative product indexed by day of year
+        cum = {}
+        cumulative = 1.0
+        first_doy = None
+        last_doy = None
+        
+        prev_close = closes[0]
+        for i, (idx, row) in enumerate(year_data.iterrows()):
+            ts = pd.Timestamp(idx)
+            doy = ts.timetuple().tm_yday
+            
+            if i == 0:
+                first_doy = doy
+                cum[doy] = 1.0
+            else:
+                close = row["Close"]
+                if prev_close > 0:
+                    daily_ret = close / prev_close - 1
+                    cumulative *= (1 + daily_ret)
+                cum[doy] = cumulative
+                prev_close = close
+            
+            last_doy = doy
+        
+        if first_doy is not None and last_doy is not None:
+            cum_returns[year] = cum
+            valid_ranges[year] = (first_doy, last_doy)
+    
+    return YearlyReturnsCache(years=years, cum_returns=cum_returns, valid_ranges=valid_ranges)
+
+
+def score_window_fast(
+    cache: YearlyReturnsCache,
+    start_doy: int,
+    end_doy: int,
+    min_years: int = 5,
+) -> tuple[float, float, float, dict[int, float | None]] | None:
+    """
+    Score a window using precomputed cache - O(years) time.
+    
+    Returns:
+        (avg_return, win_rate, score, year_returns) or None if insufficient data
+    """
+    year_returns: dict[int, float | None] = {}
+    valid_returns: list[float] = []
+    
+    for year in cache.years:
+        ret = cache.get_return(year, start_doy, end_doy)
+        year_returns[year] = ret
+        if ret is not None:
+            valid_returns.append(ret)
+    
+    if len(valid_returns) < min_years:
+        return None
+    
+    avg_return = sum(valid_returns) / len(valid_returns)
+    win_count = sum(1 for r in valid_returns if r >= 0)
+    win_rate = win_count / len(valid_returns)
+    score = avg_return * win_rate
+    
+    return avg_return, win_rate, score, year_returns
+
+
+def find_best_window_fast(
+    cache: YearlyReturnsCache,
+    max_days: int,
+    excluded_days: set[int] | None = None,
+    min_window: int = 5,
+    threshold: float = 0.5,
+) -> SlidingWindow | None:
+    """
+    Find the best investment window up to max_days length.
+    Uses precomputed cache for O(365 × max_days × years) total.
+    
+    Args:
+        cache: Precomputed returns cache
+        max_days: Maximum window length in days
+        excluded_days: Set of day-of-year values that are already used
+        min_window: Minimum window length in days
+        threshold: Minimum win rate to consider (0-1)
+    
+    Returns:
+        Best SlidingWindow or None if no valid window found
+    """
+    if excluded_days is None:
+        excluded_days = set()
+    
+    best_window: SlidingWindow | None = None
+    best_score = float('-inf')
+    
+    # Scan all possible start days
+    for start_doy in range(1, 366):
+        # Skip if start day is excluded
+        if start_doy in excluded_days:
+            continue
+        
+        # Try all window lengths from min to max
+        for length in range(min_window, max_days + 1):
+            end_doy = start_doy + length - 1
+            
+            # Handle year wraparound (skip for now - keep windows within single year)
+            if end_doy > 365:
+                break
+            
+            # Check if any day in window is excluded
+            if excluded_days:
+                has_excluded = False
+                for d in range(start_doy, end_doy + 1):
+                    if d in excluded_days:
+                        has_excluded = True
+                        break
+                if has_excluded:
+                    break  # This and longer windows from this start are invalid
+            
+            # Score the window using cache
+            result = score_window_fast(cache, start_doy, end_doy)
+            if result is None:
+                continue
+            
+            avg_return, win_rate, score, year_returns = result
+            
+            # Must meet threshold
+            if win_rate < threshold:
+                continue
+            
+            # Only consider bullish windows (positive avg return)
+            if avg_return <= 0:
+                continue
+            
+            if score > best_score:
+                best_score = score
+                best_window = SlidingWindow(
+                    start_day=start_doy,
+                    end_day=end_doy,
+                    length=length,
+                    avg_return=avg_return,
+                    win_rate=win_rate,
+                    score=score,
+                    yield_per_day=avg_return / length,
+                    year_returns=year_returns,
+                )
+    
+    return best_window
+
+
+def narrow_window_fast(
+    cache: YearlyReturnsCache,
+    window: SlidingWindow,
+    min_window: int = 5,
+    threshold: float = 0.5,
+) -> SlidingWindow:
+    """
+    Narrow a window to maximize yield (return per day).
+    Uses precomputed cache for efficiency.
+    
+    Args:
+        cache: Precomputed returns cache
+        window: The window to narrow
+        min_window: Minimum window length in days
+        threshold: Minimum win rate to consider (0-1)
+    
+    Returns:
+        Narrowed window (may be same as input if no improvement found)
+    """
+    best_window = window
+    best_yield = window.yield_per_day
+    
+    # Try all sub-windows
+    for trim_start in range(window.length - min_window + 1):
+        for trim_end in range(window.length - trim_start - min_window + 1):
+            new_start = window.start_day + trim_start
+            new_end = window.end_day - trim_end
+            new_length = new_end - new_start + 1
+            
+            if new_length < min_window:
+                continue
+            
+            result = score_window_fast(cache, new_start, new_end)
+            if result is None:
+                continue
+            
+            avg_return, win_rate, score, year_returns = result
+            
+            # Must meet threshold and be bullish
+            if win_rate < threshold or avg_return <= 0:
+                continue
+            
+            yield_per_day = avg_return / new_length
+            
+            if yield_per_day > best_yield:
+                best_yield = yield_per_day
+                best_window = SlidingWindow(
+                    start_day=new_start,
+                    end_day=new_end,
+                    length=new_length,
+                    avg_return=avg_return,
+                    win_rate=win_rate,
+                    score=score,
+                    yield_per_day=yield_per_day,
+                    year_returns=year_returns,
+                )
+    
+    return best_window
+
+
+def find_best_fixed_window(
+    cache: YearlyReturnsCache,
+    window_size: int,
+    excluded_days: set[int] | None = None,
+    threshold: float = 0.5,
+) -> SlidingWindow | None:
+    """
+    Find the best window of EXACTLY window_size days.
+    
+    Args:
+        cache: Precomputed returns cache
+        window_size: Exact window length in days
+        excluded_days: Set of day-of-year values that are already used
+        threshold: Minimum win rate to consider (0-1)
+    
+    Returns:
+        Best SlidingWindow or None if no valid window found
+    """
+    if excluded_days is None:
+        excluded_days = set()
+    
+    best_window: SlidingWindow | None = None
+    best_score = float('-inf')
+    
+    # Scan all possible start days
+    for start_doy in range(1, 366 - window_size + 2):
+        end_doy = start_doy + window_size - 1
+        
+        # Skip if beyond year
+        if end_doy > 365:
+            break
+        
+        # Check if any day in window is excluded
+        window_excluded = False
+        for d in range(start_doy, end_doy + 1):
+            if d in excluded_days:
+                window_excluded = True
+                break
+        if window_excluded:
+            continue
+        
+        # Score the window using cache
+        result = score_window_fast(cache, start_doy, end_doy)
+        if result is None:
+            continue
+        
+        avg_return, win_rate, score, year_returns = result
+        
+        # Must meet threshold
+        if win_rate < threshold:
+            continue
+        
+        # Only consider bullish windows (positive avg return)
+        if avg_return <= 0:
+            continue
+        
+        if score > best_score:
+            best_score = score
+            best_window = SlidingWindow(
+                start_day=start_doy,
+                end_day=end_doy,
+                length=window_size,
+                avg_return=avg_return,
+                win_rate=win_rate,
+                score=score,
+                yield_per_day=avg_return / window_size,
+                year_returns=year_returns,
+            )
+    
+    return best_window
+
+
+def merge_adjacent_windows(
+    windows: list[SlidingWindow],
+    cache: YearlyReturnsCache,
+) -> list[SlidingWindow]:
+    """
+    Merge adjacent windows into larger continuous windows.
+    Two windows are adjacent if one ends and the next starts within 1 day.
+    
+    Args:
+        windows: List of windows sorted by start_day
+        cache: Returns cache to recalculate merged window stats
+    
+    Returns:
+        List of merged windows
+    """
+    if len(windows) <= 1:
+        return windows
+    
+    merged: list[SlidingWindow] = []
+    current = windows[0]
+    
+    for next_window in windows[1:]:
+        # Check if adjacent (next starts within 1 day of current ending)
+        if next_window.start_day <= current.end_day + 2:
+            # Merge: extend current to include next
+            new_end = max(current.end_day, next_window.end_day)
+            new_start = current.start_day
+            new_length = new_end - new_start + 1
+            
+            # Recalculate stats for merged window
+            result = score_window_fast(cache, new_start, new_end)
+            if result:
+                avg_return, win_rate, score, year_returns = result
+                current = SlidingWindow(
+                    start_day=new_start,
+                    end_day=new_end,
+                    length=new_length,
+                    avg_return=avg_return,
+                    win_rate=win_rate,
+                    score=score,
+                    yield_per_day=avg_return / new_length,
+                    year_returns=year_returns,
+                )
+            else:
+                # Can't calculate merged stats, keep extending anyway
+                current = SlidingWindow(
+                    start_day=new_start,
+                    end_day=new_end,
+                    length=new_length,
+                    avg_return=(current.avg_return + next_window.avg_return) / 2,
+                    win_rate=min(current.win_rate, next_window.win_rate),
+                    score=(current.score + next_window.score) / 2,
+                    yield_per_day=current.avg_return / new_length,
+                    year_returns=current.year_returns,
+                )
+        else:
+            # Not adjacent, save current and start new
+            merged.append(current)
+            current = next_window
+    
+    # Don't forget the last one
+    merged.append(current)
+    return merged
+
+
+def detect_sliding_windows(
+    df: pd.DataFrame,
+    window_size: int = 30,
+    threshold: float = 0.5,
+) -> list[SlidingWindow]:
+    """
+    Detect best investment windows using fixed-size sliding window algorithm.
+    
+    Algorithm:
+    1. Precompute cumulative returns for all years (done once)
+    2. Find the best window of exactly window_size days
+    3. Mark those days as used
+    4. Repeat until no more valid windows found
+    5. Merge adjacent windows
+    
+    Args:
+        df: DataFrame with OHLC data
+        window_size: Fixed window length in days (e.g., 30)
+        threshold: Minimum win rate (0-1), default 0.5 (50%)
+    
+    Returns:
+        List of detected SlidingWindow objects, sorted by start day
+    """
+    if df.empty:
+        return []
+    
+    years = get_years_from_data(df)
+    if len(years) < 5:
+        return []
+    
+    # Build cache once for all window calculations
+    cache = build_returns_cache(df, years)
+    
+    windows: list[SlidingWindow] = []
+    excluded_days: set[int] = set()
+    
+    while True:
+        # Find best fixed-size window in remaining days
+        window = find_best_fixed_window(
+            cache, window_size, excluded_days, threshold
+        )
+        
+        if window is None:
+            break
+        
+        windows.append(window)
+        
+        # Mark these days as used
+        for d in range(window.start_day, window.end_day + 1):
+            excluded_days.add(d)
+    
+    # Sort by start day
+    windows.sort(key=lambda w: w.start_day)
+    
+    # Merge adjacent windows
+    windows = merge_adjacent_windows(windows, cache)
+    
+    return windows
+
+
+# =============================================================================
 # High-Level API Functions for Web Server
 # =============================================================================
 
@@ -1245,6 +1780,117 @@ def get_backtest_data(
         
         # Seasonal: only in market during green runs
         # Check if we should be in position today
+        should_be_in = False
+        for entry, exit_dt in trading_periods:
+            if entry <= ts <= exit_dt:
+                should_be_in = True
+                break
+        
+        if should_be_in:
+            seasonal_cumulative = (1 + seasonal_cumulative / 100) * (1 + daily_ret) - 1
+            seasonal_cumulative *= 100
+        
+        seasonal_curve.append(seasonal_cumulative)
+    
+    result = {
+        "seasonal_curve": seasonal_curve,
+        "bh_curve": bh_curve,
+        "trades": trades_info,
+        "dates": dates,
+    }
+    if data_warning:
+        result["warning"] = data_warning
+    return result
+
+
+def get_window_backtest_data(
+    symbol: str,
+    window_size: int,
+    threshold: int,
+    year: int,
+) -> dict:
+    """
+    Generate backtest data for sliding window mode.
+    
+    Uses detected windows as trading periods and builds daily equity curves
+    comparing the window strategy vs buy & hold.
+    
+    Args:
+        symbol: Stock symbol
+        window_size: Fixed window length in days
+        threshold: Win rate threshold percentage (50-100)
+        year: Year to backtest
+    
+    Returns:
+        dict with seasonal_curve, bh_curve, trades, dates, and optional warning
+    """
+    df = load_symbol_data(symbol)
+    if df.empty:
+        return {"error": "No data available", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
+    
+    # Detect windows using the same params
+    windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+    
+    if not windows:
+        return {"error": "No windows detected", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
+    
+    # Filter data for the specified year
+    year_start = pd.Timestamp(year=year, month=1, day=1)
+    year_end = pd.Timestamp(year=year, month=12, day=31)
+    year_data = df.loc[year_start:year_end].copy()
+    
+    if year_data.empty:
+        return {"error": f"No data for year {year}", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
+    
+    # Check for sparse data
+    data_warning = None
+    if len(year_data) < 200:
+        data_warning = f"Incomplete data: only {len(year_data)} trading days (expected ~245)"
+    
+    # Convert windows (day-of-year based) to actual date ranges for this year
+    trades_info = []
+    trading_periods = []
+    for w in windows:
+        start_date = dt.date(year, 1, 1) + dt.timedelta(days=w.start_day - 1)
+        end_date = dt.date(year, 1, 1) + dt.timedelta(days=w.end_day - 1)
+        entry_str = f"{calendar.month_abbr[start_date.month]}-{start_date.day}"
+        exit_str = f"{calendar.month_abbr[end_date.month]}-{end_date.day}"
+        trades_info.append({
+            "entry_date": entry_str,
+            "exit_date": exit_str,
+            "days": w.length,
+        })
+        trading_periods.append((
+            pd.Timestamp(start_date),
+            pd.Timestamp(end_date),
+        ))
+    
+    # Calculate daily returns
+    year_data["Daily_Return"] = year_data["Close"].pct_change()
+    
+    # Build equity curves
+    dates = []
+    seasonal_curve = []
+    bh_curve = []
+    
+    bh_cumulative = 0.0
+    seasonal_cumulative = 0.0
+    
+    for idx, row in year_data.iterrows():
+        ts = pd.Timestamp(idx)
+        date_str = f"{calendar.month_abbr[ts.month]}-{ts.day}"
+        dates.append(date_str)
+        
+        daily_ret = row["Daily_Return"]
+        if pd.isna(daily_ret):
+            daily_ret = 0.0
+        
+        # Buy & Hold: always in market
+        bh_cumulative = (1 + bh_cumulative / 100) * (1 + daily_ret) - 1
+        bh_cumulative *= 100
+        bh_curve.append(bh_cumulative)
+        
+        # Window strategy: only in market during detected windows
         should_be_in = False
         for entry, exit_dt in trading_periods:
             if entry <= ts <= exit_dt:

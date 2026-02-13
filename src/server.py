@@ -20,6 +20,9 @@ from backend import (
     find_optimal_trades,
     get_plan_backtest_data,
     export_plan_calendar_csv,
+    detect_sliding_windows,
+    load_symbol_data,
+    get_window_backtest_data,
     OFFSET_LIMITS,
 )
 
@@ -293,6 +296,75 @@ HTML_PAGE = """<!DOCTYPE html>
             border-radius: 6px;
             overflow: hidden;
             flex-shrink: 0;
+        }
+        
+        .trades-panel.chart-mode {
+            height: 60vh;
+            min-height: 300px;
+        }
+        
+        .trades-panel.chart-mode .trades-content {
+            position: relative;
+        }
+        
+        .window-chart-container {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+        }
+        
+        .window-chart-container svg {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .window-chart-metrics {
+            display: flex;
+            gap: 20px;
+            padding: 4px 16px;
+            border-top: 1px solid #333;
+            justify-content: center;
+            font-size: 12px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+        
+        .window-chart-metrics .metric {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .window-chart-metrics .metric .label {
+            color: #888;
+        }
+        
+        .chart-year-select {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 1px 4px;
+            font-size: 0.8em;
+            cursor: pointer;
+        }
+        
+        .chart-legend {
+            display: flex;
+            gap: 14px;
+            align-items: center;
+            font-size: 0.75em;
+            color: #888;
+        }
+        
+        .chart-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        .chart-legend-color {
+            width: 14px;
+            height: 3px;
         }
         
         .trades-content {
@@ -979,20 +1051,14 @@ HTML_PAGE = """<!DOCTYPE html>
         
         <div class="controls-section center">
             <div class="control-group">
-                <label>Period:</label>
-                <select id="period-select">
-                    <option value="monthly" selected>Monthly</option>
-                    <option value="weekly">Weekly</option>
+                <label>Window:</label>
+                <select id="window-size-select">
+                    <option value="7">1 week</option>
+                    <option value="14">2 weeks</option>
+                    <option value="30" selected>1 month</option>
+                    <option value="60">2 months</option>
+                    <option value="90">3 months</option>
                 </select>
-            </div>
-            
-            <div class="control-group">
-                <label>Offset:</label>
-                <div class="stepper">
-                    <button id="offset-minus">-</button>
-                    <span class="stepper-value" id="offset-value">0</span>
-                    <button id="offset-plus">+</button>
-                </div>
             </div>
             
             <div class="control-group">
@@ -1020,20 +1086,27 @@ HTML_PAGE = """<!DOCTYPE html>
             </div>
             <div class="table-container">
                 <table id="stats-table">
-                    <thead><tr><th>Period</th><th>Trend%</th><th>EV</th><th>RunEV</th><th>Avg</th></tr></thead>
+                    <thead><tr><th>Period</th><th>Days</th><th>Return%</th><th>Win%</th><th>bps/day</th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>
         </div>
         
-        <div class="trades-panel">
+        <div class="trades-panel" id="trades-panel">
             <div class="panel-header">
-                <h3>Strategy</h3>
+                <h3 id="trades-panel-title">Strategy</h3>
                 <div class="panel-header-actions" id="strategy-actions" style="display: none;">
                     <button id="export-trades-btn" class="btn-small btn-secondary">Export Data</button>
                     <button id="export-strategy-btn" class="btn-small btn-secondary">Export Strategy</button>
                     <button id="show-backtest-btn" class="btn-small btn-primary">Backtest</button>
                     <button id="add-to-plan-btn" class="btn-small btn-add-plan">+ Add to Plan</button>
+                </div>
+                <div id="chart-controls" style="display: none;">
+                    <div class="chart-legend">
+                        <div class="chart-legend-item"><div class="chart-legend-color" style="background: #00ff88;"></div>Strategy</div>
+                        <div class="chart-legend-item"><div class="chart-legend-color" style="background: #6699ff;"></div>Buy & Hold</div>
+                        <select id="chart-year-select" class="chart-year-select"></select>
+                    </div>
                 </div>
             </div>
             <div class="trades-content">
@@ -1044,6 +1117,8 @@ HTML_PAGE = """<!DOCTYPE html>
                     </table>
                 </div>
                 <div class="summary" id="summary"></div>
+                <div class="window-chart-container" id="window-chart" style="display: none;"></div>
+                <div class="window-chart-metrics" id="window-chart-metrics" style="display: none;"></div>
             </div>
         </div>
     </div>
@@ -1160,24 +1235,26 @@ HTML_PAGE = """<!DOCTYPE html>
         // State
         let state = {
             symbol: '',
-            period: 'monthly',
-            offset: 0,
+            windowSize: 30,
             threshold: 50,
         };
-        
-        const offsetLimits = { weekly: 6, monthly: 30 };
         
         // Elements
         const symbolInput = document.getElementById('symbol-input');
         const autocomplete = document.getElementById('autocomplete');
-        const periodSelect = document.getElementById('period-select');
-        const offsetValue = document.getElementById('offset-value');
+        const windowSizeSelect = document.getElementById('window-size-select');
         const thresholdValue = document.getElementById('threshold-value');
         const loadBtn = document.getElementById('load-btn');
         const statsTable = document.getElementById('stats-table');
         const tradesTable = document.getElementById('trades-table');
         const summary = document.getElementById('summary');
         const status = document.getElementById('status');
+        const tradesPanel = document.getElementById('trades-panel');
+        const tradesPanelTitle = document.getElementById('trades-panel-title');
+        const chartControls = document.getElementById('chart-controls');
+        const chartYearSelect = document.getElementById('chart-year-select');
+        const windowChart = document.getElementById('window-chart');
+        const windowChartMetrics = document.getElementById('window-chart-metrics');
         const spinner = document.getElementById('spinner');
         
         // Autocomplete
@@ -1303,34 +1380,10 @@ HTML_PAGE = """<!DOCTYPE html>
             loadData();
         }
         
-        // Period
-        periodSelect.addEventListener('change', (e) => {
-            state.period = e.target.value;
-            // Clamp offset to new limit
-            const limit = offsetLimits[state.period];
-            if (state.offset > limit) {
-                state.offset = limit;
-                offsetValue.textContent = state.offset;
-            }
+        // Window size
+        windowSizeSelect.addEventListener('change', (e) => {
+            state.windowSize = parseInt(e.target.value);
             loadData();
-        });
-        
-        // Offset stepper
-        document.getElementById('offset-minus').addEventListener('click', () => {
-            if (state.offset > 0) {
-                state.offset--;
-                offsetValue.textContent = state.offset;
-                loadData();
-            }
-        });
-        
-        document.getElementById('offset-plus').addEventListener('click', () => {
-            const limit = offsetLimits[state.period];
-            if (state.offset < limit) {
-                state.offset++;
-                offsetValue.textContent = state.offset;
-                loadData();
-            }
         });
         
         // Threshold stepper
@@ -1374,59 +1427,14 @@ HTML_PAGE = """<!DOCTYPE html>
             addToPlan();
         });
         
-        // Find optimal trades buttons
+        // Find optimal trades buttons - disabled for window mode
         document.getElementById('find-max-profit-btn').addEventListener('click', () => {
-            findOptimal('profit');
+            setStatus('Optimize not available in window mode', true);
         });
         
         document.getElementById('find-max-yield-btn').addEventListener('click', () => {
-            findOptimal('yield');
+            setStatus('Optimize not available in window mode', true);
         });
-        
-        // API calls
-        async function findOptimal(optimizeFor) {
-            state.symbol = symbolInput.value.trim().toUpperCase();
-            if (!state.symbol) {
-                setStatus('Enter a symbol', true);
-                return;
-            }
-            
-            showSpinner();
-            setStatus(`Finding optimal ${optimizeFor === 'profit' ? 'profit' : 'yield'} settings...`);
-            
-            try {
-                const params = new URLSearchParams({
-                    symbol: state.symbol,
-                    period: state.period,
-                    optimize_for: optimizeFor,
-                });
-                
-                const res = await fetch(`/api/optimize?${params}`);
-                const data = await res.json();
-                
-                if (data.error) {
-                    setStatus(data.error, true);
-                    hideSpinner();
-                    return;
-                }
-                
-                // Update state with optimal values
-                state.offset = data.offset;
-                state.threshold = data.threshold;
-                
-                // Update UI controls
-                offsetValue.textContent = state.offset;
-                thresholdValue.textContent = state.threshold + '%';
-                
-                // Load data with new settings
-                await loadData();
-                
-                setStatus(`Found optimal: offset=${data.offset}, threshold=${data.threshold}% (max ${optimizeFor})`);
-            } catch (err) {
-                setStatus('Error: ' + err.message, true);
-                hideSpinner();
-            }
-        }
         
         async function loadData() {
             state.symbol = symbolInput.value.trim().toUpperCase();
@@ -1441,30 +1449,23 @@ HTML_PAGE = """<!DOCTYPE html>
             try {
                 const params = new URLSearchParams({
                     symbol: state.symbol,
-                    period: state.period,
-                    offset: state.offset,
+                    window_size: state.windowSize,
                     threshold: state.threshold,
                 });
                 
-                const [statsRes, tradesRes] = await Promise.all([
-                    fetch(`/api/stats?${params}`),
-                    fetch(`/api/trades?${params}`),
-                ]);
+                const res = await fetch(`/api/windows?${params}`);
+                const data = await res.json();
                 
-                const statsData = await statsRes.json();
-                const tradesData = await tradesRes.json();
-                
-                if (statsData.error) {
-                    setStatus(statsData.error, true);
+                if (data.error) {
+                    setStatus(data.error, true);
                     hideSpinner();
                     return;
                 }
                 
-                renderStatsTable(statsData);
-                renderTradesTable(tradesData);
+                renderWindowsTable(data);
                 
-                const periodCount = state.period === 'monthly' ? 13 : 53;
-                setStatus(`Loaded ${periodCount} periods for ${displaySymbol(state.symbol)} (${state.period})`);
+                const windowLabel = windowSizeSelect.options[windowSizeSelect.selectedIndex].text;
+                setStatus(`Found ${data.windows.length} windows for ${displaySymbol(state.symbol)} (${windowLabel}, ${state.threshold}% threshold)`);
             } catch (err) {
                 setStatus('Error: ' + err.message, true);
             }
@@ -1472,74 +1473,348 @@ HTML_PAGE = """<!DOCTYPE html>
             hideSpinner();
         }
         
-        function renderStatsTable(data) {
-            const { rows, years } = data;
+        function renderWindowsTable(data) {
+            const { windows, total_days, total_return } = data;
             
-            // Build header with fixed column widths
+            // Build header
             const headerRow = statsTable.querySelector('thead tr');
-            headerRow.innerHTML = '<th class="col-period">Period</th><th class="col-trend">Trend%</th><th class="col-ev">EV</th><th class="col-runev">RunEV</th><th class="col-avg">Avg</th>';
-            years.slice().reverse().forEach(year => {
-                headerRow.innerHTML += `<th class="col-year">${year}</th>`;
-            });
+            headerRow.innerHTML = '<th class="col-period">Period</th><th class="col-days">Days</th><th class="col-return">Return%</th><th class="col-win">Win%</th><th class="col-yield">bps/day</th>';
             
-            // Calculate total columns for separator
-            const totalCols = 5 + years.length;
+            // Add year columns from first window if available
+            if (windows.length > 0) {
+                const years = Object.keys(windows[0].year_returns).sort().reverse();
+                years.forEach(year => {
+                    headerRow.innerHTML += `<th class="col-year">${year}</th>`;
+                });
+            }
             
             // Build body
             const tbody = statsTable.querySelector('tbody');
             tbody.innerHTML = '';
             
-            rows.forEach((row, idx) => {
-                // Insert rollover separator after Dec (index 11) for monthly data
-                if (idx === 12 && row.label === 'Jan+') {
-                    const sepTr = document.createElement('tr');
-                    sepTr.className = 'rollover-separator';
-                    sepTr.innerHTML = `<td colspan="${totalCols}" class="rollover-line">―――――――― Rollover into next year ――――――――</td>`;
-                    tbody.appendChild(sepTr);
-                }
-                
+            windows.forEach((w) => {
                 const tr = document.createElement('tr');
                 
-                // Add run highlighting
-                if (row.in_run) {
-                    tr.classList.add(row.is_bullish_run ? 'run-bull' : 'run-bear');
-                }
+                // Period column
+                tr.innerHTML = `<td class="col-period">${w.start_date} - ${w.end_date}</td>`;
                 
-                // Period
-                tr.innerHTML = `<td class="col-period">${row.label}</td>`;
+                // Days
+                const daysCell = document.createElement('td');
+                daysCell.className = 'col-days';
+                daysCell.textContent = w.length;
+                tr.appendChild(daysCell);
                 
-                // Trend%
-                const trendClass = row.is_neutral ? 'neutral' : (row.is_bullish ? 'positive' : 'negative');
-                tr.innerHTML += `<td class="col-trend ${row.trend_pct !== null ? trendClass : 'dim'}">${row.trend_pct !== null ? Math.round(row.trend_pct) + '%' : '-'}</td>`;
+                // Return%
+                const returnCell = document.createElement('td');
+                returnCell.className = 'col-return ' + (w.avg_return >= 0 ? 'positive' : 'negative');
+                returnCell.textContent = w.avg_return.toFixed(1) + '%';
+                tr.appendChild(returnCell);
                 
-                // EV
-                const evClass = row.is_neutral ? 'neutral' : (row.ev >= 0 ? 'positive' : 'negative');
-                tr.innerHTML += `<td class="col-ev ${row.ev !== null ? evClass : 'dim'}">${row.ev !== null ? Math.abs(row.ev).toFixed(2) : '-'}</td>`;
+                // Win%
+                const winCell = document.createElement('td');
+                winCell.className = 'col-win';
+                winCell.textContent = w.win_rate + '%';
+                tr.appendChild(winCell);
                 
-                // RunEV
-                if (row.run_ev !== null) {
-                    const runEvClass = row.is_bullish_run ? 'positive' : 'negative';
-                    tr.innerHTML += `<td class="col-runev ${runEvClass}">${Math.abs(row.run_ev).toFixed(2)}</td>`;
-                } else {
-                    tr.innerHTML += `<td class="col-runev dim">-</td>`;
-                }
+                // bps/day
+                const yieldCell = document.createElement('td');
+                yieldCell.className = 'col-yield ' + (w.yield_per_day >= 0 ? 'positive' : 'negative');
+                yieldCell.textContent = w.yield_per_day.toFixed(1);
+                tr.appendChild(yieldCell);
                 
-                // Avg
-                tr.innerHTML += `<td class="col-avg ${row.avg !== null ? (row.avg >= 0 ? 'positive' : 'negative') : 'dim'}">${row.avg !== null ? Math.abs(row.avg).toFixed(1) + '%' : '-'}</td>`;
-                
-                // Years
-                years.slice().reverse().forEach(year => {
-                    const val = row.years[year];
-                    if (val !== null) {
-                        const cls = val >= 0 ? 'positive' : 'negative';
-                        tr.innerHTML += `<td class="col-year ${cls}">${Math.abs(val).toFixed(1)}%</td>`;
+                // Year returns
+                const years = Object.keys(w.year_returns).sort().reverse();
+                years.forEach(year => {
+                    const ret = w.year_returns[year];
+                    const td = document.createElement('td');
+                    td.className = 'col-year';
+                    if (ret !== null) {
+                        td.textContent = ret.toFixed(1) + '%';
+                        td.className += ret >= 0 ? ' positive' : ' negative';
                     } else {
-                        tr.innerHTML += `<td class="col-year dim">-</td>`;
+                        td.textContent = '-';
+                        td.className += ' na';
                     }
+                    tr.appendChild(td);
                 });
                 
                 tbody.appendChild(tr);
             });
+            
+            // Add totals row
+            if (windows.length > 0) {
+                const totalTr = document.createElement('tr');
+                totalTr.className = 'totals-row';
+                totalTr.innerHTML = `
+                    <td class="col-period"><strong>TOTAL</strong></td>
+                    <td class="col-days"><strong>${total_days}</strong></td>
+                    <td class="col-return ${total_return >= 0 ? 'positive' : 'negative'}"><strong>${total_return.toFixed(1)}%</strong></td>
+                    <td class="col-win"></td>
+                    <td class="col-yield"></td>
+                `;
+                // Add empty cells for year columns
+                if (windows.length > 0) {
+                    const years = Object.keys(windows[0].year_returns).sort().reverse();
+                    years.forEach(() => {
+                        totalTr.innerHTML += '<td class="col-year"></td>';
+                    });
+                }
+                tbody.appendChild(totalTr);
+            }
+            
+            // Switch bottom panel to chart mode
+            tradesTable.querySelector('tbody').innerHTML = '';
+            summary.innerHTML = '';
+            document.getElementById('strategy-actions').style.display = 'none';
+            document.querySelector('.trades-table-container').style.display = 'none';
+            
+            // Enable chart mode
+            tradesPanel.classList.add('chart-mode');
+            tradesPanelTitle.textContent = 'Backtest';
+            chartControls.style.display = '';
+            windowChart.style.display = '';
+            windowChartMetrics.style.display = '';
+            
+            // Populate year selector from window year_returns
+            if (windows.length > 0) {
+                const years = Object.keys(windows[0].year_returns).sort().reverse();
+                chartYearSelect.innerHTML = '';
+                years.forEach(year => {
+                    const opt = document.createElement('option');
+                    opt.value = year;
+                    opt.textContent = year;
+                    chartYearSelect.appendChild(opt);
+                });
+                // Load backtest for the most recent year
+                loadWindowBacktest();
+            }
+        }
+        
+        // Year selector change handler for inline chart
+        chartYearSelect.addEventListener('change', () => {
+            loadWindowBacktest();
+        });
+        
+        async function loadWindowBacktest() {
+            const year = chartYearSelect.value;
+            if (!year || !state.symbol) return;
+            
+            windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">Loading...</div>';
+            windowChartMetrics.innerHTML = '';
+            
+            try {
+                const params = new URLSearchParams({
+                    symbol: state.symbol,
+                    window_size: state.windowSize,
+                    threshold: state.threshold,
+                    year: year,
+                });
+                
+                const res = await fetch(`/api/windows/backtest?${params}`);
+                const data = await res.json();
+                
+                if (data.error) {
+                    windowChart.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">${data.error}</div>`;
+                    return;
+                }
+                
+                renderWindowChart(data);
+            } catch (err) {
+                windowChart.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">Error: ${err.message}</div>`;
+            }
+        }
+        
+        function renderWindowChart(data) {
+            const { seasonal_curve, bh_curve, trades, dates } = data;
+            const capital = 100000;  // Fixed ₹1L for window mode
+            
+            // Chart dimensions from container
+            const container = windowChart.getBoundingClientRect();
+            const width = container.width;
+            const height = container.height;
+            if (width < 50 || height < 50) return;
+            
+            const padding = { top: 20, right: 55, bottom: 30, left: 60 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+            
+            // Scale to P&L
+            const seasonalPnL = seasonal_curve.map(p => (p / 100) * capital);
+            const bhPnL = bh_curve.map(p => (p / 100) * capital);
+            
+            const allValues = [...seasonalPnL, ...bhPnL];
+            const dataMin = Math.min(...allValues, 0);
+            const dataMax = Math.max(...allValues, 0);
+            const range = dataMax - dataMin || 1;
+            const yMin = dataMin - range * 0.1;
+            const yMax = dataMax + range * 0.1;
+            
+            const xScale = (i) => padding.left + (i / (dates.length - 1)) * chartWidth;
+            const yScale = (v) => padding.top + chartHeight - ((v - yMin) / (yMax - yMin)) * chartHeight;
+            
+            function buildPath(values) {
+                return values.map((v, i) =>
+                    `${i === 0 ? 'M' : 'L'} ${xScale(i).toFixed(1)} ${yScale(v).toFixed(1)}`
+                ).join(' ');
+            }
+            
+            // Y ticks
+            const yTicks = [];
+            const yRange = yMax - yMin;
+            let yStep;
+            if (yRange >= 500000) yStep = 100000;
+            else if (yRange >= 200000) yStep = 50000;
+            else if (yRange >= 100000) yStep = 25000;
+            else if (yRange >= 50000) yStep = 10000;
+            else if (yRange >= 20000) yStep = 5000;
+            else if (yRange >= 10000) yStep = 2000;
+            else if (yRange >= 5000) yStep = 1000;
+            else yStep = Math.ceil(yRange / 8 / 100) * 100 || 500;
+            
+            for (let v = Math.ceil(yMin / yStep) * yStep; v <= yMax; v += yStep) {
+                yTicks.push(v);
+            }
+            
+            // X ticks (monthly)
+            const xTicks = [];
+            const monthFirstIdx = {};
+            dates.forEach((d, i) => {
+                const [m] = d.split('-');
+                if (!(m in monthFirstIdx)) {
+                    monthFirstIdx[m] = i;
+                    xTicks.push({ i, label: m });
+                }
+            });
+            
+            // Trade bands and markers
+            function findNearestDateIdx(targetDate) {
+                let idx = dates.findIndex(d => d === targetDate);
+                if (idx >= 0) return idx;
+                
+                const [targetMonth, targetDay] = targetDate.split('-');
+                const monthOrder = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                const targetMonthIdx = monthOrder.indexOf(targetMonth);
+                const targetDayNum = parseInt(targetDay);
+                
+                for (let i = 0; i < dates.length; i++) {
+                    const [m, d] = dates[i].split('-');
+                    const mIdx = monthOrder.indexOf(m);
+                    const dNum = parseInt(d);
+                    if (mIdx > targetMonthIdx || (mIdx === targetMonthIdx && dNum >= targetDayNum)) {
+                        return i;
+                    }
+                }
+                return dates.length - 1;
+            }
+            
+            let tradeMarkers = '';
+            let investmentBands = '';
+            trades.forEach(trade => {
+                const entryIdx = findNearestDateIdx(trade.entry_date);
+                const exitIdx = findNearestDateIdx(trade.exit_date);
+                
+                if (entryIdx >= 0 && exitIdx >= 0 && exitIdx > entryIdx) {
+                    const x1 = xScale(entryIdx);
+                    const x2 = xScale(exitIdx);
+                    const bandWidth = x2 - x1;
+                    
+                    const entryValue = seasonalPnL[entryIdx];
+                    const exitValue = seasonalPnL[exitIdx];
+                    const tradeReturn = exitValue - entryValue;
+                    const tradeReturnPct = (tradeReturn / capital) * 100;
+                    const isProfit = tradeReturn >= 0;
+                    
+                    const bandColor = isProfit ? '#00ff88' : '#ff4466';
+                    const textColor = isProfit ? '#00cc66' : '#cc3355';
+                    
+                    const labelY = isProfit ? (padding.top + chartHeight - 6) : (padding.top + 14);
+                    const pctY = isProfit ? (padding.top + chartHeight - 18) : (padding.top + 26);
+                    
+                    investmentBands += `<rect x="${x1}" y="${padding.top}" width="${bandWidth}" height="${chartHeight}" fill="${bandColor}" opacity="0.12"/>`;
+                    tradeMarkers += `<text x="${x1 + 3}" y="${labelY}" fill="${textColor}" font-size="8" font-weight="bold" text-anchor="start">BUY</text>`;
+                    tradeMarkers += `<text x="${x2 - 3}" y="${labelY}" fill="${textColor}" font-size="8" font-weight="bold" text-anchor="end">SELL</text>`;
+                    
+                    const pctText = (tradeReturnPct >= 0 ? '+' : '') + tradeReturnPct.toFixed(1) + '%';
+                    const midX = (x1 + x2) / 2;
+                    tradeMarkers += `<text x="${midX}" y="${pctY}" fill="${textColor}" font-size="9" font-weight="bold" text-anchor="middle">${pctText}</text>`;
+                }
+            });
+            
+            const formatCurrency = (v) => {
+                const abs = Math.abs(v);
+                const sign = v < 0 ? '-' : (v > 0 ? '+' : '');
+                if (abs >= 100000) return sign + '\u20B9' + (abs / 100000).toFixed(1) + 'L';
+                if (abs >= 1000) return sign + '\u20B9' + (abs / 1000).toFixed(0) + 'K';
+                return sign + '\u20B9' + abs.toFixed(0);
+            };
+            
+            const svg = `
+                <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
+                    ${investmentBands}
+                    ${xTicks.map(t => `
+                        <line x1="${xScale(t.i)}" y1="${padding.top}" x2="${xScale(t.i)}" y2="${padding.top + chartHeight}"
+                              stroke="#444" stroke-width="0.5" opacity="0.5"/>
+                    `).join('')}
+                    ${yTicks.map(v => `
+                        <line x1="${padding.left}" y1="${yScale(v)}" x2="${width - padding.right}" y2="${yScale(v)}"
+                              stroke="${v === 0 ? '#666' : '#333'}" stroke-width="${v === 0 ? 2 : 1}"/>
+                    `).join('')}
+                    ${yTicks.map(v => `
+                        <text x="${padding.left - 8}" y="${yScale(v) + 4}" fill="#888" font-size="10" text-anchor="end">
+                            ${formatCurrency(v)}
+                        </text>
+                    `).join('')}
+                    ${xTicks.map(t => `
+                        <text x="${xScale(t.i)}" y="${height - padding.bottom + 16}" fill="#888" font-size="10" text-anchor="middle">
+                            ${t.label}
+                        </text>
+                    `).join('')}
+                    <path d="${buildPath(bhPnL)}" fill="none" stroke="#6699ff" stroke-width="1.25" opacity="0.8"/>
+                    <path d="${buildPath(seasonalPnL)}" fill="none" stroke="#00ff88" stroke-width="1.25"/>
+                    ${tradeMarkers}
+                    <text x="${width - padding.right + 4}" y="${yScale(seasonalPnL[seasonalPnL.length - 1]) + 4}"
+                          fill="#00ff88" font-size="10" font-weight="bold">
+                        ${formatCurrency(seasonalPnL[seasonalPnL.length - 1])}
+                    </text>
+                    <text x="${width - padding.right + 4}" y="${yScale(bhPnL[bhPnL.length - 1]) + 4}"
+                          fill="#6699ff" font-size="10">
+                        ${formatCurrency(bhPnL[bhPnL.length - 1])}
+                    </text>
+                </svg>
+            `;
+            
+            windowChart.innerHTML = svg;
+            
+            // Metrics
+            const finalSeasonal = seasonalPnL[seasonalPnL.length - 1];
+            const finalBH = bhPnL[bhPnL.length - 1];
+            const maxDrawdown = Math.min(...seasonalPnL);
+            const daysInMarket = trades.reduce((sum, t) => sum + t.days, 0);
+            const warning = data.warning || null;
+            
+            windowChartMetrics.innerHTML = `
+                ${warning ? `<div style="width:100%;text-align:center;color:#ff9944;font-size:11px;padding:2px 0;">${warning}</div>` : ''}
+                <div class="metric">
+                    <span class="label">P&L:</span>
+                    <span class="${finalSeasonal >= 0 ? 'positive' : 'negative'}">${formatCurrency(finalSeasonal)}</span>
+                </div>
+                <div class="metric">
+                    <span class="label">B&H:</span>
+                    <span class="${finalBH >= 0 ? 'positive' : 'negative'}">${formatCurrency(finalBH)}</span>
+                </div>
+                <div class="metric">
+                    <span class="label">Drawdown:</span>
+                    <span class="${maxDrawdown >= 0 ? 'positive' : 'negative'}">${formatCurrency(maxDrawdown)}</span>
+                </div>
+                <div class="metric">
+                    <span class="label">Days:</span>
+                    <span>${daysInMarket} / 365</span>
+                </div>
+                <div class="metric">
+                    <span class="label">Trades:</span>
+                    <span>${trades.length}</span>
+                </div>
+            `;
         }
         
         function renderTradesTable(data) {
@@ -1634,14 +1909,8 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         
         function exportCSV(type) {
-            const params = new URLSearchParams({
-                symbol: state.symbol,
-                period: state.period,
-                offset: state.offset,
-                threshold: state.threshold,
-            });
-            
-            window.location.href = `/api/export/${type}?${params}`;
+            // Export not available in window mode
+            setStatus('Export not available in window mode', true);
         }
         
         function showSpinner() {
@@ -1836,15 +2105,8 @@ HTML_PAGE = """<!DOCTYPE html>
         backtestCapitalSelect.addEventListener('change', loadBacktestData);
         
         function showBacktest() {
-            // Populate year dropdown
-            const years = window.backtestYears || [];
-            backtestYearSelect.innerHTML = years.slice().reverse().map(y => 
-                `<option value="${y}">${y}</option>`
-            ).join('');
-            
-            backtestTitle.textContent = displaySymbol(state.symbol);
-            backtestOverlay.classList.add('show');
-            loadBacktestData();
+            // Backtest not available in window mode
+            setStatus('Backtest not available in window mode', true);
         }
         
         function closeBacktest() {
@@ -1852,32 +2114,7 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         
         async function loadBacktestData() {
-            const year = backtestYearSelect.value;
-            const capital = parseInt(backtestCapitalSelect.value);
-            
-            if (!year) return;
-            
-            try {
-                const params = new URLSearchParams({
-                    symbol: state.symbol,
-                    period: state.period,
-                    offset: state.offset,
-                    threshold: state.threshold,
-                    year: year,
-                });
-                
-                const res = await fetch(`/api/backtest?${params}`);
-                const data = await res.json();
-                
-                if (data.error) {
-                    backtestChart.innerHTML = `<div style="color: #ff4466; padding: 20px;">${data.error}</div>`;
-                    return;
-                }
-                
-                renderBacktestChart(data, capital);
-            } catch (err) {
-                backtestChart.innerHTML = `<div style="color: #ff4466; padding: 20px;">Error: ${err.message}</div>`;
-            }
+            // Disabled in window mode
         }
         
         function renderBacktestChart(data, capital) {
@@ -2173,37 +2410,8 @@ HTML_PAGE = """<!DOCTYPE html>
         
         // Add current strategy to plan
         function addToPlan() {
-            if (!state.symbol) {
-                setStatus('Load a symbol first', true);
-                return;
-            }
-            
-            const plan = loadPlan();
-            
-            // Check for duplicate
-            const isDuplicate = plan.some(s => 
-                s.symbol === state.symbol && 
-                s.period === state.period && 
-                s.offset === state.offset && 
-                s.threshold === state.threshold
-            );
-            
-            if (isDuplicate) {
-                setStatus('Strategy already in plan', true);
-                return;
-            }
-            
-            // Add to plan
-            plan.push({
-                symbol: state.symbol,
-                period: state.period,
-                offset: state.offset,
-                threshold: state.threshold,
-                addedAt: Date.now()
-            });
-            
-            savePlan(plan);
-            setStatus(`Added ${displaySymbol(state.symbol)} to plan (${plan.length} strategies)`);
+            // Disabled in window mode
+            setStatus('Add to plan not available in window mode', true);
         }
         
         // Remove strategy from plan
@@ -2833,6 +3041,80 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 self.send_csv(content, filename)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        elif path == "/api/windows":
+            params = self.parse_params()
+            try:
+                symbols = parse_symbols(params.get("symbol", ""))
+                window_size = int(params.get("window_size", 30))
+                threshold = int(params.get("threshold", 50))
+                
+                if not symbols:
+                    self.send_json({"error": "No symbol provided"}, 400)
+                    return
+                
+                # For now, just use the first symbol
+                symbol = symbols[0]
+                df = load_symbol_data(symbol)
+                
+                if df.empty:
+                    self.send_json({"error": f"No data found for {symbol}"}, 404)
+                    return
+                
+                windows = detect_sliding_windows(
+                    df,
+                    window_size=window_size,
+                    threshold=threshold / 100,  # Convert to 0-1
+                )
+                
+                # Convert to JSON-serializable format
+                result = {
+                    "symbol": symbol,
+                    "window_size": window_size,
+                    "threshold": threshold,
+                    "windows": [
+                        {
+                            "start_day": w.start_day,
+                            "end_day": w.end_day,
+                            "start_date": w.start_date_str,
+                            "end_date": w.end_date_str,
+                            "length": w.length,
+                            "avg_return": round(w.avg_return, 2),
+                            "win_rate": round(w.win_rate * 100, 0),
+                            "score": round(w.score, 2),
+                            "yield_per_day": round(w.yield_per_day * 100, 2),  # bps/day
+                            "year_returns": {
+                                str(k): round(v, 2) if v is not None else None
+                                for k, v in w.year_returns.items()
+                            }
+                        }
+                        for w in windows
+                    ],
+                    "total_days": sum(w.length for w in windows),
+                    "total_return": round(sum(w.avg_return for w in windows), 2),
+                }
+                self.send_json(result)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        elif path == "/api/windows/backtest":
+            params = self.parse_params()
+            try:
+                symbols = parse_symbols(params.get("symbol", ""))
+                window_size = int(params.get("window_size", 30))
+                threshold = int(params.get("threshold", 50))
+                year = int(params.get("year", 2024))
+                
+                if not symbols:
+                    self.send_json({"error": "No symbol provided"}, 400)
+                    return
+                
+                result = get_window_backtest_data(
+                    symbols[0], window_size, threshold, year,
+                )
+                self.send_json(result)
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
         

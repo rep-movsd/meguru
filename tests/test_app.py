@@ -288,9 +288,9 @@ class TestComputeWindowReturn:
             index=pd.to_datetime(["2024-01-01", "2024-01-02"]),
         )
         result = compute_window_return(df, df.index[0], df.index[-1])
-        # Net return = (110 / 100 - 1) * 100 = 10%
+        # Close-to-close: (110 / 102 - 1) * 100 = 7.843%
         assert result is not None
-        assert abs(result - 10.0) < 0.001
+        assert abs(result - 7.843) < 0.01
 
     def test_negative_return(self):
         df = pd.DataFrame(
@@ -303,9 +303,9 @@ class TestComputeWindowReturn:
             index=pd.to_datetime(["2024-01-01", "2024-01-02"]),
         )
         result = compute_window_return(df, df.index[0], df.index[-1])
-        # Net return = (90 / 100 - 1) * 100 = -10%
+        # Close-to-close: (90 / 95 - 1) * 100 = -5.263%
         assert result is not None
-        assert abs(result - (-10.0)) < 0.001
+        assert abs(result - (-5.263)) < 0.01
 
     def test_empty_window(self):
         df = pd.DataFrame(
@@ -398,12 +398,13 @@ class TestGenerateSeasonalData:
         assert result[51].label == "Week 52"
         assert result[52].label == "Week 1+"  # Wraparound week
 
-    def test_monthly_generates_12_rows(self, sample_ohlc_df):
+    def test_monthly_generates_24_rows(self, sample_ohlc_df):
         result = generate_seasonal_data(sample_ohlc_df, "monthly", 0, 3)
-        assert len(result) == 13  # 12 months + 1 wraparound
+        assert len(result) == 24  # 12 months + 12 rollover months
         assert result[0].label == "Jan"
         assert result[11].label == "Dec"
-        assert result[12].label == "Jan+"  # Wraparound month
+        assert result[12].label == "Jan+"  # Rollover month
+        assert result[23].label == "Dec+"  # Last rollover month
 
     def test_empty_dataframe(self):
         df = pd.DataFrame()
@@ -648,22 +649,25 @@ class TestGetPeriodDateLabel:
         assert result == "Jan-1"
 
     def test_weekly_entry_no_offset(self):
-        """Entry date for weekly with no offset is Monday."""
+        """Entry date for weekly with no offset is Monday of that week (as date)."""
         result = get_period_date_label("Week 1", "weekly", 0, is_entry=True)
-        assert result == "W1-Mon"
+        # Week 1 of 2024 starts on Jan 1 (2024 starts on Monday)
+        assert result == "Jan-1"
 
     def test_weekly_entry_with_offset(self):
         """Entry date for weekly with offset shifts day."""
         result = get_period_date_label("Week 5", "weekly", 2, is_entry=True)
-        assert result == "W5-Wed"  # Monday + 2 = Wednesday
+        # Week 5 starts Jan 29, +2 days = Jan 31
+        assert result == "Jan-31"
 
     def test_weekly_exit_no_offset(self):
-        """Exit date for weekly with no offset is Sunday."""
+        """Exit date for weekly with no offset is Sunday of that week (as date)."""
         result = get_period_date_label("Week 10", "weekly", 0, is_entry=False)
-        assert result == "W10-Sun"
+        # Week 10 starts Mar 4, +6 days = Mar 10
+        assert result == "Mar-10"
 
     def test_weekly_exit_with_offset(self):
         """Exit date for weekly with offset shifts day."""
         result = get_period_date_label("Week 3", "weekly", 3, is_entry=False)
-        # Sunday (7) + 3 = 10, wraps to Wed (10 % 7 = 3)
-        assert result == "W3-Wed"
+        # Week 3 starts Jan 15, +6+3 = +9 days = Jan 24
+        assert result == "Jan-24"
