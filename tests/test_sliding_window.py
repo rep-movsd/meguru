@@ -198,21 +198,35 @@ class TestFindBestFixedWindow:
         assert window.avg_return > 0
         assert window.win_rate >= 0.5
 
-    def test_respects_excluded_days(self, synthetic_cache):
-        """Excluded days should not be part of found window."""
-        # Exclude April
-        excluded = set(range(day_of_year(4, 1), day_of_year(5, 1)))
+    def test_respects_range(self, synthetic_cache):
+        """Window should be confined within the given range."""
+        # Only search in Jan-Feb (days 1-59)
+        range_start = 1
+        range_end = 59
         
         window = find_best_fixed_window(
             synthetic_cache,
             window_size=30,
-            excluded_days=excluded,
-            threshold=0.5,
+            range_start=range_start,
+            range_end=range_end,
+            threshold=0.3,  # Lower threshold since Jan-Feb may not be strongly bullish
         )
         
         if window is not None:
-            window_days = set(range(window.start_day, window.end_day + 1))
-            assert not (window_days & excluded), "Window should not overlap excluded days"
+            assert window.start_day >= range_start, \
+                f"Window starts before range: {window.start_day} < {range_start}"
+            assert window.end_day <= range_end, \
+                f"Window ends after range: {window.end_day} > {range_end}"
+    
+    def test_returns_none_for_small_range(self, synthetic_cache):
+        """Should return None if range is smaller than window_size."""
+        window = find_best_fixed_window(
+            synthetic_cache,
+            window_size=30,
+            range_start=1,
+            range_end=20,
+        )
+        assert window is None
 
 
 class TestNarrowWindowFast:

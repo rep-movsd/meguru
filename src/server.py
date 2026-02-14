@@ -19,10 +19,13 @@ from backend import (
     get_backtest_data,
     find_optimal_trades,
     get_plan_backtest_data,
+    get_plan_backtest_average,
     export_plan_calendar_csv,
     detect_sliding_windows,
     load_symbol_data,
     get_window_backtest_data,
+    get_window_backtest_average,
+    get_plan_overlap,
     OFFSET_LIMITS,
 )
 
@@ -341,11 +344,12 @@ HTML_PAGE = """<!DOCTYPE html>
         .chart-year-select {
             background: #1a1a2e;
             color: #e0e0e0;
-            border: 1px solid #444;
+            border: 1px solid #555;
             border-radius: 4px;
-            padding: 1px 4px;
-            font-size: 0.8em;
+            padding: 4px 8px;
+            font-size: 1em;
             cursor: pointer;
+            min-width: 80px;
         }
         
         .chart-legend {
@@ -384,7 +388,7 @@ HTML_PAGE = """<!DOCTYPE html>
         table {
             border-collapse: collapse;
             font-size: 12px;
-            table-layout: fixed;
+            width: max-content;
         }
         
         th, td {
@@ -396,19 +400,19 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         
         /* Fixed column widths */
-        .col-period { width: 52px; text-align: left; }
-        .col-trend { width: 44px; }
-        .col-ev { width: 48px; }
-        .col-runev { width: 48px; }
-        .col-avg { width: 48px; }
-        .col-year { width: 52px; }
+        .col-period { min-width: 52px; text-align: left; }
+        .col-trend { min-width: 44px; }
+        .col-ev { min-width: 48px; }
+        .col-runev { min-width: 48px; }
+        .col-avg { min-width: 48px; }
+        .col-year { min-width: 52px; }
         
         /* Trades table columns */
-        .col-entry { width: 56px; text-align: left; }
-        .col-exit { width: 56px; }
-        .col-profit { width: 52px; }
-        .col-days { width: 40px; }
-        .col-bps { width: 60px; }
+        .col-entry { min-width: 56px; text-align: left; }
+        .col-exit { min-width: 56px; }
+        .col-profit { min-width: 52px; }
+        .col-days { min-width: 40px; }
+        .col-bps { min-width: 60px; }
         
         th {
             background: #1f4068;
@@ -1072,8 +1076,8 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
         
         <div class="controls-section right">
-            <button id="find-max-profit-btn" class="btn-secondary">Find max profit trades</button>
-            <button id="find-max-yield-btn" class="btn-secondary">Find max yield trades</button>
+            <button id="find-max-profit-btn" class="btn-secondary" style="display:none;">Find max profit trades</button>
+            <button id="find-max-yield-btn" class="btn-secondary" style="display:none;">Find max yield trades</button>
             <button id="show-plan-btn" class="btn-plan">Plan<span id="plan-badge" class="plan-badge" style="display:none;">0</span></button>
         </div>
     </div>
@@ -1106,6 +1110,7 @@ HTML_PAGE = """<!DOCTYPE html>
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #00ff88;"></div>Strategy</div>
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #6699ff;"></div>Buy & Hold</div>
                         <select id="chart-year-select" class="chart-year-select"></select>
+                        <button id="chart-add-plan-btn" class="btn-small btn-add-plan">+ Add to Plan</button>
                     </div>
                 </div>
             </div>
@@ -1237,6 +1242,7 @@ HTML_PAGE = """<!DOCTYPE html>
             symbol: '',
             windowSize: 30,
             threshold: 50,
+            overlapData: null,
         };
         
         // Elements
@@ -1427,6 +1433,10 @@ HTML_PAGE = """<!DOCTYPE html>
             addToPlan();
         });
         
+        document.getElementById('chart-add-plan-btn').addEventListener('click', () => {
+            addToPlan();
+        });
+        
         // Find optimal trades buttons - disabled for window mode
         document.getElementById('find-max-profit-btn').addEventListener('click', () => {
             setStatus('Optimize not available in window mode', true);
@@ -1453,13 +1463,35 @@ HTML_PAGE = """<!DOCTYPE html>
                     threshold: state.threshold,
                 });
                 
-                const res = await fetch(`/api/windows?${params}`);
-                const data = await res.json();
+                // Fetch windows, and overlap with plan in parallel
+                const plan = loadPlan();
+                const fetches = [fetch(`/api/windows?${params}`)];
+                if (plan.length > 0) {
+                    const overlapParams = new URLSearchParams({
+                        symbol: state.symbol,
+                        window_size: state.windowSize,
+                        threshold: state.threshold,
+                        strategies: JSON.stringify(plan),
+                    });
+                    fetches.push(fetch(`/api/plan/overlap?${overlapParams}`));
+                }
+                
+                const responses = await Promise.all(fetches);
+                const data = await responses[0].json();
                 
                 if (data.error) {
                     setStatus(data.error, true);
                     hideSpinner();
                     return;
+                }
+                
+                // Parse overlap if available
+                state.overlapData = null;
+                if (responses.length > 1) {
+                    try {
+                        const od = await responses[1].json();
+                        if (!od.error) state.overlapData = od;
+                    } catch (e) {}
                 }
                 
                 renderWindowsTable(data);
@@ -1560,6 +1592,24 @@ HTML_PAGE = """<!DOCTYPE html>
                     });
                 }
                 tbody.appendChild(totalTr);
+                
+                // Plan overlap row
+                if (state.overlapData) {
+                    const od = state.overlapData;
+                    const overlapTr = document.createElement('tr');
+                    overlapTr.style.cssText = 'border-top:1px solid #444;';
+                    const colSpan = 5 + Object.keys(windows[0].year_returns).length;
+                    const overlapPct = od.stock_days > 0 ? Math.round(od.overlap_days / od.stock_days * 100) : 0;
+                    overlapTr.innerHTML = `
+                        <td colspan="${colSpan}" style="color:#aa88dd;font-size:11px;padding:6px 8px;">
+                            Plan overlap: ${od.overlap_days}/${od.stock_days} days (${overlapPct}%)
+                            &nbsp;&bull;&nbsp;
+                            <span style="color:#00cc66;">+${od.new_days} new days</span>
+                            to plan's ${od.plan_days}d coverage
+                        </td>
+                    `;
+                    tbody.appendChild(overlapTr);
+                }
             }
             
             // Switch bottom panel to chart mode
@@ -1579,13 +1629,18 @@ HTML_PAGE = """<!DOCTYPE html>
             if (windows.length > 0) {
                 const years = Object.keys(windows[0].year_returns).sort().reverse();
                 chartYearSelect.innerHTML = '';
+                // Add Average option first
+                const avgOpt = document.createElement('option');
+                avgOpt.value = 'avg';
+                avgOpt.textContent = 'Average';
+                chartYearSelect.appendChild(avgOpt);
                 years.forEach(year => {
                     const opt = document.createElement('option');
                     opt.value = year;
                     opt.textContent = year;
                     chartYearSelect.appendChild(opt);
                 });
-                // Load backtest for the most recent year
+                // Load backtest for the average
                 loadWindowBacktest();
             }
         }
@@ -1618,13 +1673,13 @@ HTML_PAGE = """<!DOCTYPE html>
                     return;
                 }
                 
-                renderWindowChart(data);
+                renderWindowChart(data, state.overlapData);
             } catch (err) {
                 windowChart.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">Error: ${err.message}</div>`;
             }
         }
         
-        function renderWindowChart(data) {
+        function renderWindowChart(data, overlapData) {
             const { seasonal_curve, bh_curve, trades, dates } = data;
             const capital = 100000;  // Fixed ₹1L for window mode
             
@@ -1709,6 +1764,26 @@ HTML_PAGE = """<!DOCTYPE html>
             
             let tradeMarkers = '';
             let investmentBands = '';
+            
+            // Plan overlap bands (purple, behind stock's green bands)
+            let planBands = '';
+            if (overlapData && overlapData.plan_windows) {
+                const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                function doyToDateStr(doy) {
+                    const d = new Date(2023, 0, doy);
+                    return monthNames[d.getMonth()] + '-' + d.getDate();
+                }
+                overlapData.plan_windows.forEach(([startDay, endDay]) => {
+                    const startIdx = findNearestDateIdx(doyToDateStr(startDay));
+                    const endIdx = findNearestDateIdx(doyToDateStr(endDay));
+                    if (startIdx >= 0 && endIdx >= 0 && endIdx > startIdx) {
+                        const x1 = xScale(startIdx);
+                        const x2 = xScale(endIdx);
+                        planBands += `<rect x="${x1}" y="${padding.top}" width="${x2 - x1}" height="${chartHeight}" fill="#aa66ff" opacity="0.10"/>`;
+                    }
+                });
+            }
+            
             trades.forEach(trade => {
                 const entryIdx = findNearestDateIdx(trade.entry_date);
                 const exitIdx = findNearestDateIdx(trade.exit_date);
@@ -1750,6 +1825,9 @@ HTML_PAGE = """<!DOCTYPE html>
             
             const svg = `
                 <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
+                    <!-- Plan bands (purple, behind everything) -->
+                    ${planBands}
+                    <!-- Investment bands (behind lines) -->
                     ${investmentBands}
                     ${xTicks.map(t => `
                         <line x1="${xScale(t.i)}" y1="${padding.top}" x2="${xScale(t.i)}" y2="${padding.top + chartHeight}"
@@ -1791,15 +1869,18 @@ HTML_PAGE = """<!DOCTYPE html>
             const maxDrawdown = Math.min(...seasonalPnL);
             const daysInMarket = trades.reduce((sum, t) => sum + t.days, 0);
             const warning = data.warning || null;
+            const isAvg = data.avg_years != null;
+            const pnlLabel = isAvg ? `Avg P&L (${data.avg_years}y):` : 'P&L:';
+            const bhLabel = isAvg ? 'Avg B&H:' : 'B&H:';
             
             windowChartMetrics.innerHTML = `
                 ${warning ? `<div style="width:100%;text-align:center;color:#ff9944;font-size:11px;padding:2px 0;">${warning}</div>` : ''}
                 <div class="metric">
-                    <span class="label">P&L:</span>
+                    <span class="label">${pnlLabel}</span>
                     <span class="${finalSeasonal >= 0 ? 'positive' : 'negative'}">${formatCurrency(finalSeasonal)}</span>
                 </div>
                 <div class="metric">
-                    <span class="label">B&H:</span>
+                    <span class="label">${bhLabel}</span>
                     <span class="${finalBH >= 0 ? 'positive' : 'negative'}">${formatCurrency(finalBH)}</span>
                 </div>
                 <div class="metric">
@@ -1814,6 +1895,16 @@ HTML_PAGE = """<!DOCTYPE html>
                     <span class="label">Trades:</span>
                     <span>${trades.length}</span>
                 </div>
+                ${overlapData ? `
+                <div class="metric" style="border-top:1px solid #333;padding-top:4px;margin-top:2px;">
+                    <span class="label" style="color:#aa88dd;">Plan overlap:</span>
+                    <span style="color:#aa88dd;">${overlapData.overlap_days}d / ${overlapData.stock_days}d</span>
+                </div>
+                <div class="metric">
+                    <span class="label" style="color:#aa88dd;">New coverage:</span>
+                    <span class="positive">+${overlapData.new_days}d</span>
+                </div>
+                ` : ''}
             `;
         }
         
@@ -2410,8 +2501,33 @@ HTML_PAGE = """<!DOCTYPE html>
         
         // Add current strategy to plan
         function addToPlan() {
-            // Disabled in window mode
-            setStatus('Add to plan not available in window mode', true);
+            if (!state.symbol) {
+                setStatus('No symbol loaded', true);
+                return;
+            }
+            
+            const plan = loadPlan();
+            
+            // Check for duplicate
+            const isDuplicate = plan.some(s => 
+                s.symbol === state.symbol && 
+                s.window_size === state.windowSize && 
+                s.threshold === state.threshold
+            );
+            
+            if (isDuplicate) {
+                setStatus('Strategy already in plan', true);
+                return;
+            }
+            
+            plan.push({
+                symbol: state.symbol,
+                window_size: state.windowSize,
+                threshold: state.threshold,
+            });
+            
+            savePlan(plan);
+            setStatus(`Added ${displaySymbol(state.symbol)} to plan (${plan.length} strateg${plan.length === 1 ? 'y' : 'ies'})`);
         }
         
         // Remove strategy from plan
@@ -2454,12 +2570,11 @@ HTML_PAGE = """<!DOCTYPE html>
             }
             
             planStrategiesList.innerHTML = plan.map((s, idx) => {
-                const periodLabel = s.period === 'monthly' ? 'M' : 'W';
                 return `
                     <div class="plan-strategy-item" data-index="${idx}">
                         <div class="plan-strategy-info">
                             <div class="plan-strategy-symbol">${displaySymbol(s.symbol)}</div>
-                            <div class="plan-strategy-params">${periodLabel} | offset: ${s.offset} | threshold: ${s.threshold}%</div>
+                            <div class="plan-strategy-params">${s.window_size}d window | ${s.threshold}% threshold</div>
                         </div>
                         <div class="plan-strategy-remove" data-index="${idx}">✕</div>
                     </div>
@@ -2486,7 +2601,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 }
             }
             
-            planYearSelect.innerHTML = years.slice().reverse().map(y => 
+            planYearSelect.innerHTML = '<option value="avg">Average</option>' + years.slice().reverse().map(y => 
                 `<option value="${y}">${y}</option>`
             ).join('');
         }
@@ -2496,17 +2611,17 @@ HTML_PAGE = """<!DOCTYPE html>
             const plan = loadPlan();
             if (plan.length === 0) return;
             
-            const year = parseInt(planYearSelect.value);
+            const yearVal = planYearSelect.value;
             const capital = parseInt(planCapitalSelect.value);
             
-            if (!year) return;
+            if (!yearVal) return;
             
             planChart.innerHTML = '<div style="padding: 20px; color: #888; text-align: center;">Loading...</div>';
             
             try {
                 const params = new URLSearchParams({
                     strategies: JSON.stringify(plan),
-                    year: year
+                    year: yearVal
                 });
                 
                 const res = await fetch(`/api/plan/backtest?${params}`);
@@ -2619,20 +2734,10 @@ HTML_PAGE = """<!DOCTYPE html>
                         const bandColor = isProfit ? '#9b59b6' : '#ff4466';
                         const textColor = isProfit ? '#9b59b6' : '#cc3355';
                         
-                        // Labels at bottom for profit, top for loss
-                        const labelY = isProfit ? (padding.top + chartHeight - 8) : (padding.top + 16);
                         const pctY = isProfit ? (padding.top + chartHeight - 22) : (padding.top + 30);
                         
                         // Draw investment band
                         investmentBands += `<rect x="${x1}" y="${padding.top}" width="${bandWidth}" height="${chartHeight}" fill="${bandColor}" opacity="0.12"/>`;
-                        
-                        // Symbol label on left side
-                        const symbolLabel = trade.symbol ? trade.symbol.replace('.NS', '') : 'BUY';
-                        tradeMarkers += `<text x="${x1 + 3}" y="${labelY}" fill="${textColor}" font-size="8" font-weight="bold" text-anchor="start">${symbolLabel}</text>`;
-                        
-                        // SELL label on right side (show exit date for wraparound)
-                        const sellLabel = isWraparound ? `SELL ${trade.exit_date}` : 'SELL';
-                        tradeMarkers += `<text x="${x2 - 3}" y="${labelY}" fill="${textColor}" font-size="8" font-weight="bold" text-anchor="end">${sellLabel}</text>`;
                         
                         // Percentage in the middle
                         const pctText = (tradeReturnPct >= 0 ? '+' : '') + tradeReturnPct.toFixed(1) + '%';
@@ -2745,21 +2850,23 @@ HTML_PAGE = """<!DOCTYPE html>
                     </text>
                 </svg>
             `;
-            
             planChart.innerHTML = svg;
             
             // Update metrics
             const finalCombined = combinedPnL[combinedPnL.length - 1];
             const finalBH = bhPnL[bhPnL.length - 1];
             const maxDrawdown = Math.min(...combinedPnL);
+            const isAvg = data.avg_years != null;
+            const pnlLabel = isAvg ? `Avg Combined P&L (${data.avg_years}y):` : 'Combined P&L:';
+            const bhLabel = isAvg ? 'Avg B&H P&L:' : 'B&H P&L:';
             
             planMetrics.innerHTML = `
                 <div class="backtest-metric">
-                    <span class="label">Combined P&L:</span>
+                    <span class="label">${pnlLabel}</span>
                     <span class="${finalCombined >= 0 ? 'positive' : 'negative'}">${formatCurrency(finalCombined)}</span>
                 </div>
                 <div class="backtest-metric">
-                    <span class="label">B&H P&L:</span>
+                    <span class="label">${bhLabel}</span>
                     <span class="${finalBH >= 0 ? 'positive' : 'negative'}">${formatCurrency(finalBH)}</span>
                 </div>
                 <div class="backtest-metric">
@@ -3013,13 +3120,16 @@ class MeguruHandler(BaseHTTPRequestHandler):
             try:
                 strategies_json = params.get("strategies", "[]")
                 strategies = json.loads(strategies_json)
-                year = int(params.get("year", 2023))
+                year_str = params.get("year", "2023")
                 
                 if not strategies:
                     self.send_json({"error": "No strategies provided"}, 400)
                     return
                 
-                result = get_plan_backtest_data(strategies, year)
+                if year_str == "avg":
+                    result = get_plan_backtest_average(strategies)
+                else:
+                    result = get_plan_backtest_data(strategies, int(year_str))
                 self.send_json(result)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)
@@ -3039,6 +3149,30 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 content = export_plan_calendar_csv(strategies)
                 filename = "trading-plan.csv"
                 self.send_csv(content, filename)
+            except json.JSONDecodeError:
+                self.send_json({"error": "Invalid strategies JSON"}, 400)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        elif path == "/api/plan/overlap":
+            params = self.parse_params()
+            try:
+                symbol = params.get("symbol", "")
+                window_size = int(params.get("window_size", 30))
+                threshold = int(params.get("threshold", 50))
+                strategies_json = params.get("strategies", "[]")
+                strategies = json.loads(strategies_json)
+                
+                if not symbol:
+                    self.send_json({"error": "No symbol provided"}, 400)
+                    return
+                
+                if not strategies:
+                    self.send_json({"error": "No strategies in plan"}, 400)
+                    return
+                
+                result = get_plan_overlap(symbol, window_size, threshold, strategies)
+                self.send_json(result)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)
             except Exception as e:
@@ -3105,15 +3239,20 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 symbols = parse_symbols(params.get("symbol", ""))
                 window_size = int(params.get("window_size", 30))
                 threshold = int(params.get("threshold", 50))
-                year = int(params.get("year", 2024))
+                year_str = params.get("year", "2024")
                 
                 if not symbols:
                     self.send_json({"error": "No symbol provided"}, 400)
                     return
                 
-                result = get_window_backtest_data(
-                    symbols[0], window_size, threshold, year,
-                )
+                if year_str == "avg":
+                    result = get_window_backtest_average(
+                        symbols[0], window_size, threshold,
+                    )
+                else:
+                    result = get_window_backtest_data(
+                        symbols[0], window_size, threshold, int(year_str),
+                    )
                 self.send_json(result)
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
