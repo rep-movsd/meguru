@@ -1969,22 +1969,25 @@ def get_window_backtest_average(
 
 def _load_strategy_windows(
     strategies: list[dict],
-) -> tuple[list[dict], list[tuple[int, int]], pd.DataFrame, list[pd.DataFrame]] | None:
+) -> tuple[list[dict], list[tuple[int, int]], pd.DataFrame, list[pd.DataFrame], list[str]] | None:
     """
     Load data and detect windows for each strategy (once).
     
     Returns:
-        Tuple of (trading_period_templates, window_day_ranges, ref_data, window_dfs)
+        Tuple of (trading_period_templates, window_day_ranges, ref_data, window_dfs, unique_symbols)
         or None if no valid windows found.
         
         trading_period_templates: list of {start_day, end_day, symbol} dicts.
         window_day_ranges: list of (start_day, end_day) 1-365 pairs.
         ref_data: DataFrame for B&H reference (first strategy's data).
         window_dfs: list of DataFrames, one per window (each window's own stock data).
+        unique_symbols: ordered list of unique display symbols (for coloring).
     """
     all_templates: list[dict] = []
     all_day_ranges: list[tuple[int, int]] = []
     all_window_dfs: list[pd.DataFrame] = []
+    all_strategy_dfs: list[pd.DataFrame] = []  # one per unique strategy
+    unique_symbols: list[str] = []
     ref_data = pd.DataFrame()
     
     for i, strat in enumerate(strategies):
@@ -2008,12 +2011,17 @@ def _load_strategy_windows(
         if i == 0:
             ref_data = df
         
+        display_symbol = symbol.replace(".NS", "")
+        
         windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
         
         if not windows:
             continue
         
-        display_symbol = symbol.replace(".NS", "")
+        if display_symbol not in unique_symbols:
+            unique_symbols.append(display_symbol)
+            all_strategy_dfs.append(df)
+        
         for w in windows:
             all_templates.append({
                 "start_day": w.start_day,
@@ -2026,7 +2034,7 @@ def _load_strategy_windows(
     if not all_templates or ref_data.empty:
         return None
     
-    return all_templates, all_day_ranges, ref_data, all_window_dfs
+    return all_templates, all_day_ranges, ref_data, all_window_dfs, unique_symbols
 
 
 def get_plan_overlap(
@@ -2075,7 +2083,7 @@ def get_plan_overlap(
             "new_days": len(stock_days),
         }
 
-    _templates, plan_day_ranges, _ref_data, _window_dfs = loaded
+    _templates, plan_day_ranges, _ref_data, _window_dfs, _syms = loaded
 
     # Build DOY set for plan
     plan_days: set[int] = set()
@@ -2100,6 +2108,7 @@ def _build_equity_curve(
     day_ranges: list[tuple[int, int]],
     year: int,
     window_dfs: list[pd.DataFrame] | None = None,
+    unique_symbols: list[str] | None = None,
 ) -> dict | None:
     """
     Build equity curves for a single year using pre-computed window ranges.
@@ -2108,13 +2117,17 @@ def _build_equity_curve(
     among all strategies whose windows are active. Each strategy uses its own
     stock's daily returns.
     
+    Also builds per-strategy individual curves (each strategy traded alone)
+    and an equal-weight B&H curve across all unique stocks.
+    
     Args:
-        ref_data: DataFrame for B&H reference (first strategy's data).
+        ref_data: DataFrame for B&H reference and date index.
         templates: list of {start_day, end_day, symbol} dicts.
         day_ranges: list of (start_day, end_day) 1-365 DOY pairs.
         year: Year to backtest.
         window_dfs: list of DataFrames, one per window. If None, falls back to
                     ref_data for all windows (single-stock behavior).
+        unique_symbols: ordered list of unique display symbols.
     
     Returns:
         Result dict or None if no data for that year.
@@ -2125,6 +2138,9 @@ def _build_equity_curve(
     
     if year_data.empty:
         return None
+    
+    if unique_symbols is None:
+        unique_symbols = []
     
     # Convert day-of-year ranges to actual date ranges for this year
     all_trading_periods = []
@@ -2145,14 +2161,6 @@ def _build_equity_curve(
             pd.Timestamp(end_date),
         ))
     
-    # B&H daily returns from ref_data
-    closes = year_data["Close"].values
-    daily_ret = np.empty(len(closes))
-    daily_ret[0] = 0.0
-    daily_ret[1:] = closes[1:] / closes[:-1] - 1.0
-    
-    bh_curve = (np.cumprod(1.0 + daily_ret) - 1.0) * 100.0
-    
     # Build per-window daily return arrays and boolean masks
     idx_values = year_data.index.values
     n_days = len(idx_values)
@@ -2163,6 +2171,9 @@ def _build_equity_curve(
     # Per-window daily returns aligned to ref_data's date index
     window_rets = np.zeros((n_windows, n_days))
     
+    # Track per-stock daily returns for B&H (keyed by df id to avoid duplicates)
+    df_id_to_rets: dict[int, np.ndarray] = {}
+    
     for w_idx, (entry_ts, exit_ts) in enumerate(ts_ranges):
         entry_np = np.datetime64(entry_ts)
         exit_np = np.datetime64(exit_ts)
@@ -2171,40 +2182,72 @@ def _build_equity_curve(
         # Get this window's stock data
         if window_dfs is not None:
             w_df = window_dfs[w_idx]
-            w_year = w_df.loc[year_start:year_end]
-            if not w_year.empty:
-                # Align to ref_data index via reindex
-                w_closes = w_year["Close"].reindex(year_data.index)
-                w_vals = w_closes.values
-                w_ret = np.empty(n_days)
-                w_ret[0] = 0.0
-                for j in range(1, n_days):
-                    if np.isnan(w_vals[j]) or np.isnan(w_vals[j - 1]) or w_vals[j - 1] == 0:
-                        w_ret[j] = 0.0
-                    else:
-                        w_ret[j] = w_vals[j] / w_vals[j - 1] - 1.0
-                window_rets[w_idx] = w_ret
-            else:
+            df_id = id(w_df)
+            
+            if df_id not in df_id_to_rets:
+                w_year = w_df.loc[year_start:year_end]
+                if not w_year.empty:
+                    w_closes = w_year["Close"].reindex(year_data.index)
+                    w_vals = w_closes.values
+                    w_ret = np.empty(n_days)
+                    w_ret[0] = 0.0
+                    for j in range(1, n_days):
+                        if np.isnan(w_vals[j]) or np.isnan(w_vals[j - 1]) or w_vals[j - 1] == 0:
+                            w_ret[j] = 0.0
+                        else:
+                            w_ret[j] = w_vals[j] / w_vals[j - 1] - 1.0
+                    df_id_to_rets[df_id] = w_ret
+                else:
+                    df_id_to_rets[df_id] = np.zeros(n_days)
+            
+            window_rets[w_idx] = df_id_to_rets[df_id]
+            if np.all(df_id_to_rets[df_id] == 0):
                 window_masks[w_idx] = False
         else:
             # Fallback: all windows use ref_data returns
+            closes = year_data["Close"].values
+            daily_ret = np.empty(len(closes))
+            daily_ret[0] = 0.0
+            daily_ret[1:] = closes[1:] / closes[:-1] - 1.0
             window_rets[w_idx] = daily_ret
     
     # Dynamic equal-weight blended return per day
-    # active_count[d] = number of windows active on day d
     active_count = window_masks.sum(axis=0)  # shape (n_days,)
-    
-    # Weighted return per day = sum of active windows' returns / active_count
-    # (equal weight among active windows)
     active_ret_sum = (window_masks * window_rets).sum(axis=0)  # shape (n_days,)
-    
-    # Where active_count > 0, blended return = sum / count (equal weight)
-    # Where active_count == 0, return = 0 (out of market)
     safe_count = np.where(active_count > 0, active_count, 1)
     blended_ret = np.where(active_count > 0, active_ret_sum / safe_count, 0.0)
     
     combined_curve = (np.cumprod(1.0 + blended_ret) - 1.0) * 100.0
     total_days_in_market = int(np.sum(active_count > 0))
+    
+    # Build per-strategy curves: each strategy's windows traded in isolation
+    strategy_curves: dict[str, list[float]] = {}
+    for sym in unique_symbols:
+        # Find all windows belonging to this symbol
+        sym_mask = np.zeros(n_days, dtype=bool)
+        sym_ret_sum = np.zeros(n_days)
+        sym_count = np.zeros(n_days, dtype=int)
+        for w_idx, tmpl in enumerate(templates):
+            if tmpl["symbol"] == sym:
+                sym_mask |= window_masks[w_idx]
+                sym_ret_sum += window_masks[w_idx] * window_rets[w_idx]
+                sym_count += window_masks[w_idx].astype(int)
+        
+        sym_safe = np.where(sym_count > 0, sym_count, 1)
+        sym_blended = np.where(sym_mask, sym_ret_sum / sym_safe, 0.0)
+        sym_curve = (np.cumprod(1.0 + sym_blended) - 1.0) * 100.0
+        strategy_curves[sym] = sym_curve.tolist()
+    
+    # Equal-weight B&H: average daily returns across all unique stocks
+    if window_dfs is not None and df_id_to_rets:
+        unique_rets = list(df_id_to_rets.values())
+        bh_blended = np.mean(unique_rets, axis=0)
+    else:
+        closes = year_data["Close"].values
+        bh_blended = np.empty(len(closes))
+        bh_blended[0] = 0.0
+        bh_blended[1:] = closes[1:] / closes[:-1] - 1.0
+    bh_curve = (np.cumprod(1.0 + bh_blended) - 1.0) * 100.0
     
     # Vectorized date formatting
     months = year_data.index.month.values
@@ -2216,11 +2259,12 @@ def _build_equity_curve(
     return {
         "combined_curve": combined_curve.tolist(),
         "bh_curve": bh_curve.tolist(),
-        "strategy_curves": {},
+        "strategy_curves": strategy_curves,
         "trades_count": len(all_trading_periods),
         "total_days": total_days_in_market,
         "dates": dates,
         "trades": all_trading_periods,
+        "symbols": unique_symbols,
     }
 
 
@@ -2249,8 +2293,8 @@ def get_plan_backtest_data(
     if loaded is None:
         return {"error": "No windows detected in any strategy"}
     
-    templates, day_ranges, ref_data, window_dfs = loaded
-    result = _build_equity_curve(ref_data, templates, day_ranges, year, window_dfs)
+    templates, day_ranges, ref_data, window_dfs, unique_symbols = loaded
+    result = _build_equity_curve(ref_data, templates, day_ranges, year, window_dfs, unique_symbols)
     
     if result is None:
         return {"error": f"No data for year {year}"}
@@ -2281,13 +2325,13 @@ def get_plan_backtest_average(
     if loaded is None:
         return {"error": "No windows detected in any strategy"}
     
-    templates, day_ranges, ref_data, window_dfs = loaded
+    templates, day_ranges, ref_data, window_dfs, unique_symbols = loaded
     
     years = get_years_from_data(ref_data)
     if not years:
         return {"error": "No complete years available"}
     
-    # Build synthetic average-year series from reference data (for B&H and DOY grid)
+    # Build synthetic average-year series from reference data (for DOY grid)
     avg_result = _build_average_year_series(ref_data, years)
     if avg_result is None:
         return {"error": "No valid years for averaging"}
@@ -2307,9 +2351,6 @@ def get_plan_backtest_average(
             "exit_date": f"{month_abbrs[ref_end.month]}-{ref_end.day}",
             "symbol": tmpl["symbol"],
         })
-    
-    # Buy-and-hold curve on synthetic series (ref stock)
-    bh_curve = (np.cumprod(1.0 + avg_rets) - 1.0) * 100.0
     
     # Build per-window average return series and masks
     n_windows = len(day_ranges)
@@ -2346,32 +2387,72 @@ def get_plan_backtest_average(
     combined_curve = (np.cumprod(1.0 + blended_ret) - 1.0) * 100.0
     total_days_in_market = int(np.sum(active_count > 0))
     
+    # Per-strategy curves
+    strategy_curves: dict[str, list[float]] = {}
+    for sym in unique_symbols:
+        sym_mask = np.zeros(n_days, dtype=bool)
+        sym_ret_sum = np.zeros(n_days)
+        sym_count = np.zeros(n_days, dtype=int)
+        for w_idx, tmpl in enumerate(templates):
+            if tmpl["symbol"] == sym:
+                sym_mask |= window_masks[w_idx]
+                sym_ret_sum += window_masks[w_idx] * window_avg_rets[w_idx]
+                sym_count += window_masks[w_idx].astype(int)
+        
+        sym_safe = np.where(sym_count > 0, sym_count, 1)
+        sym_blended = np.where(sym_mask, sym_ret_sum / sym_safe, 0.0)
+        sym_curve = (np.cumprod(1.0 + sym_blended) - 1.0) * 100.0
+        strategy_curves[sym] = sym_curve.tolist()
+    
+    # Equal-weight B&H: average daily returns across all unique stocks
+    unique_avg_rets = list(df_id_to_avg.values())
+    if len(unique_avg_rets) > 1:
+        bh_blended = np.mean(unique_avg_rets, axis=0)
+    else:
+        bh_blended = avg_rets
+    bh_curve = (np.cumprod(1.0 + bh_blended) - 1.0) * 100.0
+    
     return {
         "combined_curve": combined_curve.tolist(),
         "bh_curve": bh_curve.tolist(),
-        "strategy_curves": {},
+        "strategy_curves": strategy_curves,
         "trades_count": len(trades_info),
         "total_days": total_days_in_market,
         "dates": date_labels,
         "trades": trades_info,
         "avg_years": len(years),
+        "symbols": unique_symbols,
     }
 
 
-def export_plan_calendar_csv(strategies: list[dict]) -> str:
+def export_plan_calendar_csv(strategies: list[dict], align_windows: bool = False) -> str:
     """
-    Generate unified trading calendar CSV from multiple window-mode strategies.
+    Generate a target-allocation trading calendar CSV.
     
-    Format: date,stockname,action (no headers)
-    Sorted by date for easy execution.
+    Format: Date column + one column per stock.
+    Each row is an event date (window open/close). Cell values show
+    the target portfolio allocation % for that stock after rebalancing.
+    Empty cell = no change. On the far right, an Action column describes
+    what triggered the rebalance.
+    
+    Equal-weight: all active positions get 1/N of portfolio.
     
     Args:
         strategies: List of strategy dicts with symbol, window_size, threshold
+        align_windows: If True, merge entry/exit dates within 2 days of each other
     
     Returns:
         CSV content string
     """
-    all_entries = []  # List of (month_idx, day, date_str, stock_name, action)
+    import io
+    import calendar as cal
+    
+    month_order = {cal.month_abbr[i]: i for i in range(1, 13)}
+    
+    # Collect all windows across strategies
+    # Each window: (start_doy, end_doy, stock_name)
+    all_windows: list[tuple[int, int, str]] = []
+    stock_names: list[str] = []  # ordered unique names
     
     for strat in strategies:
         symbol = strat.get("symbol", "")
@@ -2382,7 +2463,6 @@ def export_plan_calendar_csv(strategies: list[dict]) -> str:
         if not symbols:
             continue
         
-        # Load data and detect windows
         if len(symbols) == 1:
             df = load_symbol_data(symbols[0])
         else:
@@ -2392,43 +2472,131 @@ def export_plan_calendar_csv(strategies: list[dict]) -> str:
             continue
         
         windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
-        
         if not windows:
             continue
         
-        # Create display name
         if len(symbols) == 1:
             stock_name = symbols[0].replace(".NS", "")
         else:
             stock_name = "+".join(s.replace(".NS", "") for s in symbols)
         
-        # Add BUY/SELL entries for each window
+        if stock_name not in stock_names:
+            stock_names.append(stock_name)
+        
         for w in windows:
-            entry_str = w.start_date_str
-            exit_str = w.end_date_str
-            
-            entry_parts = entry_str.split("-")
-            exit_parts = exit_str.split("-")
-            
-            month_order = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-                           "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
-            
-            entry_month_idx = month_order.get(entry_parts[0], 0)
-            entry_day = int(entry_parts[1])
-            exit_month_idx = month_order.get(exit_parts[0], 0)
-            exit_day = int(exit_parts[1])
-            
-            all_entries.append((entry_month_idx, entry_day, entry_str, stock_name, "BUY"))
-            all_entries.append((exit_month_idx, exit_day, exit_str, stock_name, "SELL"))
+            all_windows.append((w.start_day, w.end_day, stock_name))
     
-    # Sort by month, then day
-    all_entries.sort(key=lambda x: (x[0], x[1]))
+    if not all_windows or not stock_names:
+        return ""
+    
+    # Apply alignment: merge entries/exits within 2 days of each other
+    if align_windows:
+        all_windows = _align_window_dates(all_windows)
+    
+    # Build chronological event list
+    # Each event: (doy, stock_name, event_type)  where event_type = "enter" | "exit"
+    events: list[tuple[int, str, str]] = []
+    for start_doy, end_doy, name in all_windows:
+        events.append((start_doy, name, "enter"))
+        events.append((end_doy, name, "exit"))
+    
+    # Sort by doy, then exits before entries on same day (exit frees capital first)
+    events.sort(key=lambda e: (e[0], 0 if e[2] == "exit" else 1))
+    
+    # Group events on the same day
+    grouped: list[tuple[int, list[tuple[str, str]]]] = []
+    i = 0
+    while i < len(events):
+        doy = events[i][0]
+        day_events: list[tuple[str, str]] = []
+        while i < len(events) and events[i][0] == doy:
+            day_events.append((events[i][1], events[i][2]))
+            i += 1
+        grouped.append((doy, day_events))
+    
+    # Walk through events, tracking active positions and computing target allocations
+    active: set[str] = set()  # currently active stock names
+    rows: list[tuple[str, dict[str, str], str]] = []  # (date_str, {stock: alloc}, action_desc)
+    
+    for doy, day_events in grouped:
+        # Determine action description
+        entering = [name for name, typ in day_events if typ == "enter"]
+        exiting = [name for name, typ in day_events if typ == "exit"]
+        
+        # Apply exits first
+        for name in exiting:
+            active.discard(name)
+        # Apply entries
+        for name in entering:
+            active.add(name)
+        
+        # Build action description
+        actions = []
+        if entering:
+            actions.append("Enter " + ", ".join(entering))
+        if exiting:
+            actions.append("Exit " + ", ".join(exiting))
+        action_desc = "; ".join(actions)
+        
+        # Compute target allocations (equal weight)
+        allocs: dict[str, str] = {}
+        if active:
+            pct = 100 // len(active)
+            # Distribute remainder to first positions
+            remainder = 100 - pct * len(active)
+            sorted_active = sorted(active, key=lambda s: stock_names.index(s))
+            for j, name in enumerate(sorted_active):
+                p = pct + (1 if j < remainder else 0)
+                allocs[name] = f"{p}%"
+        
+        # Convert doy to date string
+        month, day = date_from_day_of_year(doy)
+        date_str = f"{cal.month_abbr[month]}-{day}"
+        
+        rows.append((date_str, allocs, action_desc))
     
     # Generate CSV
-    import io
     output = io.StringIO()
     
-    for _, _, date_str, stock_name, action in all_entries:
-        output.write(f"{date_str},{stock_name},{action}\n")
+    # Header
+    header = ["Date"] + stock_names + ["Action"]
+    output.write(",".join(header) + "\n")
+    
+    for date_str, allocs, action_desc in rows:
+        cells = [date_str]
+        for name in stock_names:
+            cells.append(allocs.get(name, ""))
+        cells.append(action_desc)
+        output.write(",".join(cells) + "\n")
     
     return output.getvalue()
+
+
+def _align_window_dates(windows: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
+    """
+    Merge entry/exit dates that are within 2 days of each other.
+    
+    For entries within 2 days: snap the later one to the earlier.
+    For exits within 2 days: snap the earlier one to the later.
+    This reduces the number of distinct trading days.
+    """
+    # Build mutable list of [start_doy, end_doy, name]
+    mutable = [[s, e, n] for s, e, n in windows]
+    
+    # Align entries: sort by start_doy, merge nearby
+    by_start = sorted(range(len(mutable)), key=lambda i: mutable[i][0])
+    for k in range(len(by_start) - 1):
+        i1 = by_start[k]
+        i2 = by_start[k + 1]
+        if 0 < mutable[i2][0] - mutable[i1][0] <= 2:
+            mutable[i2][0] = mutable[i1][0]  # snap later entry to earlier
+    
+    # Align exits: sort by end_doy, merge nearby
+    by_end = sorted(range(len(mutable)), key=lambda i: mutable[i][1])
+    for k in range(len(by_end) - 1):
+        i1 = by_end[k]
+        i2 = by_end[k + 1]
+        if 0 < mutable[i2][1] - mutable[i1][1] <= 2:
+            mutable[i1][1] = mutable[i2][1]  # snap earlier exit to later
+    
+    return [(s, e, n) for s, e, n in mutable]

@@ -882,8 +882,8 @@ HTML_PAGE = """<!DOCTYPE html>
         .plan-panel {
             background: #16213e;
             border-radius: 8px;
-            width: 80vw;
-            height: 80vh;
+            width: 95vw;
+            height: 92vh;
             display: flex;
             flex-direction: column;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
@@ -1000,6 +1000,48 @@ HTML_PAGE = """<!DOCTYPE html>
         .plan-chart-controls label {
             color: #888;
             font-size: 0.9em;
+        }
+        
+        .plan-legend {
+            padding: 6px 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 14px;
+            align-items: center;
+            border-bottom: 1px solid #222;
+        }
+        
+        .plan-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            user-select: none;
+            transition: opacity 0.15s;
+        }
+        
+        .plan-legend-item:hover {
+            background: rgba(255,255,255,0.06);
+        }
+        
+        .plan-legend-item.hidden {
+            opacity: 0.35;
+        }
+        
+        .plan-legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        
+        .plan-legend-line {
+            width: 18px;
+            height: 2px;
+            flex-shrink: 0;
         }
         
         .plan-chart {
@@ -1224,6 +1266,7 @@ HTML_PAGE = """<!DOCTYPE html>
                             <option value="1000000">₹10,00,000</option>
                         </select>
                     </div>
+                    <div class="plan-legend" id="plan-legend"></div>
                     <div class="plan-chart" id="plan-chart">
                         <div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>
                     </div>
@@ -1231,7 +1274,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 </div>
             </div>
             <div class="plan-footer">
-                <button id="plan-export-btn" class="btn-secondary">Export Trading Calendar</button>
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#999;margin-right:auto;cursor:pointer">
+                    <input type="checkbox" id="plan-align-check"> Align windows (\u00b12 days)
+                </label>
+                <button id="plan-export-btn" class="btn-secondary">Export Trading Plan</button>
             </div>
         </div>
     </div>
@@ -1243,6 +1289,8 @@ HTML_PAGE = """<!DOCTYPE html>
             windowSize: 30,
             threshold: 50,
             overlapData: null,
+            planVisible: {},  // symbol -> boolean, for show/hide checkboxes
+            lastPlanData: null,  // cached plan backtest data for checkbox toggling
         };
         
         // Elements
@@ -2470,9 +2518,13 @@ HTML_PAGE = """<!DOCTYPE html>
         const planYearSelect = document.getElementById('plan-year-select');
         const planCapitalSelect = document.getElementById('plan-capital-select');
         const planChart = document.getElementById('plan-chart');
+        const planLegend = document.getElementById('plan-legend');
         const planMetrics = document.getElementById('plan-metrics');
         const planBadge = document.getElementById('plan-badge');
         const showPlanBtn = document.getElementById('show-plan-btn');
+        
+        // Strategy colors for plan chart (up to 8)
+        const STRATEGY_COLORS = ['#ff6b6b', '#4ecdc4', '#f7b731', '#a55eea', '#26de81', '#fd9644', '#45aaf2', '#fc5c65'];
         
         // Load plan from localStorage
         function loadPlan() {
@@ -2632,6 +2684,7 @@ HTML_PAGE = """<!DOCTYPE html>
                     return;
                 }
                 
+                state.lastPlanData = data;
                 renderPlanChart(data, capital);
             } catch (err) {
                 planChart.innerHTML = `<div style="color: #ff4466; padding: 20px;">Error: ${err.message}</div>`;
@@ -2641,21 +2694,96 @@ HTML_PAGE = """<!DOCTYPE html>
         // Render combined backtest chart
         function renderPlanChart(data, capital) {
             const { combined_curve, bh_curve, strategy_curves, trades_count, total_days, dates, trades } = data;
+            const symbols = data.symbols || Object.keys(strategy_curves);
+            
+            // Build symbol-to-color map based on plan order
+            const plan = loadPlan();
+            const symbolColorMap = {};
+            plan.forEach((s, idx) => {
+                const sym = displaySymbol(s.symbol);
+                if (!symbolColorMap[sym]) {
+                    symbolColorMap[sym] = STRATEGY_COLORS[idx % STRATEGY_COLORS.length];
+                }
+            });
+            
+            // Build per-strategy PnL arrays (needed for legend values)
+            const combinedPnL = combined_curve.map(p => (p / 100) * capital);
+            const bhPnL = bh_curve.map(p => (p / 100) * capital);
+            const strategyPnLs = {};
+            for (const sym of symbols) {
+                if (strategy_curves[sym]) {
+                    strategyPnLs[sym] = strategy_curves[sym].map(p => (p / 100) * capital);
+                }
+            }
+            
+            // Format currency helper
+            const formatCurrency = (v) => {
+                const abs = Math.abs(v);
+                const sign = v < 0 ? '-' : (v > 0 ? '+' : '');
+                if (abs >= 100000) return sign + '₹' + (abs / 100000).toFixed(1) + 'L';
+                if (abs >= 1000) return sign + '₹' + (abs / 1000).toFixed(0) + 'K';
+                return sign + '₹' + abs.toFixed(0);
+            };
+            
+            // Render interactive legend
+            let legendHTML = '';
+            // Per-strategy items
+            for (const sym of symbols) {
+                if (!strategyPnLs[sym]) continue;
+                const color = symbolColorMap[sym] || '#888';
+                const finalVal = strategyPnLs[sym][strategyPnLs[sym].length - 1];
+                const isHidden = state.planVisible[sym] === false;
+                const valColor = finalVal >= 0 ? '#44ff88' : '#ff4466';
+                legendHTML += `<div class="plan-legend-item${isHidden ? ' hidden' : ''}" data-legend-sym="${sym}">
+                    <span class="plan-legend-dot" style="background:${color}"></span>
+                    <span>${sym}</span>
+                    <span style="color:${valColor};font-weight:600">${formatCurrency(finalVal)}</span>
+                </div>`;
+            }
+            // Combined item
+            const finalCombinedVal = combinedPnL[combinedPnL.length - 1];
+            const combinedValColor = finalCombinedVal >= 0 ? '#44ff88' : '#ff4466';
+            legendHTML += `<div class="plan-legend-item" style="pointer-events:none">
+                <span class="plan-legend-line" style="background:#ffffff"></span>
+                <span>Total</span>
+                <span style="color:${combinedValColor};font-weight:600">${formatCurrency(finalCombinedVal)}</span>
+            </div>`;
+            // B&H item
+            const finalBHVal = bhPnL[bhPnL.length - 1];
+            const bhValColor = finalBHVal >= 0 ? '#44ff88' : '#ff4466';
+            legendHTML += `<div class="plan-legend-item" style="pointer-events:none">
+                <span class="plan-legend-line" style="background:#6699ff;border-top:2px dashed #6699ff;height:0"></span>
+                <span>B&H</span>
+                <span style="color:${bhValColor};font-weight:600">${formatCurrency(finalBHVal)}</span>
+            </div>`;
+            planLegend.innerHTML = legendHTML;
+            
+            // Attach legend click handlers
+            planLegend.querySelectorAll('[data-legend-sym]').forEach(el => {
+                el.addEventListener('click', () => {
+                    const sym = el.getAttribute('data-legend-sym');
+                    state.planVisible[sym] = state.planVisible[sym] === false ? true : false;
+                    renderPlanChart(state.lastPlanData, capital);
+                });
+            });
             
             // Chart dimensions
             const container = planChart.getBoundingClientRect();
             const width = container.width - 40;
             const height = container.height - 40;
-            const padding = { top: 30, right: 60, bottom: 40, left: 70 };
+            const padding = { top: 30, right: 20, bottom: 40, left: 70 };
             const chartWidth = width - padding.left - padding.right;
             const chartHeight = height - padding.top - padding.bottom;
             
-            // Scale profit percentages to actual P&L
-            const combinedPnL = combined_curve.map(p => (p / 100) * capital);
-            const bhPnL = bh_curve.map(p => (p / 100) * capital);
-            
-            // Find min/max for Y axis
-            const allValues = [...combinedPnL, ...bhPnL];
+            // Find min/max for Y axis (include all visible curves)
+            const allValues = [...bhPnL];
+            // Always include combined
+            allValues.push(...combinedPnL);
+            for (const sym of symbols) {
+                if (state.planVisible[sym] !== false && strategyPnLs[sym]) {
+                    allValues.push(...strategyPnLs[sym]);
+                }
+            }
             const dataMin = Math.min(...allValues, 0);
             const dataMax = Math.max(...allValues, 0);
             const range = dataMax - dataMin || 1;
@@ -2677,17 +2805,14 @@ HTML_PAGE = """<!DOCTYPE html>
             
             // Helper to find nearest trading day index for a date like "Mar-6"
             function findNearestDateIdx(targetDate) {
-                // First try exact match
                 let idx = dates.findIndex(d => d === targetDate);
                 if (idx >= 0) return idx;
                 
-                // Parse target date
                 const [targetMonth, targetDay] = targetDate.split('-');
                 const monthOrder = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
                 const targetMonthIdx = monthOrder.indexOf(targetMonth);
                 const targetDayNum = parseInt(targetDay);
                 
-                // Find closest date on or after target
                 for (let i = 0; i < dates.length; i++) {
                     const [m, d] = dates[i].split('-');
                     const mIdx = monthOrder.indexOf(m);
@@ -2699,17 +2824,20 @@ HTML_PAGE = """<!DOCTYPE html>
                 return dates.length - 1;
             }
             
-            // Build investment bands from trades
+            // Build investment bands per strategy (colored by symbol)
             let investmentBands = '';
             let tradeMarkers = '';
             const monthOrder = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             
             if (trades && trades.length > 0) {
                 trades.forEach(trade => {
+                    const sym = trade.symbol || '';
+                    // Skip hidden strategies
+                    if (state.planVisible[sym] === false) return;
+                    
                     const entryIdx = findNearestDateIdx(trade.entry_date);
                     let exitIdx = findNearestDateIdx(trade.exit_date);
                     
-                    // Check for wraparound trade
                     const entryMonth = trade.entry_date.split('-')[0];
                     const exitMonth = trade.exit_date.split('-')[0];
                     const isWraparound = monthOrder.indexOf(exitMonth) < monthOrder.indexOf(entryMonth);
@@ -2723,26 +2851,24 @@ HTML_PAGE = """<!DOCTYPE html>
                         const x2 = xScale(exitIdx);
                         const bandWidth = x2 - x1;
                         
-                        // Calculate return for this trade period
-                        const entryValue = combinedPnL[entryIdx];
-                        const exitValue = combinedPnL[exitIdx];
+                        // Use strategy color for band
+                        const bandColor = symbolColorMap[sym] || '#9b59b6';
+                        
+                        // Calculate per-strategy return if curve available
+                        const curve = strategyPnLs[sym] || combinedPnL;
+                        const entryValue = curve[entryIdx];
+                        const exitValue = curve[exitIdx];
                         const tradeReturn = exitValue - entryValue;
                         const tradeReturnPct = (tradeReturn / capital) * 100;
                         const isProfit = tradeReturn >= 0;
                         
-                        // Band color based on profit/loss
-                        const bandColor = isProfit ? '#9b59b6' : '#ff4466';
-                        const textColor = isProfit ? '#9b59b6' : '#cc3355';
-                        
                         const pctY = isProfit ? (padding.top + chartHeight - 22) : (padding.top + 30);
                         
-                        // Draw investment band
-                        investmentBands += `<rect x="${x1}" y="${padding.top}" width="${bandWidth}" height="${chartHeight}" fill="${bandColor}" opacity="0.12"/>`;
+                        investmentBands += `<rect x="${x1}" y="${padding.top}" width="${bandWidth}" height="${chartHeight}" fill="${bandColor}" opacity="0.10"/>`;
                         
-                        // Percentage in the middle
                         const pctText = (tradeReturnPct >= 0 ? '+' : '') + tradeReturnPct.toFixed(1) + '%';
                         const midX = (x1 + x2) / 2;
-                        tradeMarkers += `<text x="${midX}" y="${pctY}" fill="${textColor}" font-size="9" font-weight="bold" text-anchor="middle">${pctText}</text>`;
+                        tradeMarkers += `<text x="${midX}" y="${pctY}" fill="${bandColor}" font-size="9" font-weight="bold" text-anchor="middle" opacity="0.9">${pctText}</text>`;
                     }
                 });
             }
@@ -2775,7 +2901,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 }
             });
             
-            // Check for wraparound trades and add Jan+ label
+            // Check for wraparound trades
             let hasWraparound = false;
             if (trades) {
                 trades.forEach(trade => {
@@ -2790,14 +2916,16 @@ HTML_PAGE = """<!DOCTYPE html>
                 xTicks.push({ i: dates.length - 1, label: 'Jan+', isWraparound: true });
             }
             
-            // Format currency
-            const formatCurrency = (v) => {
-                const abs = Math.abs(v);
-                const sign = v < 0 ? '-' : (v > 0 ? '+' : '');
-                if (abs >= 100000) return sign + '₹' + (abs / 100000).toFixed(1) + 'L';
-                if (abs >= 1000) return sign + '₹' + (abs / 1000).toFixed(0) + 'K';
-                return sign + '₹' + abs.toFixed(0);
-            };
+            // Build per-strategy SVG lines
+            let strategyLines = '';
+            for (const sym of symbols) {
+                if (state.planVisible[sym] === false) continue;
+                if (!strategyPnLs[sym]) continue;
+                
+                const color = symbolColorMap[sym] || '#888';
+                const curve = strategyPnLs[sym];
+                strategyLines += `<path d="${buildPath(curve)}" fill="none" stroke="${color}" stroke-width="1.5" opacity="0.8"/>`;
+            }
             
             const svg = `
                 <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
@@ -2830,24 +2958,18 @@ HTML_PAGE = """<!DOCTYPE html>
                         </text>
                     `).join('')}
                     
-                    <!-- Buy & Hold line -->
-                    <path d="${buildPath(bhPnL)}" fill="none" stroke="#6699ff" stroke-width="1.25" opacity="0.8"/>
+                    <!-- Buy & Hold line (blue, dashed) -->
+                    <path d="${buildPath(bhPnL)}" fill="none" stroke="#6699ff" stroke-width="1.25" opacity="0.6" stroke-dasharray="4,3"/>
                     
-                    <!-- Combined strategy line -->
-                    <path d="${buildPath(combinedPnL)}" fill="none" stroke="#9b59b6" stroke-width="2"/>
+                    <!-- Per-strategy lines -->
+                    ${strategyLines}
+                    
+                    <!-- Combined strategy line (white) -->
+                    <path d="${buildPath(combinedPnL)}" fill="none" stroke="#ffffff" stroke-width="2.5"/>
                     
                     <!-- Trade markers -->
                     ${tradeMarkers}
                     
-                    <!-- Final values -->
-                    <text x="${width - padding.right + 5}" y="${yScale(combinedPnL[combinedPnL.length - 1]) + 4}" 
-                          fill="#9b59b6" font-size="12" font-weight="bold">
-                        ${formatCurrency(combinedPnL[combinedPnL.length - 1])}
-                    </text>
-                    <text x="${width - padding.right + 5}" y="${yScale(bhPnL[bhPnL.length - 1]) + 4}" 
-                          fill="#6699ff" font-size="12">
-                        ${formatCurrency(bhPnL[bhPnL.length - 1])}
-                    </text>
                 </svg>
             `;
             planChart.innerHTML = svg;
@@ -2858,7 +2980,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const maxDrawdown = Math.min(...combinedPnL);
             const isAvg = data.avg_years != null;
             const pnlLabel = isAvg ? `Avg Combined P&L (${data.avg_years}y):` : 'Combined P&L:';
-            const bhLabel = isAvg ? 'Avg B&H P&L:' : 'B&H P&L:';
+            const bhLabel = isAvg ? 'Avg EW B&H:' : 'EW B&H:';
             
             planMetrics.innerHTML = `
                 <div class="backtest-metric">
@@ -2891,8 +3013,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 return;
             }
             
+            const align = document.getElementById('plan-align-check').checked;
             const params = new URLSearchParams({
-                strategies: JSON.stringify(plan)
+                strategies: JSON.stringify(plan),
+                align: align ? '1' : '0'
             });
             
             window.location.href = `/api/plan/export?${params}`;
@@ -3146,7 +3270,8 @@ class MeguruHandler(BaseHTTPRequestHandler):
                     self.send_json({"error": "No strategies provided"}, 400)
                     return
                 
-                content = export_plan_calendar_csv(strategies)
+                align = params.get("align", "0") == "1"
+                content = export_plan_calendar_csv(strategies, align_windows=align)
                 filename = "trading-plan.csv"
                 self.send_csv(content, filename)
             except json.JSONDecodeError:
