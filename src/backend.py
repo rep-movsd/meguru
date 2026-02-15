@@ -1144,6 +1144,39 @@ def detect_sliding_windows(
     windows = _find_in_range(1, 365)
     windows.sort(key=lambda w: w.start_day)
     
+    # Merge contiguous/near-contiguous windows.
+    # The fixed-size search splits continuous bullish periods into chunks.
+    # If the gap between consecutive windows is <= 7 days, they are really
+    # one seasonal period — merge and recompute stats from the cache.
+    max_merge_gap = 7
+    if len(windows) >= 2:
+        merged: list[SlidingWindow] = [windows[0]]
+        for w in windows[1:]:
+            prev = merged[-1]
+            gap = w.start_day - prev.end_day
+            if gap <= max_merge_gap:
+                new_start = prev.start_day
+                new_end = w.end_day
+                new_length = new_end - new_start + 1
+                result = score_window_fast(cache, new_start, new_end)
+                if result is not None:
+                    avg_return, win_rate, score, year_returns = result
+                    merged[-1] = SlidingWindow(
+                        start_day=new_start,
+                        end_day=new_end,
+                        length=new_length,
+                        avg_return=avg_return,
+                        win_rate=win_rate,
+                        score=score,
+                        yield_per_day=avg_return / new_length,
+                        year_returns=year_returns,
+                    )
+                else:
+                    merged.append(w)
+            else:
+                merged.append(w)
+        windows = merged
+    
     return windows
 
 
