@@ -33,6 +33,7 @@ from backend import (
     list_plans,
     delete_plan,
     OFFSET_LIMITS,
+    get_market_caps,
 )
 
 HOST = "localhost"
@@ -1424,6 +1425,7 @@ HTML_PAGE = """<!DOCTYPE html>
                         <select id="plan-alloc-select">
                             <option value="equal" selected>Equal</option>
                             <option value="return">Return-wtd</option>
+                            <option value="marketcap">Mkt-cap</option>
                         </select>
                         <label>SL%:</label>
                         <input type="number" id="plan-sl-input" min="0" max="50" step="1" value="0" style="width:48px" title="Entry stop-loss %. Exits if price drops this % below entry. 0 = disabled.">
@@ -3172,15 +3174,58 @@ HTML_PAGE = """<!DOCTYPE html>
             }
         }
         
-        // Get current weights (null for equal, {sym: weight} for return-weighted)
+        // Compute market-cap-weighted allocation.
+        // Fetches market caps for all symbols in the plan, normalizes to sum=1.
+        async function computeMarketCapWeights() {
+            const plan = getVisiblePlan();
+            if (plan.length === 0) return null;
+            try {
+                // Collect unique symbols (with .NS suffix for backend)
+                const symSet = new Set();
+                plan.forEach(s => symSet.add(s.symbol));
+                const symbols = Array.from(symSet);
+
+                const res = await fetch('/api/marketcap?symbols=' + encodeURIComponent(symbols.join(',')));
+                const caps = await res.json();
+                if (caps.error) return null;
+
+                // Display symbols (strip .NS)
+                const displaySyms = symbols.map(s => s.replace(/\\.NS$/i, ''));
+
+                // Use sqrt(mcap) to dampen extreme size differences
+                const rawWeights = {};
+                displaySyms.forEach(sym => {
+                    const cap = caps[sym] || 0;
+                    rawWeights[sym] = cap > 0 ? Math.sqrt(cap) : 0;
+                });
+
+                // If all are zero (indices or failures), fall back to equal
+                const totalWeight = Object.values(rawWeights).reduce((s, v) => s + v, 0);
+                if (totalWeight === 0) return null;
+
+                const weights = {};
+                displaySyms.forEach(sym => {
+                    weights[sym] = rawWeights[sym] / totalWeight;
+                });
+                return weights;
+            } catch (err) {
+                return null;
+            }
+        }
+
+        // Get current weights (null for equal, {sym: weight} for return-weighted or mkt-cap)
         async function getPlanWeights() {
             if (planAllocSelect.value === 'equal') {
                 state.planWeights = null;
                 return null;
             }
-            // Return-weighted: compute if not cached
+            // Compute if not cached
             if (!state.planWeights) {
-                state.planWeights = await computeReturnWeights();
+                if (planAllocSelect.value === 'marketcap') {
+                    state.planWeights = await computeMarketCapWeights();
+                } else {
+                    state.planWeights = await computeReturnWeights();
+                }
             }
             return state.planWeights;
         }
@@ -4378,6 +4423,19 @@ class MeguruHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
         
+        elif path == "/api/marketcap":
+            params = self.parse_params()
+            try:
+                symbols_str = params.get("symbols", "")
+                if not symbols_str:
+                    self.send_json({"error": "No symbols provided"}, 400)
+                    return
+                symbols = [s.strip() for s in symbols_str.split(",") if s.strip()]
+                caps = get_market_caps(symbols)
+                self.send_json(caps)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         elif path == "/api/plans":
             try:
                 self.send_json(list_plans())

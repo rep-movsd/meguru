@@ -310,6 +310,77 @@ def synthesize_basket(symbols: Iterable[str]) -> pd.DataFrame:
 
 
 # =============================================================================
+# Market Cap Data
+# =============================================================================
+
+_MCAP_CACHE_FILE = DATA_DIR / "marketcap.json"
+_MCAP_MAX_AGE_DAYS = 7
+
+
+def _load_mcap_cache() -> dict:
+    """Load the market-cap JSON cache from disk."""
+    if _MCAP_CACHE_FILE.exists():
+        try:
+            return _json.loads(_MCAP_CACHE_FILE.read_text())
+        except (_json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def _save_mcap_cache(cache: dict) -> None:
+    """Write the market-cap cache to disk."""
+    ensure_dirs()
+    _MCAP_CACHE_FILE.write_text(_json.dumps(cache, indent=2))
+
+
+def get_market_caps(symbols: list[str]) -> dict[str, float]:
+    """Return market capitalisation for each symbol.
+
+    Values are cached in a JSON file and refreshed if older than
+    ``_MCAP_MAX_AGE_DAYS`` days.  Indices (starting with ``^``) have
+    no meaningful market cap and are returned as 0.
+
+    Returns a dict ``{display_symbol: market_cap}`` where
+    ``display_symbol`` strips the ``.NS`` suffix.
+    """
+    cache = _load_mcap_cache()
+    cutoff = (dt.datetime.now() - dt.timedelta(days=_MCAP_MAX_AGE_DAYS)).isoformat()
+    result: dict[str, float] = {}
+    dirty = False
+
+    for sym in symbols:
+        display = sym.replace(".NS", "")
+        # Indices have no market cap
+        if sym.startswith("^"):
+            result[display] = 0.0
+            continue
+
+        entry = cache.get(sym)
+        if entry and entry.get("fetched_at", "") >= cutoff:
+            result[display] = float(entry.get("value", 0))
+            continue
+
+        # Fetch from yfinance
+        try:
+            info = yf.Ticker(sym).info
+            mcap = float(info.get("marketCap", 0) or 0)
+        except Exception:
+            mcap = 0.0
+
+        cache[sym] = {
+            "value": mcap,
+            "fetched_at": dt.datetime.now().isoformat(),
+        }
+        dirty = True
+        result[display] = mcap
+
+    if dirty:
+        _save_mcap_cache(cache)
+
+    return result
+
+
+# =============================================================================
 # Seasonal Analysis Functions
 # =============================================================================
 
