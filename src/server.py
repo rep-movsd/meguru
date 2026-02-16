@@ -2240,14 +2240,16 @@ HTML_PAGE = """<!DOCTYPE html>
 
             const container = windowChart.getBoundingClientRect();
             const containerWidth = container.width;
-            const height = container.height;
-            if (containerWidth < 50 || height < 50) return;
+            const rawHeight = container.height;
 
             const padding = { top: 30, right: 20, bottom: 55, left: 60 };
             const n = years.length;
             const minPerGroup = 80;
             const minWidth = padding.left + padding.right + n * minPerGroup;
             const width = Math.max(containerWidth, minWidth);
+            // If horizontal scrollbar will appear, reserve space for it (~20px)
+            const height = width > containerWidth ? rawHeight - 20 : rawHeight;
+            if (containerWidth < 50 || height < 50) return;
             const chartWidth = width - padding.left - padding.right;
             const chartHeight = height - padding.top - padding.bottom;
 
@@ -3612,14 +3614,16 @@ HTML_PAGE = """<!DOCTYPE html>
 
             const container = planChart.getBoundingClientRect();
             const containerWidth = container.width - 40;
-            const height = container.height - 40;
-            if (containerWidth < 50 || height < 50) return;
+            const rawHeight = container.height - 40;
 
             const padding = { top: 30, right: 20, bottom: 55, left: 70 };
             const n = years.length;
             const minPerGroup = 80;
             const minWidth = padding.left + padding.right + n * minPerGroup;
             const width = Math.max(containerWidth, minWidth);
+            // If horizontal scrollbar will appear, reserve space for it (~20px)
+            const height = width > containerWidth ? rawHeight - 20 : rawHeight;
+            if (containerWidth < 50 || height < 50) return;
             const chartWidth = width - padding.left - padding.right;
             const chartHeight = height - padding.top - padding.bottom;
 
