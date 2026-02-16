@@ -2255,7 +2255,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const chartWidth = width - padding.left - padding.right;
             const chartHeight = height - padding.top - padding.bottom;
 
-            // Find Y range — tight fit to data with just enough room for labels.
+            // Find Y range — fit data with room for value labels above/below bars.
             let dataMin = Infinity, dataMax = -Infinity;
             years.forEach(d => {
                 dataMin = Math.min(dataMin, d.strategy_return, d.bh_return);
@@ -2264,11 +2264,14 @@ HTML_PAGE = """<!DOCTYPE html>
             // Always include 0 so bars have a baseline
             let yMin = Math.min(dataMin, 0);
             let yMax = Math.max(dataMax, 0);
-            // Fixed padding: ~15px worth of data-space for value labels
-            const pxPerUnit = chartHeight / ((yMax - yMin) || 1);
-            const labelPad = pxPerUnit > 0 ? 15 / pxPerUnit : 1;
-            yMax += labelPad;
-            if (yMin < 0) yMin -= labelPad * 0.5;
+            // Reserve pixels for value labels: 18px above bars, 18px below bars.
+            // Convert pixel needs to data-space units using the available chart height.
+            const dataRange = (yMax - yMin) || 1;
+            const labelPx = 18;
+            const usableHeight = chartHeight - 2 * labelPx;  // height left after label zones
+            const scale = dataRange / (usableHeight > 10 ? usableHeight : chartHeight);
+            yMax += labelPx * scale;
+            yMin -= labelPx * scale;
 
             const groupWidth = chartWidth / n;
             const barWidth = Math.min(groupWidth * 0.38, 50);
@@ -3672,7 +3675,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const chartWidth = width - padding.left - padding.right;
             const chartHeight = height - padding.top - padding.bottom;
 
-            // Find Y range — tight fit to data with just enough room for labels.
+            // Find Y range — fit data with room for value labels above/below bars.
             let dataMin = Infinity, dataMax = -Infinity;
             years.forEach(d => {
                 dataMin = Math.min(dataMin, d.combined_return, d.bh_return);
@@ -3680,10 +3683,13 @@ HTML_PAGE = """<!DOCTYPE html>
             });
             let yMin = Math.min(dataMin, 0);
             let yMax = Math.max(dataMax, 0);
-            const pxPerUnit = chartHeight / ((yMax - yMin) || 1);
-            const labelPad = pxPerUnit > 0 ? 15 / pxPerUnit : 1;
-            yMax += labelPad;
-            if (yMin < 0) yMin -= labelPad * 0.5;
+            // Reserve pixels for value labels: 18px above bars, 18px below bars.
+            const dataRange = (yMax - yMin) || 1;
+            const labelPx = 18;
+            const usableHeight = chartHeight - 2 * labelPx;
+            const scale = dataRange / (usableHeight > 10 ? usableHeight : chartHeight);
+            yMax += labelPx * scale;
+            yMin -= labelPx * scale;
 
             const groupWidth = chartWidth / n;
             const barWidth = Math.min(groupWidth * 0.38, 50);
