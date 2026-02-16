@@ -1853,11 +1853,86 @@ def get_backtest_data(
     return result
 
 
+def _apply_entry_stop_loss(
+    in_market: np.ndarray,
+    daily_ret: np.ndarray,
+    closes: np.ndarray,
+    windows: list,
+    idx_values: np.ndarray,
+    year: int,
+    stop_loss_pct: float,
+    reentry_pct: float,
+) -> None:
+    """
+    Apply per-window entry stop-loss (and optional re-entry) to a single
+    stock's in_market mask and daily_ret array, in place.
+
+    For each window, records the entry price (close on first active day).
+    When the close drops stop_loss_pct% from the entry price, marks remaining
+    window days as out-of-market. If reentry_pct > 0, re-enters when the
+    close drops that additional % below the stop-out price (may catch
+    rebounds). Only one re-entry per window; on re-entry the entry price
+    resets to the re-entry close.
+
+    Modifies in_market and daily_ret in place.
+    """
+    n_days = len(idx_values)
+
+    for w in windows:
+        start_date = dt.date(year, 1, 1) + dt.timedelta(days=w.start_day - 1)
+        end_date = dt.date(year, 1, 1) + dt.timedelta(days=w.end_day - 1)
+        entry_np = np.datetime64(pd.Timestamp(start_date))
+        exit_np = np.datetime64(pd.Timestamp(end_date))
+        w_mask = (idx_values >= entry_np) & (idx_values <= exit_np)
+
+        entry_price = np.nan
+        stopped_out = False
+        reentered = False
+        stop_price = 0.0
+
+        for d in range(n_days):
+            if not w_mask[d]:
+                continue
+
+            close = closes[d]
+            if np.isnan(close):
+                continue
+
+            # First active day: record entry price, no stop check
+            if np.isnan(entry_price):
+                entry_price = close
+                continue
+
+            if stopped_out and not reentered:
+                in_market[d] = False
+                daily_ret[d] = 0.0
+                if reentry_pct > 0 and close <= stop_price * (1.0 - reentry_pct / 100.0):
+                    reentered = True
+                    stopped_out = False
+                    entry_price = close
+                    in_market[d] = True
+                    daily_ret[d] = 0.0
+                continue
+
+            if stopped_out and reentered:
+                in_market[d] = False
+                daily_ret[d] = 0.0
+                continue
+
+            # Active position: check stop against entry price
+            loss_from_entry = (entry_price - close) / entry_price
+            if loss_from_entry >= stop_loss_pct / 100.0:
+                stop_price = close
+                stopped_out = True
+
+
 def get_window_backtest_data(
     symbol: str,
     window_size: int,
     threshold: int,
     year: int,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
 ) -> dict:
     """
     Generate backtest data for sliding window mode.
@@ -1870,6 +1945,8 @@ def get_window_backtest_data(
         window_size: Fixed window length in days
         threshold: Win rate threshold percentage (50-100)
         year: Year to backtest
+        stop_loss_pct: Entry stop-loss % (0 = disabled)
+        reentry_pct: Re-entry % below stop price (0 = disabled)
     
     Returns:
         dict with seasonal_curve, bh_curve, trades, dates, and optional warning
@@ -1931,6 +2008,13 @@ def get_window_backtest_data(
         entry_np = np.datetime64(entry_ts)
         exit_np = np.datetime64(exit_ts)
         in_market |= (idx_values >= entry_np) & (idx_values <= exit_np)
+    
+    # Apply entry stop-loss per window
+    if stop_loss_pct > 0:
+        _apply_entry_stop_loss(
+            in_market, daily_ret, closes, windows, idx_values, year,
+            stop_loss_pct, reentry_pct,
+        )
     
     # Vectorized seasonal curve
     masked_ret = np.where(in_market, daily_ret, 0.0)
@@ -2237,6 +2321,8 @@ def _build_equity_curve(
     window_dfs: list[pd.DataFrame] | None = None,
     unique_symbols: list[str] | None = None,
     symbol_weights: dict[str, float] | None = None,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
 ) -> dict | None:
     """
     Build equity curves for a single year using pre-computed window ranges.
@@ -2257,6 +2343,15 @@ def _build_equity_curve(
         window_dfs: list of DataFrames, one per window. If None, falls back to
                     ref_data for all windows (single-stock behavior).
         unique_symbols: ordered list of unique display symbols.
+        symbol_weights: optional {symbol: weight} for return-weighted allocation.
+        stop_loss_pct: entry stop-loss percentage (0 = disabled). When the
+                       close drops this % from the entry price, the window
+                       is exited early.
+        reentry_pct: re-entry percentage below the stop-out price (0 = disabled).
+                     After a stop-loss exit, if the close drops this additional %
+                     from the exit price, re-enter for the remainder of the window.
+                     Entry price resets to the re-entry close.
+                     Only one re-entry per window.
     
     Returns:
         Result dict or None if no data for that year.
@@ -2302,6 +2397,8 @@ def _build_equity_curve(
     
     # Track per-stock daily returns for B&H (keyed by df id to avoid duplicates)
     df_id_to_rets: dict[int, np.ndarray] = {}
+    # Track per-stock close prices for stop-loss (keyed by df id)
+    df_id_to_closes: dict[int, np.ndarray] = {}
     
     for w_idx, (entry_ts, exit_ts) in enumerate(ts_ranges):
         entry_np = np.datetime64(entry_ts)
@@ -2326,8 +2423,10 @@ def _build_equity_curve(
                         else:
                             w_ret[j] = w_vals[j] / w_vals[j - 1] - 1.0
                     df_id_to_rets[df_id] = w_ret
+                    df_id_to_closes[df_id] = w_vals.copy()
                 else:
                     df_id_to_rets[df_id] = np.zeros(n_days)
+                    df_id_to_closes[df_id] = np.full(n_days, np.nan)
             
             window_rets[w_idx] = df_id_to_rets[df_id]
             if np.all(df_id_to_rets[df_id] == 0):
@@ -2339,6 +2438,63 @@ def _build_equity_curve(
             daily_ret[0] = 0.0
             daily_ret[1:] = closes[1:] / closes[:-1] - 1.0
             window_rets[w_idx] = daily_ret
+    
+    # Apply entry stop-loss and re-entry logic per window
+    if stop_loss_pct > 0:
+        for w_idx in range(n_windows):
+            # Get close prices for this window's stock
+            if window_dfs is not None:
+                w_closes = df_id_to_closes[id(window_dfs[w_idx])]
+            else:
+                w_closes = year_data["Close"].values
+            
+            entry_price = np.nan
+            stopped_out = False
+            reentered = False
+            stop_price = 0.0
+            
+            for d in range(n_days):
+                if not window_masks[w_idx, d]:
+                    # Outside the original window range — skip
+                    continue
+                
+                close = w_closes[d]
+                if np.isnan(close):
+                    continue
+                
+                # First active day: record entry price, no stop check
+                if np.isnan(entry_price):
+                    entry_price = close
+                    continue
+                
+                if stopped_out and not reentered:
+                    # We're stopped out, watching for re-entry
+                    window_masks[w_idx, d] = False
+                    window_rets[w_idx, d] = 0.0
+                    if reentry_pct > 0 and close <= stop_price * (1.0 - reentry_pct / 100.0):
+                        # Re-enter: price dropped enough below stop price
+                        reentered = True
+                        stopped_out = False
+                        entry_price = close  # reset entry price to re-entry price
+                        window_masks[w_idx, d] = True
+                        # Return on re-entry day is 0 (fresh position)
+                        window_rets[w_idx, d] = 0.0
+                    continue
+                
+                if stopped_out and reentered:
+                    # Already stopped out after re-entry — stay out
+                    window_masks[w_idx, d] = False
+                    window_rets[w_idx, d] = 0.0
+                    continue
+                
+                # Active position: check stop against entry price
+                loss_from_entry = (entry_price - close) / entry_price
+                if loss_from_entry >= stop_loss_pct / 100.0:
+                    # Stop-loss triggered at today's close
+                    stop_price = close
+                    stopped_out = True
+                    # Today's return is already captured (we exited at close)
+                    # but mark subsequent days as inactive
     
     # Weighted blended return per day
     if symbol_weights:
@@ -2414,6 +2570,8 @@ def get_plan_backtest_data(
     strategies: list[dict],
     year: int,
     symbol_weights: dict[str, float] | None = None,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
 ) -> dict:
     """
     Generate combined backtest data for multiple window-mode strategies.
@@ -2426,6 +2584,8 @@ def get_plan_backtest_data(
         strategies: List of strategy dicts with symbol, window_size, threshold
         year: Year to backtest
         symbol_weights: Optional {symbol: weight} for return-weighted allocation
+        stop_loss_pct: Entry stop-loss % (0 = disabled)
+        reentry_pct: Re-entry % below stop price (0 = disabled)
     
     Returns:
         dict with combined_curve, bh_curve, trades_count, total_days, dates, trades
@@ -2438,7 +2598,7 @@ def get_plan_backtest_data(
         return {"error": "No windows detected in any strategy"}
     
     templates, day_ranges, ref_data, window_dfs, unique_symbols = loaded
-    result = _build_equity_curve(ref_data, templates, day_ranges, year, window_dfs, unique_symbols, symbol_weights)
+    result = _build_equity_curve(ref_data, templates, day_ranges, year, window_dfs, unique_symbols, symbol_weights, stop_loss_pct, reentry_pct)
     
     if result is None:
         return {"error": f"No data for year {year}"}
@@ -2449,6 +2609,8 @@ def get_plan_backtest_data(
 def get_plan_backtest_average(
     strategies: list[dict],
     symbol_weights: dict[str, float] | None = None,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
 ) -> dict:
     """
     Generate average plan backtest across all available years.
@@ -2458,8 +2620,15 @@ def get_plan_backtest_average(
     all strategies whose windows are active, using equal or return-weighted
     allocation.
     
+    Note: stop_loss_pct and reentry_pct are accepted for API consistency but
+    are not applied to the average-year series (entry stops require real
+    price data, not synthetic averages).
+    
     Args:
         strategies: List of strategy dicts with symbol, window_size, threshold
+        symbol_weights: Optional {symbol: weight} for return-weighted allocation
+        stop_loss_pct: Accepted but not applied (no real prices in average mode)
+        reentry_pct: Accepted but not applied
     
     Returns:
         dict with combined_curve, bh_curve, dates, trades (same format + avg_years)
@@ -2832,6 +3001,8 @@ def get_window_bar_data(
     symbol: str,
     window_size: int,
     threshold: int,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
 ) -> dict:
     """
     Compute per-year strategy return and buy-and-hold return for bar chart.
@@ -2839,6 +3010,13 @@ def get_window_bar_data(
     For each complete year of data, runs the sliding-window strategy and
     computes the final cumulative return percentage for both the strategy
     and buy-and-hold.
+
+    Args:
+        symbol: Stock symbol
+        window_size: Fixed window length in days
+        threshold: Win rate threshold percentage (50-100)
+        stop_loss_pct: Entry stop-loss % (0 = disabled)
+        reentry_pct: Re-entry % below stop price (0 = disabled)
 
     Returns:
         dict with "years" list of {year, strategy_return, bh_return}.
@@ -2882,6 +3060,13 @@ def get_window_bar_data(
             exit_np = np.datetime64(pd.Timestamp(end_date))
             in_market |= (idx_values >= entry_np) & (idx_values <= exit_np)
 
+        # Apply entry stop-loss per window
+        if stop_loss_pct > 0:
+            _apply_entry_stop_loss(
+                in_market, daily_ret, closes, windows, idx_values, year,
+                stop_loss_pct, reentry_pct,
+            )
+
         masked_ret = np.where(in_market, daily_ret, 0.0)
         strategy_return = float(
             (np.cumprod(1.0 + masked_ret)[-1] - 1.0) * 100.0,
@@ -2901,13 +3086,15 @@ def get_window_bar_data(
 def get_plan_bar_data(
     strategies: list[dict],
     symbol_weights: dict[str, float] | None = None,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
 ) -> dict:
     """
     Compute per-year combined plan return, B&H return, and per-stock
     contribution for stacked bar chart.
 
     For each complete year, builds equity curves using the plan backtest
-    engine (with optional return-weighted allocation), then reports:
+    engine (with optional return-weighted allocation and stop-loss), then reports:
       - combined strategy return (%)
       - equal-weight B&H return (%)
       - per-stock individual strategy return (%)
@@ -2933,7 +3120,7 @@ def get_plan_bar_data(
     for year in available_years:
         curve = _build_equity_curve(
             ref_data, templates, day_ranges, year, window_dfs, unique_symbols,
-            symbol_weights,
+            symbol_weights, stop_loss_pct, reentry_pct,
         )
         if curve is None:
             continue

@@ -1296,6 +1296,10 @@ HTML_PAGE = """<!DOCTYPE html>
                             <button id="chart-line-btn" class="chart-view-btn active">Line</button>
                             <button id="chart-bar-btn" class="chart-view-btn">Bar</button>
                         </div>
+                        <label style="color:#888;font-size:0.9em">SL%:</label>
+                        <input type="number" id="chart-sl-input" min="0" max="50" step="1" value="0" style="width:48px" title="Entry stop-loss %. Exits if price drops this % below entry. 0 = disabled.">
+                        <label style="color:#888;font-size:0.9em">Re%:</label>
+                        <input type="number" id="chart-re-input" min="0" max="50" step="1" value="0" style="width:48px" title="Re-entry % below stop price. May catch rebounds. 0 = disabled.">
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #00ff88;"></div>Strategy</div>
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #6699ff;"></div>Buy & Hold</div>
                         <button id="chart-add-plan-btn" class="btn-small btn-add-plan">+ Add to Plan</button>
@@ -1420,6 +1424,10 @@ HTML_PAGE = """<!DOCTYPE html>
                             <option value="equal" selected>Equal</option>
                             <option value="return">Return-wtd</option>
                         </select>
+                        <label>SL%:</label>
+                        <input type="number" id="plan-sl-input" min="0" max="50" step="1" value="0" style="width:48px" title="Entry stop-loss %. Exits if price drops this % below entry. 0 = disabled.">
+                        <label>Re%:</label>
+                        <input type="number" id="plan-re-input" min="0" max="50" step="1" value="0" style="width:48px" title="Re-entry % below stop price. May catch rebounds. 0 = disabled.">
                     </div>
                     <div class="plan-legend" id="plan-legend"></div>
                     <div class="plan-chart" id="plan-chart">
@@ -1493,6 +1501,8 @@ HTML_PAGE = """<!DOCTYPE html>
         const tradesPanelTitle = document.getElementById('trades-panel-title');
         const chartControls = document.getElementById('chart-controls');
         const chartYearSelect = document.getElementById('chart-year-select');
+        const chartSLInput = document.getElementById('chart-sl-input');
+        const chartREInput = document.getElementById('chart-re-input');
         const windowChart = document.getElementById('window-chart');
         const windowChartMetrics = document.getElementById('window-chart-metrics');
         const spinner = document.getElementById('spinner');
@@ -1905,6 +1915,10 @@ HTML_PAGE = """<!DOCTYPE html>
                     threshold: state.threshold,
                     year: year,
                 });
+                const sl = parseFloat(chartSLInput.value) || 0;
+                const re = parseFloat(chartREInput.value) || 0;
+                if (sl > 0) params.set('stop_loss', String(sl));
+                if (re > 0) params.set('reentry', String(re));
                 
                 const res = await fetch(`/api/windows/backtest?${params}`);
                 const data = await res.json();
@@ -2172,6 +2186,16 @@ HTML_PAGE = """<!DOCTYPE html>
             loadWindowBacktest();
         });
         
+        function onChartSLREChange() {
+            if (state.windowBarMode) {
+                loadWindowBarChart();
+            } else {
+                loadWindowBacktest();
+            }
+        }
+        chartSLInput.addEventListener('change', onChartSLREChange);
+        chartREInput.addEventListener('change', onChartSLREChange);
+        
         async function loadWindowBarChart() {
             if (!state.symbol) return;
             windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">Loading...</div>';
@@ -2182,6 +2206,10 @@ HTML_PAGE = """<!DOCTYPE html>
                     window_size: state.windowSize,
                     threshold: state.threshold,
                 });
+                const sl = parseFloat(chartSLInput.value) || 0;
+                const re = parseFloat(chartREInput.value) || 0;
+                if (sl > 0) params.set('stop_loss', String(sl));
+                if (re > 0) params.set('reentry', String(re));
                 const res = await fetch('/api/windows/bar?' + params);
                 const data = await res.json();
                 if (data.error) {
@@ -2868,6 +2896,8 @@ HTML_PAGE = """<!DOCTYPE html>
         const planYearSelect = document.getElementById('plan-year-select');
         const planCapitalSelect = document.getElementById('plan-capital-select');
         const planAllocSelect = document.getElementById('plan-alloc-select');
+        const planSLInput = document.getElementById('plan-sl-input');
+        const planREInput = document.getElementById('plan-re-input');
         const planChart = document.getElementById('plan-chart');
         const planLegend = document.getElementById('plan-legend');
         const planMetrics = document.getElementById('plan-metrics');
@@ -3163,6 +3193,10 @@ HTML_PAGE = """<!DOCTYPE html>
                     year: yearVal
                 });
                 if (weights) params.set('weights', JSON.stringify(weights));
+                const sl = parseFloat(planSLInput.value) || 0;
+                const re = parseFloat(planREInput.value) || 0;
+                if (sl > 0) params.set('stop_loss', String(sl));
+                if (re > 0) params.set('reentry', String(re));
                 
                 const res = await fetch(`/api/plan/backtest?${params}`);
                 const data = await res.json();
@@ -3533,6 +3567,10 @@ HTML_PAGE = """<!DOCTYPE html>
                     strategies: JSON.stringify(plan),
                 });
                 if (weights) params.set('weights', JSON.stringify(weights));
+                const sl = parseFloat(planSLInput.value) || 0;
+                const re = parseFloat(planREInput.value) || 0;
+                if (sl > 0) params.set('stop_loss', String(sl));
+                if (re > 0) params.set('reentry', String(re));
                 const res = await fetch('/api/plan/bar?' + params);
                 const data = await res.json();
                 if (data.error) {
@@ -3922,6 +3960,15 @@ HTML_PAGE = """<!DOCTYPE html>
                 loadPlanBacktest();
             }
         });
+        function onSLREChange() {
+            if (state.planBarMode) {
+                loadPlanBarChart();
+            } else {
+                loadPlanBacktest();
+            }
+        }
+        planSLInput.addEventListener('change', onSLREChange);
+        planREInput.addEventListener('change', onSLREChange);
         planOverlay.addEventListener('click', (e) => {
             if (e.target === planOverlay) closePlanOverlay();
         });
@@ -4135,15 +4182,17 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 year_str = params.get("year", "2023")
                 weights_json = params.get("weights", "")
                 symbol_weights = json.loads(weights_json) if weights_json else None
+                stop_loss = float(params.get("stop_loss", "0"))
+                reentry = float(params.get("reentry", "0"))
                 
                 if not strategies:
                     self.send_json({"error": "No strategies provided"}, 400)
                     return
                 
                 if year_str == "avg":
-                    result = get_plan_backtest_average(strategies, symbol_weights)
+                    result = get_plan_backtest_average(strategies, symbol_weights, stop_loss, reentry)
                 else:
-                    result = get_plan_backtest_data(strategies, int(year_str), symbol_weights)
+                    result = get_plan_backtest_data(strategies, int(year_str), symbol_weights, stop_loss, reentry)
                 self.send_json(result)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)
@@ -4255,6 +4304,8 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 window_size = int(params.get("window_size", 30))
                 threshold = int(params.get("threshold", 50))
                 year_str = params.get("year", "2024")
+                stop_loss = float(params.get("stop_loss", "0"))
+                reentry = float(params.get("reentry", "0"))
                 
                 if not symbols:
                     self.send_json({"error": "No symbol provided"}, 400)
@@ -4267,6 +4318,7 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 else:
                     result = get_window_backtest_data(
                         symbols[0], window_size, threshold, int(year_str),
+                        stop_loss_pct=stop_loss, reentry_pct=reentry,
                     )
                 self.send_json(result)
             except Exception as e:
@@ -4278,12 +4330,15 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 symbols = parse_symbols(params.get("symbol", ""))
                 window_size = int(params.get("window_size", 30))
                 threshold = int(params.get("threshold", 50))
+                stop_loss = float(params.get("stop_loss", "0"))
+                reentry = float(params.get("reentry", "0"))
                 
                 if not symbols:
                     self.send_json({"error": "No symbol provided"}, 400)
                     return
                 
-                result = get_window_bar_data(symbols[0], window_size, threshold)
+                result = get_window_bar_data(symbols[0], window_size, threshold,
+                                             stop_loss_pct=stop_loss, reentry_pct=reentry)
                 self.send_json(result)
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
@@ -4295,12 +4350,14 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 strategies = json.loads(strategies_json)
                 weights_json = params.get("weights", "")
                 symbol_weights = json.loads(weights_json) if weights_json else None
+                stop_loss = float(params.get("stop_loss", "0"))
+                reentry = float(params.get("reentry", "0"))
                 
                 if not strategies:
                     self.send_json({"error": "No strategies provided"}, 400)
                     return
                 
-                result = get_plan_bar_data(strategies, symbol_weights)
+                result = get_plan_bar_data(strategies, symbol_weights, stop_loss, reentry)
                 self.send_json(result)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)
