@@ -2994,6 +2994,37 @@ def delete_plan(name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Sharpe ratio helper
+# ---------------------------------------------------------------------------
+
+
+def _compute_sharpe(annual_returns: list[float]) -> tuple[float, str]:
+    """Compute Sharpe ratio from annual percentage returns.
+
+    Returns (sharpe_value, label) where label is one of:
+    'poor', 'average', 'good', 'excellent'.
+    """
+    if len(annual_returns) < 2:
+        return 0.0, "poor"
+    mean_r = float(np.mean(annual_returns))
+    std_r = float(np.std(annual_returns, ddof=1))
+    if std_r == 0:
+        sharpe = 0.0 if mean_r == 0 else float("inf")
+    else:
+        sharpe = mean_r / std_r
+    sharpe = round(sharpe, 2)
+    if sharpe < 0.5:
+        label = "poor"
+    elif sharpe < 1.0:
+        label = "average"
+    elif sharpe < 2.0:
+        label = "good"
+    else:
+        label = "excellent"
+    return sharpe, label
+
+
+# ---------------------------------------------------------------------------
 # Bar chart data: per-year return summaries
 # ---------------------------------------------------------------------------
 
@@ -3080,7 +3111,9 @@ def get_window_bar_data(
             "total_trading_days": len(year_data),
         })
 
-    return {"years": results}
+    annual_rets = [r["strategy_return"] for r in results]
+    sharpe, sharpe_label = _compute_sharpe(annual_rets)
+    return {"years": results, "sharpe_ratio": sharpe, "sharpe_label": sharpe_label}
 
 
 def get_plan_bar_data(
@@ -3145,4 +3178,7 @@ def get_plan_bar_data(
             "total_trading_days": len(curve["dates"]),
         })
 
-    return {"years": results, "symbols": unique_symbols}
+    annual_rets = [r["combined_return"] for r in results]
+    sharpe, sharpe_label = _compute_sharpe(annual_rets)
+    return {"years": results, "symbols": unique_symbols,
+            "sharpe_ratio": sharpe, "sharpe_label": sharpe_label}

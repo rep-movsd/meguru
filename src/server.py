@@ -2223,6 +2223,13 @@ HTML_PAGE = """<!DOCTYPE html>
             }
         }
         
+        function sharpeColor(s) {
+            if (s == null || s < 0.5) return '#ff4466';
+            if (s < 1.0) return '#ffaa44';
+            if (s < 2.0) return '#44ff88';
+            return '#44ddff';
+        }
+
         function renderWindowBarChart(data) {
             const years = data.years;
             if (!years || years.length === 0) {
@@ -2331,7 +2338,8 @@ HTML_PAGE = """<!DOCTYPE html>
             windowChartMetrics.innerHTML =
                 '<div class="metric"><span class="label">Avg Strategy:</span><span class="' + (avgStrategy >= 0 ? 'positive' : 'negative') + '">' + avgStrategy.toFixed(1) + '%</span></div>' +
                 '<div class="metric"><span class="label">Avg B&H:</span><span class="' + (avgBH >= 0 ? 'positive' : 'negative') + '">' + avgBH.toFixed(1) + '%</span></div>' +
-                '<div class="metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>';
+                '<div class="metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>' +
+                '<div class="metric"><span class="label">Sharpe:</span><span style="color:' + sharpeColor(data.sharpe_ratio) + '">' + (data.sharpe_ratio != null ? data.sharpe_ratio.toFixed(2) : 'N/A') + ' (' + (data.sharpe_label || 'N/A') + ')</span></div>';
         }
         
         function renderTradesTable(data) {
@@ -3767,7 +3775,8 @@ HTML_PAGE = """<!DOCTYPE html>
             planMetrics.innerHTML =
                 '<div class="backtest-metric"><span class="label">Avg Plan:</span><span class="' + (avgCombined >= 0 ? 'positive' : 'negative') + '">' + avgCombined.toFixed(1) + '%</span></div>' +
                 '<div class="backtest-metric"><span class="label">Avg B&H:</span><span class="' + (avgBH >= 0 ? 'positive' : 'negative') + '">' + avgBH.toFixed(1) + '%</span></div>' +
-                '<div class="backtest-metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>';
+                '<div class="backtest-metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>' +
+                '<div class="backtest-metric"><span class="label">Sharpe:</span><span style="color:' + sharpeColor(data.sharpe_ratio) + '">' + (data.sharpe_ratio != null ? data.sharpe_ratio.toFixed(2) : 'N/A') + ' (' + (data.sharpe_label || 'N/A') + ')</span></div>';
         }
         
         // Export unified trading calendar
