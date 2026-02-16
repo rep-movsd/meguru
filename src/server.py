@@ -2244,7 +2244,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const containerWidth = container.width;
             const rawHeight = container.height;
 
-            const padding = { top: 30, right: 20, bottom: 55, left: 60 };
+            const padding = { top: 10, right: 20, bottom: 55, left: 60 };
             const n = years.length;
             const minPerGroup = 80;
             const minWidth = padding.left + padding.right + n * minPerGroup;
@@ -2264,14 +2264,15 @@ HTML_PAGE = """<!DOCTYPE html>
             // Always include 0 so bars have a baseline
             let yMin = Math.min(dataMin, 0);
             let yMax = Math.max(dataMax, 0);
-            // Reserve pixels for value labels: 18px above bars, 18px below bars.
+            // Reserve pixels for value labels: 14px above bars, 18px below bars.
             // Convert pixel needs to data-space units using the available chart height.
             const dataRange = (yMax - yMin) || 1;
-            const labelPx = 18;
-            const usableHeight = chartHeight - 2 * labelPx;  // height left after label zones
+            const topLabelPx = 14;
+            const botLabelPx = 18;
+            const usableHeight = chartHeight - topLabelPx - botLabelPx;
             const scale = dataRange / (usableHeight > 10 ? usableHeight : chartHeight);
-            yMax += labelPx * scale;
-            yMin -= labelPx * scale;
+            yMax += topLabelPx * scale;
+            yMin -= botLabelPx * scale;
 
             const groupWidth = chartWidth / n;
             const barWidth = Math.min(groupWidth * 0.38, 50);
@@ -3664,7 +3665,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const containerWidth = container.width - 40;
             const rawHeight = container.height - 40;
 
-            const padding = { top: 30, right: 20, bottom: 55, left: 70 };
+            const padding = { top: 10, right: 20, bottom: 55, left: 70 };
             const n = years.length;
             const minPerGroup = 80;
             const minWidth = padding.left + padding.right + n * minPerGroup;
@@ -3683,13 +3684,14 @@ HTML_PAGE = """<!DOCTYPE html>
             });
             let yMin = Math.min(dataMin, 0);
             let yMax = Math.max(dataMax, 0);
-            // Reserve pixels for value labels: 18px above bars, 18px below bars.
+            // Reserve pixels for value labels: 14px above bars, 18px below bars.
             const dataRange = (yMax - yMin) || 1;
-            const labelPx = 18;
-            const usableHeight = chartHeight - 2 * labelPx;
+            const topLabelPx = 14;
+            const botLabelPx = 18;
+            const usableHeight = chartHeight - topLabelPx - botLabelPx;
             const scale = dataRange / (usableHeight > 10 ? usableHeight : chartHeight);
-            yMax += labelPx * scale;
-            yMin -= labelPx * scale;
+            yMax += topLabelPx * scale;
+            yMin -= botLabelPx * scale;
 
             const groupWidth = chartWidth / n;
             const barWidth = Math.min(groupWidth * 0.38, 50);
