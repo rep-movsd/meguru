@@ -1114,7 +1114,7 @@ HTML_PAGE = """<!DOCTYPE html>
         
         .plan-chart {
             flex: 1;
-            padding: 16px;
+            padding: 16px 16px 0 16px;
             min-height: 0;
             overflow-x: auto;
             overflow-y: hidden;
@@ -2244,7 +2244,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const containerWidth = container.width;
             const rawHeight = container.height;
 
-            const padding = { top: 10, right: 20, bottom: 55, left: 60 };
+            const padding = { top: 10, right: 20, bottom: 70, left: 60 };
             const n = years.length;
             const minPerGroup = 80;
             const minWidth = padding.left + padding.right + n * minPerGroup;
@@ -3351,8 +3351,8 @@ HTML_PAGE = """<!DOCTYPE html>
             
             // Chart dimensions
             const container = planChart.getBoundingClientRect();
-            const width = container.width - 40;
-            const height = container.height - 40;
+            const width = container.width - 32;
+            const height = container.height - 20;
             const padding = { top: 30, right: 20, bottom: 40, left: 70 };
             const chartWidth = width - padding.left - padding.right;
             const chartHeight = height - padding.top - padding.bottom;
@@ -3662,10 +3662,10 @@ HTML_PAGE = """<!DOCTYPE html>
             });
 
             const container = planChart.getBoundingClientRect();
-            const containerWidth = container.width - 40;
-            const rawHeight = container.height - 40;
+            const containerWidth = container.width - 32;
+            const rawHeight = container.height - 20;
 
-            const padding = { top: 10, right: 20, bottom: 55, left: 70 };
+            const padding = { top: 10, right: 20, bottom: 70, left: 70 };
             const n = years.length;
             const minPerGroup = 80;
             const minWidth = padding.left + padding.right + n * minPerGroup;
