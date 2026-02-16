@@ -1415,6 +1415,11 @@ HTML_PAGE = """<!DOCTYPE html>
                             <option value="500000">₹5,00,000</option>
                             <option value="1000000">₹10,00,000</option>
                         </select>
+                        <label>Alloc:</label>
+                        <select id="plan-alloc-select">
+                            <option value="equal" selected>Equal</option>
+                            <option value="return">Return-wtd</option>
+                        </select>
                     </div>
                     <div class="plan-legend" id="plan-legend"></div>
                     <div class="plan-chart" id="plan-chart">
@@ -1471,6 +1476,7 @@ HTML_PAGE = """<!DOCTYPE html>
             planBarMode: false,    // toggle for bar chart view in plan
             windowBarData: null,   // cached bar chart data
             planBarData: null,     // cached plan bar chart data
+            planWeights: null,     // cached {symbol: weight} for return-weighted mode
         };
         
         // Elements
@@ -2861,6 +2867,7 @@ HTML_PAGE = """<!DOCTYPE html>
         const planStrategyCount = document.getElementById('plan-strategy-count');
         const planYearSelect = document.getElementById('plan-year-select');
         const planCapitalSelect = document.getElementById('plan-capital-select');
+        const planAllocSelect = document.getElementById('plan-alloc-select');
         const planChart = document.getElementById('plan-chart');
         const planLegend = document.getElementById('plan-legend');
         const planMetrics = document.getElementById('plan-metrics');
@@ -2933,6 +2940,7 @@ HTML_PAGE = """<!DOCTYPE html>
             });
             
             savePlan(plan);
+            state.planWeights = null; // invalidate cached weights
             setStatus(`Added ${displaySymbol(state.symbol)} to plan (${plan.length} strateg${plan.length === 1 ? 'y' : 'ies'})`);
         }
         
@@ -2941,6 +2949,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const plan = loadPlan();
             plan.splice(index, 1);
             savePlan(plan);
+            state.planWeights = null; // invalidate cached weights
             renderPlanStrategies();
             const visible = getVisiblePlan();
             if (visible.length > 0) {
@@ -3044,6 +3053,7 @@ HTML_PAGE = """<!DOCTYPE html>
                     } else {
                         state.hiddenStrategies.add(idx);
                     }
+                    state.planWeights = null; // invalidate cached weights
                     renderPlanStrategies();
                     const visiblePlan = getVisiblePlan();
                     if (visiblePlan.length > 0) {
@@ -3077,6 +3087,63 @@ HTML_PAGE = """<!DOCTYPE html>
             ).join('');
         }
         
+        // Compute return-weighted allocation weights from bar chart data.
+        // Fetches equal-weight bar data, computes per-symbol avg return,
+        // clamps negatives to a minimum floor, normalizes to sum=1.
+        async function computeReturnWeights() {
+            const plan = getVisiblePlan();
+            if (plan.length === 0) return null;
+            try {
+                const params = new URLSearchParams({
+                    strategies: JSON.stringify(plan),
+                });
+                const res = await fetch('/api/plan/bar?' + params);
+                const data = await res.json();
+                if (data.error || !data.years || data.years.length === 0) return null;
+                
+                const symbols = data.symbols || [];
+                const n = data.years.length;
+                const MIN_WEIGHT = 0.05; // 5% floor for negative-return strategies
+                
+                // Compute per-symbol average return
+                const avgReturns = {};
+                symbols.forEach(sym => {
+                    const total = data.years.reduce((s, d) => s + (d.stock_returns[sym] || 0), 0);
+                    avgReturns[sym] = total / n;
+                });
+                
+                // Clamp negatives to floor, use raw positive values
+                const rawWeights = {};
+                symbols.forEach(sym => {
+                    rawWeights[sym] = avgReturns[sym] > 0 ? avgReturns[sym] : MIN_WEIGHT;
+                });
+                
+                // Normalize to sum = 1
+                const totalWeight = Object.values(rawWeights).reduce((s, v) => s + v, 0);
+                const weights = {};
+                symbols.forEach(sym => {
+                    weights[sym] = totalWeight > 0 ? rawWeights[sym] / totalWeight : 1 / symbols.length;
+                });
+                
+                return weights;
+            } catch (err) {
+                return null;
+            }
+        }
+        
+        // Get current weights (null for equal, {sym: weight} for return-weighted)
+        async function getPlanWeights() {
+            if (planAllocSelect.value === 'equal') {
+                state.planWeights = null;
+                return null;
+            }
+            // Return-weighted: compute if not cached
+            if (!state.planWeights) {
+                state.planWeights = await computeReturnWeights();
+            }
+            return state.planWeights;
+        }
+        
         // Load combined backtest for all strategies
         async function loadPlanBacktest() {
             const plan = getVisiblePlan();
@@ -3090,10 +3157,12 @@ HTML_PAGE = """<!DOCTYPE html>
             planChart.innerHTML = '<div style="padding: 20px; color: #888; text-align: center;">Loading...</div>';
             
             try {
+                const weights = await getPlanWeights();
                 const params = new URLSearchParams({
                     strategies: JSON.stringify(plan),
                     year: yearVal
                 });
+                if (weights) params.set('weights', JSON.stringify(weights));
                 
                 const res = await fetch(`/api/plan/backtest?${params}`);
                 const data = await res.json();
@@ -3144,6 +3213,7 @@ HTML_PAGE = """<!DOCTYPE html>
             
             // Render interactive legend
             let legendHTML = '';
+            const weights = state.planWeights;
             // Per-strategy items
             for (const sym of symbols) {
                 if (!strategyPnLs[sym]) continue;
@@ -3151,9 +3221,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 const finalVal = strategyPnLs[sym][strategyPnLs[sym].length - 1];
                 const isHidden = state.planVisible[sym] === false;
                 const valColor = finalVal >= 0 ? '#44ff88' : '#ff4466';
+                const weightLabel = weights && weights[sym] != null ? ' (' + (weights[sym] * 100).toFixed(0) + '%)' : '';
                 legendHTML += `<div class="plan-legend-item${isHidden ? ' hidden' : ''}" data-legend-sym="${sym}">
                     <span class="plan-legend-dot" style="background:${color}"></span>
-                    <span>${sym}</span>
+                    <span>${sym}${weightLabel}</span>
                     <span style="color:${valColor};font-weight:600">${formatCurrency(finalVal)}</span>
                 </div>`;
             }
@@ -3457,9 +3528,11 @@ HTML_PAGE = """<!DOCTYPE html>
             planMetrics.innerHTML = '';
             planLegend.innerHTML = '';
             try {
+                const weights = await getPlanWeights();
                 const params = new URLSearchParams({
                     strategies: JSON.stringify(plan),
                 });
+                if (weights) params.set('weights', JSON.stringify(weights));
                 const res = await fetch('/api/plan/bar?' + params);
                 const data = await res.json();
                 if (data.error) {
@@ -3633,11 +3706,13 @@ HTML_PAGE = """<!DOCTYPE html>
 
             // Build legend showing per-stock colors and avg returns
             let legendHTML = '';
+            const weights = state.planWeights;
             symbols.forEach(sym => {
                 const color = symbolColorMap[sym] || '#888';
                 const avgReturn = years.reduce((s, d) => s + (d.stock_returns[sym] || 0), 0) / n;
                 const valColor = avgReturn >= 0 ? '#44ff88' : '#ff4466';
-                legendHTML += '<div class="plan-legend-item" style="pointer-events:none"><span class="plan-legend-dot" style="background:' + color + '"></span><span>' + sym + '</span><span style="color:' + valColor + ';font-weight:600">avg ' + avgReturn.toFixed(1) + '%</span></div>';
+                const weightLabel = weights && weights[sym] != null ? ' (' + (weights[sym] * 100).toFixed(0) + '%)' : '';
+                legendHTML += '<div class="plan-legend-item" style="pointer-events:none"><span class="plan-legend-dot" style="background:' + color + '"></span><span>' + sym + weightLabel + '</span><span style="color:' + valColor + ';font-weight:600">avg ' + avgReturn.toFixed(1) + '%</span></div>';
             });
             // Combined
             const avgCombined = years.reduce((s, d) => s + d.combined_return, 0) / n;
@@ -3773,6 +3848,7 @@ HTML_PAGE = """<!DOCTYPE html>
                     return;
                 }
                 savePlan(data.strategies);
+                state.planWeights = null;
                 renderPlanStrategies();
                 closeLoadDialog();
                 setStatus(`Loaded plan "${name}"`);
@@ -3837,6 +3913,15 @@ HTML_PAGE = """<!DOCTYPE html>
         document.getElementById('plan-export-btn').addEventListener('click', exportPlanCalendar);
         planYearSelect.addEventListener('change', loadPlanBacktest);
         planCapitalSelect.addEventListener('change', loadPlanBacktest);
+        planAllocSelect.addEventListener('change', () => {
+            // Allocation mode changed — invalidate cached weights and reload
+            state.planWeights = null;
+            if (state.planBarMode) {
+                loadPlanBarChart();
+            } else {
+                loadPlanBacktest();
+            }
+        });
         planOverlay.addEventListener('click', (e) => {
             if (e.target === planOverlay) closePlanOverlay();
         });
@@ -4048,15 +4133,17 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 strategies_json = params.get("strategies", "[]")
                 strategies = json.loads(strategies_json)
                 year_str = params.get("year", "2023")
+                weights_json = params.get("weights", "")
+                symbol_weights = json.loads(weights_json) if weights_json else None
                 
                 if not strategies:
                     self.send_json({"error": "No strategies provided"}, 400)
                     return
                 
                 if year_str == "avg":
-                    result = get_plan_backtest_average(strategies)
+                    result = get_plan_backtest_average(strategies, symbol_weights)
                 else:
-                    result = get_plan_backtest_data(strategies, int(year_str))
+                    result = get_plan_backtest_data(strategies, int(year_str), symbol_weights)
                 self.send_json(result)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)
@@ -4206,12 +4293,14 @@ class MeguruHandler(BaseHTTPRequestHandler):
             try:
                 strategies_json = params.get("strategies", "[]")
                 strategies = json.loads(strategies_json)
+                weights_json = params.get("weights", "")
+                symbol_weights = json.loads(weights_json) if weights_json else None
                 
                 if not strategies:
                     self.send_json({"error": "No strategies provided"}, 400)
                     return
                 
-                result = get_plan_bar_data(strategies)
+                result = get_plan_bar_data(strategies, symbol_weights)
                 self.send_json(result)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)

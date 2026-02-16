@@ -2236,13 +2236,15 @@ def _build_equity_curve(
     year: int,
     window_dfs: list[pd.DataFrame] | None = None,
     unique_symbols: list[str] | None = None,
+    symbol_weights: dict[str, float] | None = None,
 ) -> dict | None:
     """
     Build equity curves for a single year using pre-computed window ranges.
     
-    Uses dynamic equal-weight allocation: on each day, capital is split equally
-    among all strategies whose windows are active. Each strategy uses its own
-    stock's daily returns.
+    Uses dynamic allocation: on each day, capital is split among all strategies
+    whose windows are active. With equal weighting (default), each gets 1/N.
+    With symbol_weights, each strategy is weighted by its symbol's weight,
+    renormalized among active windows on each day.
     
     Also builds per-strategy individual curves (each strategy traded alone)
     and an equal-weight B&H curve across all unique stocks.
@@ -2338,14 +2340,27 @@ def _build_equity_curve(
             daily_ret[1:] = closes[1:] / closes[:-1] - 1.0
             window_rets[w_idx] = daily_ret
     
-    # Dynamic equal-weight blended return per day
-    active_count = window_masks.sum(axis=0)  # shape (n_days,)
-    active_ret_sum = (window_masks * window_rets).sum(axis=0)  # shape (n_days,)
-    safe_count = np.where(active_count > 0, active_count, 1)
-    blended_ret = np.where(active_count > 0, active_ret_sum / safe_count, 0.0)
+    # Weighted blended return per day
+    if symbol_weights:
+        # Build per-window weight vector
+        w_weights = np.array([symbol_weights.get(tmpl["symbol"], 0.0) for tmpl in templates])
+        # On each day, normalize weights among active windows
+        active_weight_sum = (window_masks * w_weights[:, None]).sum(axis=0)  # shape (n_days,)
+        safe_weight = np.where(active_weight_sum > 0, active_weight_sum, 1.0)
+        # Each window's contribution = (its weight / sum of active weights) * its return
+        weighted_ret_sum = (window_masks * w_weights[:, None] * window_rets).sum(axis=0)
+        blended_ret = np.where(active_weight_sum > 0, weighted_ret_sum / safe_weight, 0.0)
+    else:
+        # Dynamic equal-weight blended return per day
+        active_count = window_masks.sum(axis=0)  # shape (n_days,)
+        active_ret_sum = (window_masks * window_rets).sum(axis=0)  # shape (n_days,)
+        safe_count = np.where(active_count > 0, active_count, 1)
+        blended_ret = np.where(active_count > 0, active_ret_sum / safe_count, 0.0)
+    
+    active_any = window_masks.sum(axis=0) > 0
     
     combined_curve = (np.cumprod(1.0 + blended_ret) - 1.0) * 100.0
-    total_days_in_market = int(np.sum(active_count > 0))
+    total_days_in_market = int(np.sum(active_any))
     
     # Build per-strategy curves: each strategy's windows traded in isolation
     strategy_curves: dict[str, list[float]] = {}
@@ -2398,6 +2413,7 @@ def _build_equity_curve(
 def get_plan_backtest_data(
     strategies: list[dict],
     year: int,
+    symbol_weights: dict[str, float] | None = None,
 ) -> dict:
     """
     Generate combined backtest data for multiple window-mode strategies.
@@ -2409,6 +2425,7 @@ def get_plan_backtest_data(
     Args:
         strategies: List of strategy dicts with symbol, window_size, threshold
         year: Year to backtest
+        symbol_weights: Optional {symbol: weight} for return-weighted allocation
     
     Returns:
         dict with combined_curve, bh_curve, trades_count, total_days, dates, trades
@@ -2421,7 +2438,7 @@ def get_plan_backtest_data(
         return {"error": "No windows detected in any strategy"}
     
     templates, day_ranges, ref_data, window_dfs, unique_symbols = loaded
-    result = _build_equity_curve(ref_data, templates, day_ranges, year, window_dfs, unique_symbols)
+    result = _build_equity_curve(ref_data, templates, day_ranges, year, window_dfs, unique_symbols, symbol_weights)
     
     if result is None:
         return {"error": f"No data for year {year}"}
@@ -2431,13 +2448,15 @@ def get_plan_backtest_data(
 
 def get_plan_backtest_average(
     strategies: list[dict],
+    symbol_weights: dict[str, float] | None = None,
 ) -> dict:
     """
     Generate average plan backtest across all available years.
     
     Builds a synthetic average-year return series for each strategy's stock,
-    then simulates dynamic equal-weight allocation: on each day, capital is
-    split equally among all strategies whose windows are active.
+    then simulates dynamic allocation: on each day, capital is split among
+    all strategies whose windows are active, using equal or return-weighted
+    allocation.
     
     Args:
         strategies: List of strategy dicts with symbol, window_size, threshold
@@ -2505,14 +2524,22 @@ def get_plan_backtest_average(
         
         window_avg_rets[w_idx] = df_id_to_avg[df_id]
     
-    # Dynamic equal-weight blended return per day
-    active_count = window_masks.sum(axis=0)
-    active_ret_sum = (window_masks * window_avg_rets).sum(axis=0)
-    safe_count = np.where(active_count > 0, active_count, 1)
-    blended_ret = np.where(active_count > 0, active_ret_sum / safe_count, 0.0)
+    # Weighted or equal-weight blended return per day
+    if symbol_weights:
+        w_weights = np.array([symbol_weights.get(tmpl["symbol"], 0.0) for tmpl in templates])
+        active_weight_sum = (window_masks * w_weights[:, None]).sum(axis=0)
+        safe_weight = np.where(active_weight_sum > 0, active_weight_sum, 1.0)
+        weighted_ret_sum = (window_masks * w_weights[:, None] * window_avg_rets).sum(axis=0)
+        blended_ret = np.where(active_weight_sum > 0, weighted_ret_sum / safe_weight, 0.0)
+    else:
+        active_count = window_masks.sum(axis=0)
+        active_ret_sum = (window_masks * window_avg_rets).sum(axis=0)
+        safe_count = np.where(active_count > 0, active_count, 1)
+        blended_ret = np.where(active_count > 0, active_ret_sum / safe_count, 0.0)
     
+    active_any = window_masks.sum(axis=0) > 0
     combined_curve = (np.cumprod(1.0 + blended_ret) - 1.0) * 100.0
-    total_days_in_market = int(np.sum(active_count > 0))
+    total_days_in_market = int(np.sum(active_any))
     
     # Per-strategy curves
     strategy_curves: dict[str, list[float]] = {}
@@ -2873,13 +2900,14 @@ def get_window_bar_data(
 
 def get_plan_bar_data(
     strategies: list[dict],
+    symbol_weights: dict[str, float] | None = None,
 ) -> dict:
     """
     Compute per-year combined plan return, B&H return, and per-stock
     contribution for stacked bar chart.
 
-    For each complete year, builds the same dynamic equal-weight equity
-    curves used by the plan backtest, then reports:
+    For each complete year, builds equity curves using the plan backtest
+    engine (with optional return-weighted allocation), then reports:
       - combined strategy return (%)
       - equal-weight B&H return (%)
       - per-stock individual strategy return (%)
@@ -2905,6 +2933,7 @@ def get_plan_bar_data(
     for year in available_years:
         curve = _build_equity_curve(
             ref_data, templates, day_ranges, year, window_dfs, unique_symbols,
+            symbol_weights,
         )
         if curve is None:
             continue
