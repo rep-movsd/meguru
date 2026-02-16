@@ -1012,6 +1012,37 @@ HTML_PAGE = """<!DOCTYPE html>
             border-radius: 4px;
         }
         
+        .plan-strategy-hide {
+            color: #aaa;
+            cursor: pointer;
+            padding: 2px 5px;
+            font-size: 10px;
+            border: 1px solid #555;
+            border-radius: 3px;
+            user-select: none;
+            white-space: nowrap;
+        }
+        
+        .plan-strategy-hide:hover {
+            background: rgba(136, 136, 136, 0.3);
+        }
+        
+        .plan-strategy-hide.is-hidden {
+            color: #666;
+            border-color: #444;
+        }
+        
+        .plan-strategy-item.strategy-hidden {
+            opacity: 0.4;
+        }
+        
+        .plan-strategy-actions {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        
         .plan-empty {
             padding: 20px;
             text-align: center;
@@ -1372,6 +1403,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 </div>
                 <div class="plan-chart-area">
                     <div class="plan-chart-controls">
+                        <div class="chart-view-toggle">
+                            <button id="plan-line-btn" class="chart-view-btn active">Line</button>
+                            <button id="plan-bar-btn" class="chart-view-btn">Bar</button>
+                        </div>
                         <label>Year:</label>
                         <select id="plan-year-select"></select>
                         <label>Capital:</label>
@@ -1380,10 +1415,6 @@ HTML_PAGE = """<!DOCTYPE html>
                             <option value="500000">₹5,00,000</option>
                             <option value="1000000">₹10,00,000</option>
                         </select>
-                        <div class="chart-view-toggle">
-                            <button id="plan-line-btn" class="chart-view-btn active">Line</button>
-                            <button id="plan-bar-btn" class="chart-view-btn">Bar</button>
-                        </div>
                     </div>
                     <div class="plan-legend" id="plan-legend"></div>
                     <div class="plan-chart" id="plan-chart">
@@ -1435,6 +1466,7 @@ HTML_PAGE = """<!DOCTYPE html>
             overlapData: null,
             planVisible: {},  // symbol -> boolean, for show/hide checkboxes
             lastPlanData: null,  // cached plan backtest data for checkbox toggling
+            hiddenStrategies: new Set(),  // indices of hidden strategies in plan
             windowBarMode: false,  // toggle for bar chart view in main window
             planBarMode: false,    // toggle for bar chart view in plan
             windowBarData: null,   // cached bar chart data
@@ -1649,10 +1681,8 @@ HTML_PAGE = """<!DOCTYPE html>
                 return;
             }
             
-            // Reset bar chart mode on new data load
-            state.windowBarMode = false;
+            // Clear cached bar data on new data load (will be re-fetched if needed)
             state.windowBarData = null;
-            setWindowViewMode(false);
             
             showSpinner();
             setStatus('Loading...');
@@ -1841,8 +1871,12 @@ HTML_PAGE = """<!DOCTYPE html>
                     opt.textContent = year;
                     chartYearSelect.appendChild(opt);
                 });
-                // Load backtest for the average
-                loadWindowBacktest();
+                // Load chart in current mode
+                if (state.windowBarMode) {
+                    loadWindowBarChart();
+                } else {
+                    loadWindowBacktest();
+                }
             }
         }
         
@@ -2167,7 +2201,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const height = container.height;
             if (containerWidth < 50 || height < 50) return;
 
-            const padding = { top: 30, right: 20, bottom: 40, left: 60 };
+            const padding = { top: 30, right: 20, bottom: 55, left: 60 };
             const n = years.length;
             const minPerGroup = 80;
             const minWidth = padding.left + padding.right + n * minPerGroup;
@@ -2236,6 +2270,10 @@ HTML_PAGE = """<!DOCTYPE html>
 
                 // Year label
                 labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 18) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
+                // Days in market label
+                if (d.days_in_market != null) {
+                    labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 32) + '" fill="#666" font-size="10" text-anchor="middle">' + d.days_in_market + '/' + d.total_trading_days + 'd</text>';
+                }
             });
 
             const svg = '<svg width="' + width + '" height="' + height + '">' +
@@ -2894,11 +2932,21 @@ HTML_PAGE = """<!DOCTYPE html>
             plan.splice(index, 1);
             savePlan(plan);
             renderPlanStrategies();
-            if (plan.length > 0) {
-                loadPlanBacktest();
+            const visible = getVisiblePlan();
+            if (visible.length > 0) {
+                if (state.planBarMode) {
+                    loadPlanBarChart();
+                } else {
+                    loadPlanBacktest();
+                }
+            } else if (plan.length > 0) {
+                planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">All strategies hidden</div>';
+                planMetrics.innerHTML = '';
+                planLegend.innerHTML = '';
             } else {
                 planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>';
                 planMetrics.innerHTML = '';
+                planLegend.innerHTML = '';
             }
         }
         
@@ -2907,7 +2955,7 @@ HTML_PAGE = """<!DOCTYPE html>
             renderPlanStrategies();
             populatePlanYears();
             planOverlay.classList.add('show');
-            if (loadPlan().length > 0) {
+            if (getVisiblePlan().length > 0) {
                 if (state.planBarMode) {
                     loadPlanBarChart();
                 } else {
@@ -2921,24 +2969,40 @@ HTML_PAGE = """<!DOCTYPE html>
             planOverlay.classList.remove('show');
         }
         
+        // Get plan filtered to only visible (non-hidden) strategies
+        function getVisiblePlan() {
+            const plan = loadPlan();
+            return plan.filter((_, idx) => !state.hiddenStrategies.has(idx));
+        }
+        
         // Render strategy list
         function renderPlanStrategies() {
             const plan = loadPlan();
-            planStrategyCount.textContent = `${plan.length} strateg${plan.length === 1 ? 'y' : 'ies'}`;
+            const visibleCount = plan.length - state.hiddenStrategies.size;
+            planStrategyCount.textContent = `${visibleCount}/${plan.length} strateg${plan.length === 1 ? 'y' : 'ies'}`;
             
             if (plan.length === 0) {
                 planStrategiesList.innerHTML = '<div class="plan-empty">No strategies added yet. Analyze a stock and click "Add to Plan".</div>';
                 return;
             }
             
+            // Clean up hidden indices that are out of range
+            state.hiddenStrategies.forEach(idx => {
+                if (idx >= plan.length) state.hiddenStrategies.delete(idx);
+            });
+            
             planStrategiesList.innerHTML = plan.map((s, idx) => {
+                const isHidden = state.hiddenStrategies.has(idx);
                 return `
-                    <div class="plan-strategy-item" data-index="${idx}">
+                    <div class="plan-strategy-item${isHidden ? ' strategy-hidden' : ''}" data-index="${idx}">
                         <div class="plan-strategy-info">
                             <div class="plan-strategy-symbol">${displaySymbol(s.symbol)}</div>
                             <div class="plan-strategy-params">${s.window_size}d window | ${s.threshold}% threshold</div>
                         </div>
-                        <div class="plan-strategy-remove" data-index="${idx}">✕</div>
+                        <div class="plan-strategy-actions">
+                            <div class="plan-strategy-hide${isHidden ? ' is-hidden' : ''}" data-index="${idx}" title="${isHidden ? 'Show in chart' : 'Hide from chart'}">${isHidden ? 'show' : 'hide'}</div>
+                            <div class="plan-strategy-remove" data-index="${idx}">\u2715</div>
+                        </div>
                     </div>
                 `;
             }).join('');
@@ -2947,7 +3011,42 @@ HTML_PAGE = """<!DOCTYPE html>
             planStrategiesList.querySelectorAll('.plan-strategy-remove').forEach(el => {
                 el.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    removeFromPlan(parseInt(el.dataset.index));
+                    const idx = parseInt(el.dataset.index);
+                    // Adjust hidden indices after removal
+                    const newHidden = new Set();
+                    state.hiddenStrategies.forEach(h => {
+                        if (h < idx) newHidden.add(h);
+                        else if (h > idx) newHidden.add(h - 1);
+                        // h === idx: removed, skip
+                    });
+                    state.hiddenStrategies = newHidden;
+                    removeFromPlan(idx);
+                });
+            });
+            
+            // Add hide/show handlers
+            planStrategiesList.querySelectorAll('.plan-strategy-hide').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const idx = parseInt(el.dataset.index);
+                    if (state.hiddenStrategies.has(idx)) {
+                        state.hiddenStrategies.delete(idx);
+                    } else {
+                        state.hiddenStrategies.add(idx);
+                    }
+                    renderPlanStrategies();
+                    const visiblePlan = getVisiblePlan();
+                    if (visiblePlan.length > 0) {
+                        if (state.planBarMode) {
+                            loadPlanBarChart();
+                        } else {
+                            loadPlanBacktest();
+                        }
+                    } else {
+                        planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">All strategies hidden</div>';
+                        planMetrics.innerHTML = '';
+                        planLegend.innerHTML = '';
+                    }
                 });
             });
         }
@@ -2970,7 +3069,7 @@ HTML_PAGE = """<!DOCTYPE html>
         
         // Load combined backtest for all strategies
         async function loadPlanBacktest() {
-            const plan = loadPlan();
+            const plan = getVisiblePlan();
             if (plan.length === 0) return;
             
             const yearVal = planYearSelect.value;
@@ -3344,7 +3443,7 @@ HTML_PAGE = """<!DOCTYPE html>
         });
         
         async function loadPlanBarChart() {
-            const plan = loadPlan();
+            const plan = getVisiblePlan();
             if (plan.length === 0) return;
             planChart.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">Loading...</div>';
             planMetrics.innerHTML = '';
@@ -3389,7 +3488,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const height = container.height - 40;
             if (containerWidth < 50 || height < 50) return;
 
-            const padding = { top: 30, right: 20, bottom: 40, left: 70 };
+            const padding = { top: 30, right: 20, bottom: 55, left: 70 };
             const n = years.length;
             const minPerGroup = 80;
             const minWidth = padding.left + padding.right + n * minPerGroup;
@@ -3506,7 +3605,11 @@ HTML_PAGE = """<!DOCTYPE html>
                 bars += '<text x="' + (bhX + barWidth / 2).toFixed(1) + '" y="' + bhLabelY.toFixed(1) + '" fill="#6699ff" font-size="12" font-weight="600" text-anchor="middle">' + d.bh_return.toFixed(0) + '%</text>';
 
                 // Year label
-                labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 20) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
+                labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 18) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
+                // Days in market label
+                if (d.days_in_market != null) {
+                    labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 32) + '" fill="#666" font-size="10" text-anchor="middle">' + d.days_in_market + '/' + d.total_trading_days + 'd</text>';
+                }
             });
 
             const svg = '<svg width="' + width + '" height="' + height + '">' +

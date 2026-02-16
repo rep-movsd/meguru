@@ -2864,6 +2864,8 @@ def get_window_bar_data(
             "year": year,
             "strategy_return": round(strategy_return, 2),
             "bh_return": round(bh_return, 2),
+            "days_in_market": int(in_market.sum()),
+            "total_trading_days": len(year_data),
         })
 
     return {"years": results}
@@ -2923,6 +2925,8 @@ def get_plan_bar_data(
             "combined_return": round(combined_return, 2),
             "bh_return": round(bh_return, 2),
             "stock_returns": stock_returns,
+            "days_in_market": curve["total_days"],
+            "total_trading_days": len(curve["dates"]),
         })
 
     return {"years": results, "symbols": unique_symbols}
