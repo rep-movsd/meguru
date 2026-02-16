@@ -1146,7 +1146,7 @@ HTML_PAGE = """<!DOCTYPE html>
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.6);
-            z-index: 2000;
+            z-index: 10003;
             display: none;
             align-items: center;
             justify-content: center;
@@ -2870,6 +2870,16 @@ HTML_PAGE = """<!DOCTYPE html>
         // Strategy colors for plan chart (up to 8)
         const STRATEGY_COLORS = ['#ff6b6b', '#4ecdc4', '#f7b731', '#a55eea', '#26de81', '#fd9644', '#45aaf2', '#fc5c65'];
         
+        // Deterministic symbol-to-color: hash the symbol name so the color
+        // stays stable regardless of plan order or removals.
+        function symbolToColor(sym) {
+            let h = 0;
+            for (let i = 0; i < sym.length; i++) {
+                h = ((h << 5) - h + sym.charCodeAt(i)) | 0;
+            }
+            return STRATEGY_COLORS[((h % STRATEGY_COLORS.length) + STRATEGY_COLORS.length) % STRATEGY_COLORS.length];
+        }
+        
         // Load plan from localStorage
         function loadPlan() {
             const saved = localStorage.getItem('meguru_plan');
@@ -3105,13 +3115,11 @@ HTML_PAGE = """<!DOCTYPE html>
             const { combined_curve, bh_curve, strategy_curves, trades_count, total_days, dates, trades } = data;
             const symbols = data.symbols || Object.keys(strategy_curves);
             
-            // Build symbol-to-color map based on plan order
-            const plan = loadPlan();
+            // Build symbol-to-color map (deterministic by name)
             const symbolColorMap = {};
-            plan.forEach((s, idx) => {
-                const sym = displaySymbol(s.symbol);
+            symbols.forEach(sym => {
                 if (!symbolColorMap[sym]) {
-                    symbolColorMap[sym] = STRATEGY_COLORS[idx % STRATEGY_COLORS.length];
+                    symbolColorMap[sym] = symbolToColor(sym);
                 }
             });
             
@@ -3473,13 +3481,12 @@ HTML_PAGE = """<!DOCTYPE html>
                 return;
             }
 
-            // Build symbol-to-color map
-            const plan = loadPlan();
+            // Build symbol-to-color map (deterministic by name)
             const symbolColorMap = {};
-            plan.forEach((s, idx) => {
-                const sym = displaySymbol(s.symbol);
+            const uniqueSymbols = data.symbols || [];
+            uniqueSymbols.forEach(sym => {
                 if (!symbolColorMap[sym]) {
-                    symbolColorMap[sym] = STRATEGY_COLORS[idx % STRATEGY_COLORS.length];
+                    symbolColorMap[sym] = symbolToColor(sym);
                 }
             });
 
