@@ -951,7 +951,8 @@ HTML_PAGE = """<!DOCTYPE html>
         
         .plan-strategies {
             width: 180px;
-            min-width: 140px;
+            min-width: 180px;
+            flex-shrink: 0;
             border-right: 1px solid #333;
             display: flex;
             flex-direction: column;
@@ -961,7 +962,7 @@ HTML_PAGE = """<!DOCTYPE html>
             padding: 6px 10px;
             border-bottom: 1px solid #333;
             font-size: 0.8em;
-            color: #888;
+            color: #bbb;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -996,7 +997,7 @@ HTML_PAGE = """<!DOCTYPE html>
         
         .plan-strategy-params {
             font-size: 10px;
-            color: #888;
+            color: #bbb;
             margin-top: 1px;
         }
         
@@ -1046,7 +1047,7 @@ HTML_PAGE = """<!DOCTYPE html>
         .plan-empty {
             padding: 20px;
             text-align: center;
-            color: #666;
+            color: #999;
         }
         
         .plan-chart-area {
