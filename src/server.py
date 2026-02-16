@@ -26,6 +26,12 @@ from backend import (
     get_window_backtest_data,
     get_window_backtest_average,
     get_plan_overlap,
+    get_window_bar_data,
+    get_plan_bar_data,
+    save_plan,
+    load_plan,
+    list_plans,
+    delete_plan,
     OFFSET_LIMITS,
 )
 
@@ -146,7 +152,7 @@ HTML_PAGE = """<!DOCTYPE html>
             background: #16213e;
             border: 1px solid #444;
             border-radius: 4px;
-            max-height: 200px;
+            max-height: 50vh;
             overflow-y: auto;
             z-index: 1000;
             display: none;
@@ -314,11 +320,12 @@ HTML_PAGE = """<!DOCTYPE html>
             flex: 1;
             min-height: 0;
             position: relative;
+            overflow-x: auto;
+            overflow-y: hidden;
         }
         
         .window-chart-container svg {
-            width: 100%;
-            height: 100%;
+            display: block;
         }
         
         .window-chart-metrics {
@@ -350,6 +357,33 @@ HTML_PAGE = """<!DOCTYPE html>
             font-size: 1em;
             cursor: pointer;
             min-width: 80px;
+        }
+        
+        .chart-view-toggle {
+            display: flex;
+            border: 1px solid #555;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .chart-view-btn {
+            background: #2d4a6f;
+            color: #ccc;
+            border: none;
+            padding: 3px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        
+        .chart-view-btn:first-child {
+            border-right: 1px solid #555;
+        }
+        
+        .chart-view-btn.active {
+            background: #00ff88;
+            color: #111;
+            font-weight: 600;
         }
         
         .chart-legend {
@@ -916,17 +950,17 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         
         .plan-strategies {
-            width: 25%;
-            min-width: 200px;
+            width: 180px;
+            min-width: 140px;
             border-right: 1px solid #333;
             display: flex;
             flex-direction: column;
         }
         
         .plan-strategies-header {
-            padding: 10px 16px;
+            padding: 6px 10px;
             border-bottom: 1px solid #333;
-            font-size: 0.9em;
+            font-size: 0.8em;
             color: #888;
             display: flex;
             justify-content: space-between;
@@ -942,7 +976,7 @@ HTML_PAGE = """<!DOCTYPE html>
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px 16px;
+            padding: 6px 10px;
             border-bottom: 1px solid #222;
         }
         
@@ -957,19 +991,20 @@ HTML_PAGE = """<!DOCTYPE html>
         .plan-strategy-symbol {
             font-weight: bold;
             color: #00d4ff;
+            font-size: 12px;
         }
         
         .plan-strategy-params {
-            font-size: 11px;
+            font-size: 10px;
             color: #888;
-            margin-top: 2px;
+            margin-top: 1px;
         }
         
         .plan-strategy-remove {
             color: #ff4466;
             cursor: pointer;
-            padding: 4px 8px;
-            font-size: 14px;
+            padding: 2px 6px;
+            font-size: 12px;
         }
         
         .plan-strategy-remove:hover {
@@ -1048,11 +1083,12 @@ HTML_PAGE = """<!DOCTYPE html>
             flex: 1;
             padding: 16px;
             min-height: 0;
+            overflow-x: auto;
+            overflow-y: hidden;
         }
         
         .plan-chart svg {
-            width: 100%;
-            height: 100%;
+            display: block;
         }
         
         .plan-metrics {
@@ -1071,7 +1107,82 @@ HTML_PAGE = """<!DOCTYPE html>
             display: flex;
             justify-content: flex-end;
             gap: 8px;
+            align-items: center;
         }
+        
+        /* Save/Load plan dialog */
+        .plan-dialog-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .plan-dialog-overlay.show { display: flex; }
+        .plan-dialog {
+            background: #1e1e1e;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 340px;
+            max-width: 460px;
+            max-height: 70vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .plan-dialog h4 {
+            margin: 0 0 12px 0;
+            color: #e0e0e0;
+            font-size: 15px;
+        }
+        .plan-dialog input[type="text"] {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background: #2a2a2a;
+            color: #e0e0e0;
+            font-size: 13px;
+            margin-bottom: 12px;
+            box-sizing: border-box;
+        }
+        .plan-dialog-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        .plan-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 12px 0;
+            overflow-y: auto;
+            max-height: 45vh;
+        }
+        .plan-list-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            margin-bottom: 4px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .plan-list-item:hover { background: #2a2a2a; }
+        .plan-list-item-info { flex: 1; }
+        .plan-list-item-name { color: #e0e0e0; font-size: 13px; font-weight: 600; }
+        .plan-list-item-meta { color: #888; font-size: 11px; margin-top: 2px; }
+        .plan-list-item-delete {
+            color: #888;
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 14px;
+            border-radius: 4px;
+        }
+        .plan-list-item-delete:hover { color: #e74c3c; background: #333; }
+        .plan-list-empty { color: #666; font-size: 13px; text-align: center; padding: 20px; }
         
         /* Add to plan button */
         .btn-add-plan {
@@ -1149,9 +1260,13 @@ HTML_PAGE = """<!DOCTYPE html>
                 </div>
                 <div id="chart-controls" style="display: none;">
                     <div class="chart-legend">
+                        <select id="chart-year-select" class="chart-year-select"></select>
+                        <div class="chart-view-toggle">
+                            <button id="chart-line-btn" class="chart-view-btn active">Line</button>
+                            <button id="chart-bar-btn" class="chart-view-btn">Bar</button>
+                        </div>
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #00ff88;"></div>Strategy</div>
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #6699ff;"></div>Buy & Hold</div>
-                        <select id="chart-year-select" class="chart-year-select"></select>
                         <button id="chart-add-plan-btn" class="btn-small btn-add-plan">+ Add to Plan</button>
                     </div>
                 </div>
@@ -1265,6 +1380,10 @@ HTML_PAGE = """<!DOCTYPE html>
                             <option value="500000">₹5,00,000</option>
                             <option value="1000000">₹10,00,000</option>
                         </select>
+                        <div class="chart-view-toggle">
+                            <button id="plan-line-btn" class="chart-view-btn active">Line</button>
+                            <button id="plan-bar-btn" class="chart-view-btn">Bar</button>
+                        </div>
                     </div>
                     <div class="plan-legend" id="plan-legend"></div>
                     <div class="plan-chart" id="plan-chart">
@@ -1277,7 +1396,32 @@ HTML_PAGE = """<!DOCTYPE html>
                 <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#999;margin-right:auto;cursor:pointer">
                     <input type="checkbox" id="plan-align-check"> Align windows (\u00b12 days)
                 </label>
+                <button id="plan-load-btn" class="btn-secondary">Load Plan</button>
+                <button id="plan-save-btn" class="btn-secondary">Save Plan</button>
                 <button id="plan-export-btn" class="btn-secondary">Export Trading Plan</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Save plan dialog -->
+    <div class="plan-dialog-overlay" id="save-plan-dialog">
+        <div class="plan-dialog">
+            <h4>Save Plan</h4>
+            <input type="text" id="save-plan-name" placeholder="Plan name..." maxlength="64" autocomplete="off">
+            <div class="plan-dialog-actions">
+                <button class="btn-secondary btn-small" id="save-plan-cancel">Cancel</button>
+                <button class="btn-small" id="save-plan-confirm">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Load plan dialog -->
+    <div class="plan-dialog-overlay" id="load-plan-dialog">
+        <div class="plan-dialog">
+            <h4>Load Plan</h4>
+            <ul class="plan-list" id="plan-list-container"></ul>
+            <div class="plan-dialog-actions">
+                <button class="btn-secondary btn-small" id="load-plan-cancel">Close</button>
             </div>
         </div>
     </div>
@@ -1291,6 +1435,10 @@ HTML_PAGE = """<!DOCTYPE html>
             overlapData: null,
             planVisible: {},  // symbol -> boolean, for show/hide checkboxes
             lastPlanData: null,  // cached plan backtest data for checkbox toggling
+            windowBarMode: false,  // toggle for bar chart view in main window
+            planBarMode: false,    // toggle for bar chart view in plan
+            windowBarData: null,   // cached bar chart data
+            planBarData: null,     // cached plan bar chart data
         };
         
         // Elements
@@ -1500,6 +1648,11 @@ HTML_PAGE = """<!DOCTYPE html>
                 setStatus('Enter a symbol', true);
                 return;
             }
+            
+            // Reset bar chart mode on new data load
+            state.windowBarMode = false;
+            state.windowBarData = null;
+            setWindowViewMode(false);
             
             showSpinner();
             setStatus('Loading...');
@@ -1954,6 +2107,159 @@ HTML_PAGE = """<!DOCTYPE html>
                 </div>
                 ` : ''}
             `;
+        }
+        
+        // Bar/Line toggle for window chart
+        const chartLineBtn = document.getElementById('chart-line-btn');
+        const chartBarBtn = document.getElementById('chart-bar-btn');
+        
+        function setWindowViewMode(barMode) {
+            state.windowBarMode = barMode;
+            chartLineBtn.classList.toggle('active', !barMode);
+            chartBarBtn.classList.toggle('active', barMode);
+            chartYearSelect.style.display = barMode ? 'none' : '';
+        }
+        
+        chartBarBtn.addEventListener('click', async () => {
+            if (state.windowBarMode) return;
+            setWindowViewMode(true);
+            await loadWindowBarChart();
+        });
+        
+        chartLineBtn.addEventListener('click', () => {
+            if (!state.windowBarMode) return;
+            setWindowViewMode(false);
+            loadWindowBacktest();
+        });
+        
+        async function loadWindowBarChart() {
+            if (!state.symbol) return;
+            windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">Loading...</div>';
+            windowChartMetrics.innerHTML = '';
+            try {
+                const params = new URLSearchParams({
+                    symbol: state.symbol,
+                    window_size: state.windowSize,
+                    threshold: state.threshold,
+                });
+                const res = await fetch('/api/windows/bar?' + params);
+                const data = await res.json();
+                if (data.error) {
+                    windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">' + data.error + '</div>';
+                    return;
+                }
+                state.windowBarData = data;
+                renderWindowBarChart(data);
+            } catch (err) {
+                windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">Error: ' + err.message + '</div>';
+            }
+        }
+        
+        function renderWindowBarChart(data) {
+            const years = data.years;
+            if (!years || years.length === 0) {
+                windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">No data</div>';
+                return;
+            }
+
+            const container = windowChart.getBoundingClientRect();
+            const containerWidth = container.width;
+            const height = container.height;
+            if (containerWidth < 50 || height < 50) return;
+
+            const padding = { top: 30, right: 20, bottom: 40, left: 60 };
+            const n = years.length;
+            const minPerGroup = 80;
+            const minWidth = padding.left + padding.right + n * minPerGroup;
+            const width = Math.max(containerWidth, minWidth);
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+
+            // Find Y range — tight fit to data with just enough room for labels.
+            let dataMin = Infinity, dataMax = -Infinity;
+            years.forEach(d => {
+                dataMin = Math.min(dataMin, d.strategy_return, d.bh_return);
+                dataMax = Math.max(dataMax, d.strategy_return, d.bh_return);
+            });
+            // Always include 0 so bars have a baseline
+            let yMin = Math.min(dataMin, 0);
+            let yMax = Math.max(dataMax, 0);
+            // Fixed padding: ~15px worth of data-space for value labels
+            const pxPerUnit = chartHeight / ((yMax - yMin) || 1);
+            const labelPad = pxPerUnit > 0 ? 15 / pxPerUnit : 1;
+            yMax += labelPad;
+            if (yMin < 0) yMin -= labelPad * 0.5;
+
+            const groupWidth = chartWidth / n;
+            const barWidth = Math.min(groupWidth * 0.38, 50);
+            const gap = barWidth * 0.2;
+
+            const yScale = (v) => padding.top + chartHeight - ((v - yMin) / (yMax - yMin)) * chartHeight;
+            const zeroY = yScale(0);
+
+            // Y ticks
+            const yTicks = [];
+            const absRange = yMax - yMin;
+            let yStep;
+            if (absRange >= 200) yStep = 50;
+            else if (absRange >= 100) yStep = 25;
+            else if (absRange >= 50) yStep = 10;
+            else if (absRange >= 20) yStep = 5;
+            else if (absRange >= 10) yStep = 2;
+            else yStep = 1;
+            for (let v = Math.ceil(yMin / yStep) * yStep; v <= yMax; v += yStep) {
+                yTicks.push(v);
+            }
+
+            let bars = '';
+            let labels = '';
+            years.forEach((d, i) => {
+                const cx = padding.left + (i + 0.5) * groupWidth;
+                const bhX = cx - barWidth - gap / 2;
+                const stratX = cx + gap / 2;
+
+                // B&H bar
+                const bhTop = yScale(Math.max(d.bh_return, 0));
+                const bhBot = yScale(Math.min(d.bh_return, 0));
+                bars += '<rect x="' + bhX.toFixed(1) + '" y="' + bhTop.toFixed(1) + '" width="' + barWidth.toFixed(1) + '" height="' + Math.max(bhBot - bhTop, 1).toFixed(1) + '" fill="#6699ff" opacity="0.7" rx="1"/>';
+
+                // Strategy bar
+                const sTop = yScale(Math.max(d.strategy_return, 0));
+                const sBot = yScale(Math.min(d.strategy_return, 0));
+                bars += '<rect x="' + stratX.toFixed(1) + '" y="' + sTop.toFixed(1) + '" width="' + barWidth.toFixed(1) + '" height="' + Math.max(sBot - sTop, 1).toFixed(1) + '" fill="#00ff88" opacity="0.8" rx="1"/>';
+
+                // Value labels on bars
+                const bhLabelY = d.bh_return >= 0 ? bhTop - 4 : bhBot + 14;
+                const sLabelY = d.strategy_return >= 0 ? sTop - 4 : sBot + 14;
+                bars += '<text x="' + (bhX + barWidth / 2).toFixed(1) + '" y="' + bhLabelY.toFixed(1) + '" fill="#6699ff" font-size="12" font-weight="600" text-anchor="middle">' + d.bh_return.toFixed(0) + '%</text>';
+                bars += '<text x="' + (stratX + barWidth / 2).toFixed(1) + '" y="' + sLabelY.toFixed(1) + '" fill="#00ff88" font-size="12" font-weight="600" text-anchor="middle">' + d.strategy_return.toFixed(0) + '%</text>';
+
+                // Year label
+                labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 18) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
+            });
+
+            const svg = '<svg width="' + width + '" height="' + height + '">' +
+                yTicks.map(v =>
+                    '<line x1="' + padding.left + '" y1="' + yScale(v).toFixed(1) + '" x2="' + (width - padding.right) + '" y2="' + yScale(v).toFixed(1) + '" stroke="' + (v === 0 ? '#666' : '#333') + '" stroke-width="' + (v === 0 ? 2 : 1) + '"/>'
+                ).join('') +
+                yTicks.map(v =>
+                    '<text x="' + (padding.left - 8) + '" y="' + (yScale(v) + 4).toFixed(1) + '" fill="#888" font-size="11" text-anchor="end">' + v.toFixed(0) + '%</text>'
+                ).join('') +
+                '<line x1="' + padding.left + '" y1="' + zeroY.toFixed(1) + '" x2="' + (width - padding.right) + '" y2="' + zeroY.toFixed(1) + '" stroke="#666" stroke-width="1.5"/>' +
+                bars + labels +
+                '</svg>';
+
+            windowChart.innerHTML = svg;
+
+            // Metrics: averages
+            const avgStrategy = years.reduce((s, d) => s + d.strategy_return, 0) / n;
+            const avgBH = years.reduce((s, d) => s + d.bh_return, 0) / n;
+            const winYears = years.filter(d => d.strategy_return > d.bh_return).length;
+
+            windowChartMetrics.innerHTML =
+                '<div class="metric"><span class="label">Avg Strategy:</span><span class="' + (avgStrategy >= 0 ? 'positive' : 'negative') + '">' + avgStrategy.toFixed(1) + '%</span></div>' +
+                '<div class="metric"><span class="label">Avg B&H:</span><span class="' + (avgBH >= 0 ? 'positive' : 'negative') + '">' + avgBH.toFixed(1) + '%</span></div>' +
+                '<div class="metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>';
         }
         
         function renderTradesTable(data) {
@@ -2602,7 +2908,11 @@ HTML_PAGE = """<!DOCTYPE html>
             populatePlanYears();
             planOverlay.classList.add('show');
             if (loadPlan().length > 0) {
-                loadPlanBacktest();
+                if (state.planBarMode) {
+                    loadPlanBarChart();
+                } else {
+                    loadPlanBacktest();
+                }
             }
         }
         
@@ -2648,7 +2958,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const years = window.backtestYears || [];
             if (years.length === 0) {
                 const currentYear = new Date().getFullYear();
-                for (let y = currentYear - 1; y >= currentYear - 10; y--) {
+                for (let y = currentYear - 1; y >= currentYear - 20; y--) {
                     years.push(y);
                 }
             }
@@ -3006,6 +3316,237 @@ HTML_PAGE = """<!DOCTYPE html>
             `;
         }
         
+        // Plan bar/line toggle
+        const planLineBtn = document.getElementById('plan-line-btn');
+        const planBarBtn = document.getElementById('plan-bar-btn');
+        
+        function setPlanViewMode(barMode) {
+            state.planBarMode = barMode;
+            planLineBtn.classList.toggle('active', !barMode);
+            planBarBtn.classList.toggle('active', barMode);
+            planYearSelect.style.display = barMode ? 'none' : '';
+            planCapitalSelect.style.display = barMode ? 'none' : '';
+            // Also hide the labels
+            planCapitalSelect.previousElementSibling.style.display = barMode ? 'none' : '';
+            planYearSelect.previousElementSibling.style.display = barMode ? 'none' : '';
+        }
+        
+        planBarBtn.addEventListener('click', async () => {
+            if (state.planBarMode) return;
+            setPlanViewMode(true);
+            await loadPlanBarChart();
+        });
+        
+        planLineBtn.addEventListener('click', () => {
+            if (!state.planBarMode) return;
+            setPlanViewMode(false);
+            loadPlanBacktest();
+        });
+        
+        async function loadPlanBarChart() {
+            const plan = loadPlan();
+            if (plan.length === 0) return;
+            planChart.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">Loading...</div>';
+            planMetrics.innerHTML = '';
+            planLegend.innerHTML = '';
+            try {
+                const params = new URLSearchParams({
+                    strategies: JSON.stringify(plan),
+                });
+                const res = await fetch('/api/plan/bar?' + params);
+                const data = await res.json();
+                if (data.error) {
+                    planChart.innerHTML = '<div style="color:#ff4466;padding:20px;">' + data.error + '</div>';
+                    return;
+                }
+                state.planBarData = data;
+                renderPlanBarChart(data);
+            } catch (err) {
+                planChart.innerHTML = '<div style="color:#ff4466;padding:20px;">Error: ' + err.message + '</div>';
+            }
+        }
+        
+        function renderPlanBarChart(data) {
+            const years = data.years;
+            const symbols = data.symbols || [];
+            if (!years || years.length === 0) {
+                planChart.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">No data</div>';
+                return;
+            }
+
+            // Build symbol-to-color map
+            const plan = loadPlan();
+            const symbolColorMap = {};
+            plan.forEach((s, idx) => {
+                const sym = displaySymbol(s.symbol);
+                if (!symbolColorMap[sym]) {
+                    symbolColorMap[sym] = STRATEGY_COLORS[idx % STRATEGY_COLORS.length];
+                }
+            });
+
+            const container = planChart.getBoundingClientRect();
+            const containerWidth = container.width - 40;
+            const height = container.height - 40;
+            if (containerWidth < 50 || height < 50) return;
+
+            const padding = { top: 30, right: 20, bottom: 40, left: 70 };
+            const n = years.length;
+            const minPerGroup = 80;
+            const minWidth = padding.left + padding.right + n * minPerGroup;
+            const width = Math.max(containerWidth, minWidth);
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+
+            // Find Y range — tight fit to data with just enough room for labels.
+            let dataMin = Infinity, dataMax = -Infinity;
+            years.forEach(d => {
+                dataMin = Math.min(dataMin, d.combined_return, d.bh_return);
+                dataMax = Math.max(dataMax, d.combined_return, d.bh_return);
+            });
+            let yMin = Math.min(dataMin, 0);
+            let yMax = Math.max(dataMax, 0);
+            const pxPerUnit = chartHeight / ((yMax - yMin) || 1);
+            const labelPad = pxPerUnit > 0 ? 15 / pxPerUnit : 1;
+            yMax += labelPad;
+            if (yMin < 0) yMin -= labelPad * 0.5;
+
+            const groupWidth = chartWidth / n;
+            const barWidth = Math.min(groupWidth * 0.38, 50);
+            const gap = barWidth * 0.2;
+
+            const yScale = (v) => padding.top + chartHeight - ((v - yMin) / (yMax - yMin)) * chartHeight;
+            const zeroY = yScale(0);
+
+            // Y ticks
+            const yTicks = [];
+            const absRange = yMax - yMin;
+            let yStep;
+            if (absRange >= 200) yStep = 50;
+            else if (absRange >= 100) yStep = 25;
+            else if (absRange >= 50) yStep = 10;
+            else if (absRange >= 20) yStep = 5;
+            else if (absRange >= 10) yStep = 2;
+            else yStep = 1;
+            for (let v = Math.ceil(yMin / yStep) * yStep; v <= yMax; v += yStep) {
+                yTicks.push(v);
+            }
+
+            let bars = '';
+            let labels = '';
+            years.forEach((d, i) => {
+                const cx = padding.left + (i + 0.5) * groupWidth;
+                const bhX = cx - barWidth - gap / 2;
+                const stratX = cx + gap / 2;
+
+                // B&H bar (solid blue)
+                const bhTop = yScale(Math.max(d.bh_return, 0));
+                const bhBot = yScale(Math.min(d.bh_return, 0));
+                bars += '<rect x="' + bhX.toFixed(1) + '" y="' + bhTop.toFixed(1) + '" width="' + barWidth.toFixed(1) + '" height="' + Math.max(bhBot - bhTop, 1).toFixed(1) + '" fill="#6699ff" opacity="0.7" rx="1"/>';
+
+                // Strategy stacked bar: proportionally split combined_return by stock
+                if (d.stock_returns && symbols.length > 0) {
+                    const totalReturn = d.combined_return;
+                    // Get each stock's raw individual return
+                    const rawReturns = symbols.map(sym => ({ sym, val: d.stock_returns[sym] || 0 }));
+                    // Compute proportional contributions that sum exactly to combined_return
+                    const posTotal = rawReturns.reduce((s, r) => s + Math.max(r.val, 0), 0);
+                    const negTotal = rawReturns.reduce((s, r) => s + Math.min(r.val, 0), 0);
+
+                    const contribs = rawReturns.map(r => {
+                        if (totalReturn >= 0) {
+                            // Positive combined: distribute proportionally by positive returns
+                            return { sym: r.sym, contrib: posTotal > 0 ? (Math.max(r.val, 0) / posTotal) * totalReturn : totalReturn / symbols.length };
+                        } else {
+                            // Negative combined: distribute proportionally by negative returns
+                            return { sym: r.sym, contrib: negTotal < 0 ? (Math.min(r.val, 0) / negTotal) * totalReturn : totalReturn / symbols.length };
+                        }
+                    });
+
+                    const posContribs = contribs.filter(c => c.contrib >= 0);
+                    const negContribs = contribs.filter(c => c.contrib < 0);
+
+                    // Draw positive stack (bottom to top from zero line)
+                    let posAcc = 0;
+                    posContribs.forEach(({ sym, contrib }) => {
+                        const segBot = posAcc;
+                        const segTop = posAcc + contrib;
+                        const y1 = yScale(segTop);
+                        const y2 = yScale(segBot);
+                        const segH = Math.max(y2 - y1, 0.5);
+                        const color = symbolColorMap[sym] || '#888';
+                        bars += '<rect x="' + stratX.toFixed(1) + '" y="' + y1.toFixed(1) + '" width="' + barWidth.toFixed(1) + '" height="' + segH.toFixed(1) + '" fill="' + color + '" opacity="0.85" rx="0"/>';
+                        posAcc = segTop;
+                    });
+
+                    // Draw negative stack (top to bottom from zero line)
+                    let negAcc = 0;
+                    negContribs.forEach(({ sym, contrib }) => {
+                        const segTop = negAcc;
+                        const segBot = negAcc + contrib;
+                        const y1 = yScale(segTop);
+                        const y2 = yScale(segBot);
+                        const segH = Math.max(y2 - y1, 0.5);
+                        const color = symbolColorMap[sym] || '#888';
+                        bars += '<rect x="' + stratX.toFixed(1) + '" y="' + y1.toFixed(1) + '" width="' + barWidth.toFixed(1) + '" height="' + segH.toFixed(1) + '" fill="' + color + '" opacity="0.85" rx="0"/>';
+                        negAcc = segBot;
+                    });
+
+                    // Combined return label above/below the stacked bar
+                    const labelY = totalReturn >= 0 ? yScale(posAcc) - 4 : yScale(negAcc) + 14;
+                    bars += '<text x="' + (stratX + barWidth / 2).toFixed(1) + '" y="' + labelY.toFixed(1) + '" fill="#ccc" font-size="12" font-weight="600" text-anchor="middle">' + totalReturn.toFixed(0) + '%</text>';
+                } else {
+                    // Fallback: single bar for combined return
+                    const sTop = yScale(Math.max(d.combined_return, 0));
+                    const sBot = yScale(Math.min(d.combined_return, 0));
+                    bars += '<rect x="' + stratX.toFixed(1) + '" y="' + sTop.toFixed(1) + '" width="' + barWidth.toFixed(1) + '" height="' + Math.max(sBot - sTop, 1).toFixed(1) + '" fill="#ffffff" opacity="0.8" rx="1"/>';
+                }
+
+                // B&H value label
+                const bhLabelY = d.bh_return >= 0 ? bhTop - 4 : bhBot + 14;
+                bars += '<text x="' + (bhX + barWidth / 2).toFixed(1) + '" y="' + bhLabelY.toFixed(1) + '" fill="#6699ff" font-size="12" font-weight="600" text-anchor="middle">' + d.bh_return.toFixed(0) + '%</text>';
+
+                // Year label
+                labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 20) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
+            });
+
+            const svg = '<svg width="' + width + '" height="' + height + '">' +
+                yTicks.map(v =>
+                    '<line x1="' + padding.left + '" y1="' + yScale(v).toFixed(1) + '" x2="' + (width - padding.right) + '" y2="' + yScale(v).toFixed(1) + '" stroke="' + (v === 0 ? '#666' : '#333') + '" stroke-width="' + (v === 0 ? 2 : 1) + '"/>'
+                ).join('') +
+                yTicks.map(v =>
+                    '<text x="' + (padding.left - 10) + '" y="' + (yScale(v) + 4).toFixed(1) + '" fill="#888" font-size="11" text-anchor="end">' + v.toFixed(0) + '%</text>'
+                ).join('') +
+                bars + labels +
+                '</svg>';
+
+            planChart.innerHTML = svg;
+
+            // Build legend showing per-stock colors and avg returns
+            let legendHTML = '';
+            symbols.forEach(sym => {
+                const color = symbolColorMap[sym] || '#888';
+                const avgReturn = years.reduce((s, d) => s + (d.stock_returns[sym] || 0), 0) / n;
+                const valColor = avgReturn >= 0 ? '#44ff88' : '#ff4466';
+                legendHTML += '<div class="plan-legend-item" style="pointer-events:none"><span class="plan-legend-dot" style="background:' + color + '"></span><span>' + sym + '</span><span style="color:' + valColor + ';font-weight:600">avg ' + avgReturn.toFixed(1) + '%</span></div>';
+            });
+            // Combined
+            const avgCombined = years.reduce((s, d) => s + d.combined_return, 0) / n;
+            const combinedColor = avgCombined >= 0 ? '#44ff88' : '#ff4466';
+            legendHTML += '<div class="plan-legend-item" style="pointer-events:none"><span class="plan-legend-line" style="background:#ffffff"></span><span>Combined</span><span style="color:' + combinedColor + ';font-weight:600">avg ' + avgCombined.toFixed(1) + '%</span></div>';
+            // B&H
+            const avgBH = years.reduce((s, d) => s + d.bh_return, 0) / n;
+            const bhColor = avgBH >= 0 ? '#44ff88' : '#ff4466';
+            legendHTML += '<div class="plan-legend-item" style="pointer-events:none"><span class="plan-legend-line" style="background:#6699ff;border-top:2px dashed #6699ff;height:0"></span><span>B&H</span><span style="color:' + bhColor + ';font-weight:600">avg ' + avgBH.toFixed(1) + '%</span></div>';
+            planLegend.innerHTML = legendHTML;
+
+            // Metrics
+            const winYears = years.filter(d => d.combined_return > d.bh_return).length;
+            planMetrics.innerHTML =
+                '<div class="backtest-metric"><span class="label">Avg Plan:</span><span class="' + (avgCombined >= 0 ? 'positive' : 'negative') + '">' + avgCombined.toFixed(1) + '%</span></div>' +
+                '<div class="backtest-metric"><span class="label">Avg B&H:</span><span class="' + (avgBH >= 0 ? 'positive' : 'negative') + '">' + avgBH.toFixed(1) + '%</span></div>' +
+                '<div class="backtest-metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>';
+        }
+        
         // Export unified trading calendar
         async function exportPlanCalendar() {
             const plan = loadPlan();
@@ -3022,7 +3563,159 @@ HTML_PAGE = """<!DOCTYPE html>
             window.location.href = `/api/plan/export?${params}`;
         }
         
+        // =====================
+        // Plan Save / Load
+        // =====================
+        const saveDialog = document.getElementById('save-plan-dialog');
+        const loadDialog = document.getElementById('load-plan-dialog');
+        const saveNameInput = document.getElementById('save-plan-name');
+        const planListContainer = document.getElementById('plan-list-container');
+        
+        function openSaveDialog() {
+            const plan = loadPlan();
+            if (plan.length === 0) {
+                setStatus('No strategies to save', true);
+                return;
+            }
+            saveNameInput.value = '';
+            saveDialog.classList.add('show');
+            setTimeout(() => saveNameInput.focus(), 50);
+        }
+        
+        function closeSaveDialog() {
+            saveDialog.classList.remove('show');
+        }
+        
+        async function confirmSavePlan() {
+            const name = saveNameInput.value.trim();
+            if (!name) {
+                saveNameInput.focus();
+                return;
+            }
+            const plan = loadPlan();
+            try {
+                const res = await fetch('/api/plans/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name, strategies: plan})
+                });
+                const data = await res.json();
+                if (data.error) {
+                    setStatus(data.error, true);
+                } else {
+                    setStatus(`Plan "${name}" saved`);
+                    closeSaveDialog();
+                }
+            } catch (e) {
+                setStatus('Failed to save plan', true);
+            }
+        }
+        
+        async function openLoadDialog() {
+            loadDialog.classList.add('show');
+            planListContainer.innerHTML = '<div class="plan-list-empty">Loading...</div>';
+            try {
+                const res = await fetch('/api/plans');
+                const plans = await res.json();
+                if (plans.length === 0) {
+                    planListContainer.innerHTML = '<div class="plan-list-empty">No saved plans</div>';
+                    return;
+                }
+                planListContainer.innerHTML = plans.map(p => `
+                    <li class="plan-list-item" data-name="${p.name}">
+                        <div class="plan-list-item-info">
+                            <div class="plan-list-item-name">${p.name}</div>
+                            <div class="plan-list-item-meta">${p.strategies} strateg${p.strategies === 1 ? 'y' : 'ies'} &middot; ${p.saved_at || ''}</div>
+                        </div>
+                        <div class="plan-list-item-delete" data-name="${p.name}" title="Delete">&times;</div>
+                    </li>
+                `).join('');
+                
+                // Click to load
+                planListContainer.querySelectorAll('.plan-list-item-info').forEach(el => {
+                    el.addEventListener('click', () => {
+                        const name = el.closest('.plan-list-item').dataset.name;
+                        doLoadPlan(name);
+                    });
+                });
+                // Click to delete
+                planListContainer.querySelectorAll('.plan-list-item-delete').forEach(el => {
+                    el.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        doDeletePlan(el.dataset.name);
+                    });
+                });
+            } catch (e) {
+                planListContainer.innerHTML = '<div class="plan-list-empty">Failed to load plans</div>';
+            }
+        }
+        
+        function closeLoadDialog() {
+            loadDialog.classList.remove('show');
+        }
+        
+        async function doLoadPlan(name) {
+            try {
+                const res = await fetch(`/api/plans/load?name=${encodeURIComponent(name)}`);
+                const data = await res.json();
+                if (data.error) {
+                    setStatus(data.error, true);
+                    return;
+                }
+                savePlan(data.strategies);
+                renderPlanStrategies();
+                closeLoadDialog();
+                setStatus(`Loaded plan "${name}"`);
+                if (data.strategies.length > 0) {
+                    loadPlanBacktest();
+                } else {
+                    planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>';
+                    planMetrics.innerHTML = '';
+                }
+            } catch (e) {
+                setStatus('Failed to load plan', true);
+            }
+        }
+        
+        async function doDeletePlan(name) {
+            try {
+                const res = await fetch('/api/plans/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name})
+                });
+                const data = await res.json();
+                if (data.error) {
+                    setStatus(data.error, true);
+                } else {
+                    // Refresh the list
+                    openLoadDialog();
+                }
+            } catch (e) {
+                setStatus('Failed to delete plan', true);
+            }
+        }
+        
+        // Save dialog events
+        document.getElementById('save-plan-cancel').addEventListener('click', closeSaveDialog);
+        document.getElementById('save-plan-confirm').addEventListener('click', confirmSavePlan);
+        saveNameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') confirmSavePlan();
+            if (e.key === 'Escape') closeSaveDialog();
+        });
+        saveDialog.addEventListener('click', (e) => {
+            if (e.target === saveDialog) closeSaveDialog();
+        });
+        
+        // Load dialog events
+        document.getElementById('load-plan-cancel').addEventListener('click', closeLoadDialog);
+        loadDialog.addEventListener('click', (e) => {
+            if (e.target === loadDialog) closeLoadDialog();
+        });
+        
         // Event listeners for plan
+        document.getElementById('plan-save-btn').addEventListener('click', openSaveDialog);
+        document.getElementById('plan-load-btn').addEventListener('click', openLoadDialog);
         showPlanBtn.addEventListener('click', openPlanOverlay);
         document.getElementById('plan-close-btn').addEventListener('click', closePlanOverlay);
         document.getElementById('plan-clear-btn').addEventListener('click', () => {
@@ -3379,6 +4072,104 @@ class MeguruHandler(BaseHTTPRequestHandler):
                         symbols[0], window_size, threshold, int(year_str),
                     )
                 self.send_json(result)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        elif path == "/api/windows/bar":
+            params = self.parse_params()
+            try:
+                symbols = parse_symbols(params.get("symbol", ""))
+                window_size = int(params.get("window_size", 30))
+                threshold = int(params.get("threshold", 50))
+                
+                if not symbols:
+                    self.send_json({"error": "No symbol provided"}, 400)
+                    return
+                
+                result = get_window_bar_data(symbols[0], window_size, threshold)
+                self.send_json(result)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        elif path == "/api/plan/bar":
+            params = self.parse_params()
+            try:
+                strategies_json = params.get("strategies", "[]")
+                strategies = json.loads(strategies_json)
+                
+                if not strategies:
+                    self.send_json({"error": "No strategies provided"}, 400)
+                    return
+                
+                result = get_plan_bar_data(strategies)
+                self.send_json(result)
+            except json.JSONDecodeError:
+                self.send_json({"error": "Invalid strategies JSON"}, 400)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        elif path == "/api/plans":
+            try:
+                self.send_json(list_plans())
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        elif path == "/api/plans/load":
+            params = self.parse_params()
+            try:
+                name = params.get("name", "")
+                if not name:
+                    self.send_json({"error": "No plan name provided"}, 400)
+                    return
+                data = load_plan(name)
+                self.send_json(data)
+            except FileNotFoundError as e:
+                self.send_json({"error": str(e)}, 404)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_POST(self) -> None:
+        """Handle POST requests."""
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        
+        # Read JSON body
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length) if content_length else b""
+        
+        if path == "/api/plans/save":
+            try:
+                data = json.loads(body) if body else {}
+                name = data.get("name", "")
+                strategies = data.get("strategies", [])
+                if not name:
+                    self.send_json({"error": "No plan name provided"}, 400)
+                    return
+                if not strategies:
+                    self.send_json({"error": "No strategies to save"}, 400)
+                    return
+                result = save_plan(name, strategies)
+                self.send_json(result)
+            except ValueError as e:
+                self.send_json({"error": str(e)}, 400)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        elif path == "/api/plans/delete":
+            try:
+                data = json.loads(body) if body else {}
+                name = data.get("name", "")
+                if not name:
+                    self.send_json({"error": "No plan name provided"}, 400)
+                    return
+                result = delete_plan(name)
+                self.send_json(result)
+            except FileNotFoundError as e:
+                self.send_json({"error": str(e)}, 404)
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
         

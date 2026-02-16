@@ -671,3 +671,535 @@ class TestGetPeriodDateLabel:
         result = get_period_date_label("Week 3", "weekly", 3, is_entry=False)
         # Week 3 starts Jan 15, +6+3 = +9 days = Jan 24
         assert result == "Jan-24"
+
+
+# ============================================================================
+# Tests: Plan Save / Load
+# ============================================================================
+
+
+class TestPlanCRUD:
+    """Tests for save_plan, load_plan, list_plans, delete_plan."""
+
+    @pytest.fixture(autouse=True)
+    def _tmp_plans_dir(self, tmp_path, monkeypatch):
+        """Redirect PLANS_DIR to a temp directory for each test."""
+        import backend
+        monkeypatch.setattr(backend, "PLANS_DIR", tmp_path / "plans")
+
+    def test_save_and_load(self):
+        from backend import save_plan, load_plan
+        strategies = [{"symbol": "VBL.NS", "window_size": 60, "threshold": 60}]
+        result = save_plan("my plan", strategies)
+        assert result["ok"] is True
+        data = load_plan("my plan")
+        assert data["name"] == "my plan"
+        assert data["strategies"] == strategies
+        assert "saved_at" in data
+
+    def test_list_plans(self):
+        from backend import save_plan, list_plans
+        save_plan("alpha", [{"symbol": "A.NS", "window_size": 30, "threshold": 50}])
+        save_plan("beta", [
+            {"symbol": "B.NS", "window_size": 7, "threshold": 75},
+            {"symbol": "C.NS", "window_size": 60, "threshold": 60},
+        ])
+        plans = list_plans()
+        assert len(plans) == 2
+        names = {p["name"] for p in plans}
+        assert names == {"alpha", "beta"}
+        beta = next(p for p in plans if p["name"] == "beta")
+        assert beta["strategies"] == 2
+
+    def test_delete_plan(self):
+        from backend import save_plan, delete_plan, list_plans
+        save_plan("to-delete", [{"symbol": "X.NS", "window_size": 30, "threshold": 50}])
+        assert len(list_plans()) == 1
+        result = delete_plan("to-delete")
+        assert result["ok"] is True
+        assert len(list_plans()) == 0
+
+    def test_load_nonexistent_raises(self):
+        from backend import load_plan
+        with pytest.raises(FileNotFoundError):
+            load_plan("no-such-plan")
+
+    def test_delete_nonexistent_raises(self):
+        from backend import delete_plan
+        with pytest.raises(FileNotFoundError):
+            delete_plan("no-such-plan")
+
+    def test_invalid_name_raises(self):
+        from backend import save_plan
+        with pytest.raises(ValueError):
+            save_plan("bad/name", [])
+        with pytest.raises(ValueError):
+            save_plan("", [])
+
+    def test_overwrite_existing(self):
+        from backend import save_plan, load_plan
+        save_plan("ow", [{"symbol": "A.NS", "window_size": 30, "threshold": 50}])
+        save_plan("ow", [{"symbol": "B.NS", "window_size": 60, "threshold": 70}])
+        data = load_plan("ow")
+        assert data["strategies"][0]["symbol"] == "B.NS"
+
+    def test_empty_dir_returns_empty_list(self):
+        from backend import list_plans
+        assert list_plans() == []
+
+
+# ============================================================================
+# Tests: get_window_bar_data
+# ============================================================================
+
+
+class TestGetWindowBarData:
+    """Tests for get_window_bar_data function."""
+
+    @pytest.fixture
+    def mock_ohlc_df(self) -> pd.DataFrame:
+        """Create a 3-year OHLC DataFrame (2021-2023) with predictable returns."""
+        dates = pd.bdate_range("2021-01-01", "2023-12-31")
+        np.random.seed(123)
+        n = len(dates)
+        # Start at 100, gentle uptrend
+        close_prices = 100 + np.arange(n) * 0.05 + np.random.randn(n) * 0.2
+        open_prices = close_prices - 0.1
+        high_prices = close_prices + 0.5
+        low_prices = close_prices - 0.5
+        return pd.DataFrame(
+            {
+                "Open": open_prices,
+                "High": high_prices,
+                "Low": low_prices,
+                "Close": close_prices,
+            },
+            index=dates,
+        )
+
+    @patch("backend.load_symbol_data")
+    def test_empty_df_returns_error(self, mock_load):
+        from backend import get_window_bar_data
+        mock_load.return_value = pd.DataFrame()
+        result = get_window_bar_data("TEST.NS", 30, 50)
+        assert "error" in result
+        assert result["years"] == []
+
+    @patch("backend.get_years_from_data")
+    @patch("backend.detect_sliding_windows")
+    @patch("backend.load_symbol_data")
+    def test_no_windows_returns_error(self, mock_load, mock_detect, mock_years, mock_ohlc_df):
+        from backend import get_window_bar_data
+        mock_load.return_value = mock_ohlc_df
+        mock_detect.return_value = []
+        result = get_window_bar_data("TEST.NS", 30, 50)
+        assert "error" in result
+        assert result["years"] == []
+
+    @patch("backend.get_years_from_data")
+    @patch("backend.detect_sliding_windows")
+    @patch("backend.load_symbol_data")
+    def test_no_years_returns_error(self, mock_load, mock_detect, mock_years, mock_ohlc_df):
+        from backend import get_window_bar_data, SlidingWindow
+        mock_load.return_value = mock_ohlc_df
+        mock_detect.return_value = [
+            SlidingWindow(start_day=30, end_day=60, length=30, avg_return=5.0,
+                          win_rate=0.7, score=3.5, yield_per_day=0.17, year_returns={}),
+        ]
+        mock_years.return_value = []
+        result = get_window_bar_data("TEST.NS", 30, 50)
+        assert "error" in result
+        assert result["years"] == []
+
+    @patch("backend.get_years_from_data")
+    @patch("backend.detect_sliding_windows")
+    @patch("backend.load_symbol_data")
+    def test_valid_result_structure(self, mock_load, mock_detect, mock_years, mock_ohlc_df):
+        from backend import get_window_bar_data, SlidingWindow
+        mock_load.return_value = mock_ohlc_df
+        mock_detect.return_value = [
+            SlidingWindow(start_day=30, end_day=60, length=30, avg_return=5.0,
+                          win_rate=0.7, score=3.5, yield_per_day=0.17, year_returns={}),
+        ]
+        mock_years.return_value = [2021, 2022, 2023]
+        result = get_window_bar_data("TEST.NS", 30, 50)
+        assert "years" in result
+        assert "error" not in result
+        assert len(result["years"]) > 0
+        for entry in result["years"]:
+            assert "year" in entry
+            assert "strategy_return" in entry
+            assert "bh_return" in entry
+            assert isinstance(entry["strategy_return"], float)
+            assert isinstance(entry["bh_return"], float)
+
+    @patch("backend.get_years_from_data")
+    @patch("backend.detect_sliding_windows")
+    @patch("backend.load_symbol_data")
+    def test_strategy_return_differs_from_bh(self, mock_load, mock_detect, mock_years, mock_ohlc_df):
+        """Strategy (only in-market during window) should differ from full-year B&H."""
+        from backend import get_window_bar_data, SlidingWindow
+        mock_load.return_value = mock_ohlc_df
+        # Window covers only Feb (days 32-59)
+        mock_detect.return_value = [
+            SlidingWindow(start_day=32, end_day=59, length=28, avg_return=3.0,
+                          win_rate=0.6, score=1.8, yield_per_day=0.11, year_returns={}),
+        ]
+        mock_years.return_value = [2022]
+        result = get_window_bar_data("TEST.NS", 28, 50)
+        assert len(result["years"]) == 1
+        entry = result["years"][0]
+        assert entry["year"] == 2022
+        # Strategy is only in-market for ~28 days, so return should differ from B&H
+        assert entry["strategy_return"] != entry["bh_return"]
+
+    @patch("backend.get_years_from_data")
+    @patch("backend.detect_sliding_windows")
+    @patch("backend.load_symbol_data")
+    def test_skips_years_with_few_trading_days(self, mock_load, mock_detect, mock_years):
+        """Years with < 100 trading days should be skipped."""
+        from backend import get_window_bar_data, SlidingWindow
+        # Create a tiny dataframe with only 50 trading days in 2022
+        dates = pd.bdate_range("2022-01-01", periods=50)
+        df = pd.DataFrame(
+            {
+                "Open": np.full(50, 100.0),
+                "High": np.full(50, 105.0),
+                "Low": np.full(50, 95.0),
+                "Close": np.full(50, 102.0),
+            },
+            index=dates,
+        )
+        mock_load.return_value = df
+        mock_detect.return_value = [
+            SlidingWindow(start_day=10, end_day=40, length=30, avg_return=3.0,
+                          win_rate=0.6, score=1.8, yield_per_day=0.1, year_returns={}),
+        ]
+        mock_years.return_value = [2022]
+        result = get_window_bar_data("TEST.NS", 30, 50)
+        assert result["years"] == []
+
+    @patch("backend.get_years_from_data")
+    @patch("backend.detect_sliding_windows")
+    @patch("backend.load_symbol_data")
+    def test_threshold_passed_as_fraction(self, mock_load, mock_detect, mock_years, mock_ohlc_df):
+        """Threshold int (e.g., 60) should be passed to detect_sliding_windows as 0.6."""
+        from backend import get_window_bar_data, SlidingWindow
+        mock_load.return_value = mock_ohlc_df
+        mock_detect.return_value = [
+            SlidingWindow(start_day=30, end_day=60, length=30, avg_return=5.0,
+                          win_rate=0.7, score=3.5, yield_per_day=0.17, year_returns={}),
+        ]
+        mock_years.return_value = [2022]
+        get_window_bar_data("TEST.NS", 30, 60)
+        # Verify detect_sliding_windows was called with threshold=0.6
+        call_kwargs = mock_detect.call_args
+        assert call_kwargs[1]["threshold"] == 0.6
+
+    @patch("backend.get_years_from_data")
+    @patch("backend.detect_sliding_windows")
+    @patch("backend.load_symbol_data")
+    def test_returns_are_rounded(self, mock_load, mock_detect, mock_years, mock_ohlc_df):
+        """All return values should be rounded to 2 decimal places."""
+        from backend import get_window_bar_data, SlidingWindow
+        mock_load.return_value = mock_ohlc_df
+        mock_detect.return_value = [
+            SlidingWindow(start_day=30, end_day=90, length=60, avg_return=5.0,
+                          win_rate=0.7, score=3.5, yield_per_day=0.08, year_returns={}),
+        ]
+        mock_years.return_value = [2021, 2022, 2023]
+        result = get_window_bar_data("TEST.NS", 60, 50)
+        for entry in result["years"]:
+            # Check rounding: str representation should have at most 2 decimal digits
+            strat_str = str(entry["strategy_return"])
+            bh_str = str(entry["bh_return"])
+            if "." in strat_str:
+                assert len(strat_str.split(".")[1]) <= 2
+            if "." in bh_str:
+                assert len(bh_str.split(".")[1]) <= 2
+
+    @patch("backend.get_years_from_data")
+    @patch("backend.detect_sliding_windows")
+    @patch("backend.load_symbol_data")
+    def test_multiple_windows(self, mock_load, mock_detect, mock_years, mock_ohlc_df):
+        """Multiple windows should all contribute to strategy returns."""
+        from backend import get_window_bar_data, SlidingWindow
+        mock_load.return_value = mock_ohlc_df
+        mock_detect.return_value = [
+            SlidingWindow(start_day=30, end_day=60, length=30, avg_return=5.0,
+                          win_rate=0.7, score=3.5, yield_per_day=0.17, year_returns={}),
+            SlidingWindow(start_day=200, end_day=230, length=30, avg_return=3.0,
+                          win_rate=0.6, score=1.8, yield_per_day=0.1, year_returns={}),
+        ]
+        mock_years.return_value = [2022]
+        result = get_window_bar_data("TEST.NS", 30, 50)
+        assert len(result["years"]) == 1
+        # Strategy return exists (covers two separate windows)
+        assert isinstance(result["years"][0]["strategy_return"], float)
+
+
+# ============================================================================
+# Tests: get_plan_bar_data
+# ============================================================================
+
+
+class TestGetPlanBarData:
+    """Tests for get_plan_bar_data function."""
+
+    def test_empty_strategies_returns_error(self):
+        from backend import get_plan_bar_data
+        result = get_plan_bar_data([])
+        assert "error" in result
+        assert result["years"] == []
+        assert result["symbols"] == []
+
+    @patch("backend._load_strategy_windows")
+    def test_no_windows_returns_error(self, mock_load):
+        from backend import get_plan_bar_data
+        mock_load.return_value = None
+        result = get_plan_bar_data([{"symbol": "TEST.NS", "window_size": 30, "threshold": 50}])
+        assert "error" in result
+        assert result["years"] == []
+
+    @patch("backend._build_equity_curve")
+    @patch("backend.get_years_from_data")
+    @patch("backend._load_strategy_windows")
+    def test_no_complete_years_returns_error(self, mock_load_strat, mock_years, mock_build):
+        from backend import get_plan_bar_data
+        ref_data = pd.DataFrame({"Close": [100]}, index=pd.to_datetime(["2024-01-01"]))
+        mock_load_strat.return_value = ([], [], ref_data, [], ["TEST"])
+        mock_years.return_value = []
+        result = get_plan_bar_data([{"symbol": "TEST.NS", "window_size": 30, "threshold": 50}])
+        assert "error" in result
+
+    @patch("backend._build_equity_curve")
+    @patch("backend.get_years_from_data")
+    @patch("backend._load_strategy_windows")
+    def test_valid_result_structure(self, mock_load_strat, mock_years, mock_build):
+        from backend import get_plan_bar_data
+        ref_data = pd.DataFrame(
+            {"Close": np.linspace(100, 110, 250)},
+            index=pd.bdate_range("2022-01-01", periods=250),
+        )
+        mock_load_strat.return_value = (
+            [{"start_day": 30, "end_day": 60, "symbol": "VBL"}],
+            [(30, 60)],
+            ref_data,
+            [ref_data],
+            ["VBL"],
+        )
+        mock_years.return_value = [2022]
+        mock_build.return_value = {
+            "combined_curve": [0.0, 1.0, 2.5, 3.0],
+            "bh_curve": [0.0, 0.5, 1.5, 2.0],
+            "strategy_curves": {"VBL": [0.0, 1.0, 2.5, 3.0]},
+            "trades_count": 1,
+            "total_days": 30,
+            "dates": ["Jan-1", "Jan-2"],
+            "trades": [],
+            "symbols": ["VBL"],
+        }
+        result = get_plan_bar_data([{"symbol": "VBL.NS", "window_size": 30, "threshold": 50}])
+        assert "years" in result
+        assert "symbols" in result
+        assert result["symbols"] == ["VBL"]
+        assert len(result["years"]) == 1
+        entry = result["years"][0]
+        assert entry["year"] == 2022
+        assert "combined_return" in entry
+        assert "bh_return" in entry
+        assert "stock_returns" in entry
+        assert "VBL" in entry["stock_returns"]
+
+    @patch("backend._build_equity_curve")
+    @patch("backend.get_years_from_data")
+    @patch("backend._load_strategy_windows")
+    def test_combined_return_from_curve_last_value(self, mock_load_strat, mock_years, mock_build):
+        """combined_return should be last element of combined_curve."""
+        from backend import get_plan_bar_data
+        ref_data = pd.DataFrame(
+            {"Close": np.linspace(100, 110, 250)},
+            index=pd.bdate_range("2022-01-01", periods=250),
+        )
+        mock_load_strat.return_value = ([], [], ref_data, [], ["SYM"])
+        mock_years.return_value = [2022]
+        mock_build.return_value = {
+            "combined_curve": [0.0, 1.0, 5.5678],
+            "bh_curve": [0.0, 0.5, 3.1234],
+            "strategy_curves": {"SYM": [0.0, 1.0, 5.5678]},
+            "trades_count": 1,
+            "total_days": 30,
+            "dates": [],
+            "trades": [],
+            "symbols": ["SYM"],
+        }
+        result = get_plan_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
+        entry = result["years"][0]
+        assert entry["combined_return"] == 5.57  # rounded to 2dp
+        assert entry["bh_return"] == 3.12  # rounded to 2dp
+
+    @patch("backend._build_equity_curve")
+    @patch("backend.get_years_from_data")
+    @patch("backend._load_strategy_windows")
+    def test_skips_year_when_curve_is_none(self, mock_load_strat, mock_years, mock_build):
+        """Years where _build_equity_curve returns None should be skipped."""
+        from backend import get_plan_bar_data
+        ref_data = pd.DataFrame(
+            {"Close": np.linspace(100, 110, 250)},
+            index=pd.bdate_range("2022-01-01", periods=250),
+        )
+        mock_load_strat.return_value = ([], [], ref_data, [], ["SYM"])
+        mock_years.return_value = [2021, 2022]
+        # Return None for 2021, valid curve for 2022
+        mock_build.side_effect = [None, {
+            "combined_curve": [0.0, 5.0],
+            "bh_curve": [0.0, 3.0],
+            "strategy_curves": {"SYM": [0.0, 5.0]},
+            "trades_count": 1,
+            "total_days": 30,
+            "dates": [],
+            "trades": [],
+            "symbols": ["SYM"],
+        }]
+        result = get_plan_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
+        assert len(result["years"]) == 1
+        assert result["years"][0]["year"] == 2022
+
+    @patch("backend._build_equity_curve")
+    @patch("backend.get_years_from_data")
+    @patch("backend._load_strategy_windows")
+    def test_multiple_symbols(self, mock_load_strat, mock_years, mock_build):
+        """Plan with multiple stocks should include per-stock returns."""
+        from backend import get_plan_bar_data
+        ref_data = pd.DataFrame(
+            {"Close": np.linspace(100, 110, 250)},
+            index=pd.bdate_range("2022-01-01", periods=250),
+        )
+        mock_load_strat.return_value = (
+            [
+                {"start_day": 30, "end_day": 60, "symbol": "VBL"},
+                {"start_day": 100, "end_day": 130, "symbol": "TCS"},
+            ],
+            [(30, 60), (100, 130)],
+            ref_data,
+            [ref_data, ref_data],
+            ["VBL", "TCS"],
+        )
+        mock_years.return_value = [2022]
+        mock_build.return_value = {
+            "combined_curve": [0.0, 4.0],
+            "bh_curve": [0.0, 2.0],
+            "strategy_curves": {"VBL": [0.0, 3.0], "TCS": [0.0, 1.5]},
+            "trades_count": 2,
+            "total_days": 60,
+            "dates": [],
+            "trades": [],
+            "symbols": ["VBL", "TCS"],
+        }
+        result = get_plan_bar_data([
+            {"symbol": "VBL.NS", "window_size": 30, "threshold": 50},
+            {"symbol": "TCS.NS", "window_size": 30, "threshold": 50},
+        ])
+        assert result["symbols"] == ["VBL", "TCS"]
+        entry = result["years"][0]
+        assert "VBL" in entry["stock_returns"]
+        assert "TCS" in entry["stock_returns"]
+        assert entry["stock_returns"]["VBL"] == 3.0
+        assert entry["stock_returns"]["TCS"] == 1.5
+
+    @patch("backend._build_equity_curve")
+    @patch("backend.get_years_from_data")
+    @patch("backend._load_strategy_windows")
+    def test_missing_symbol_in_strategy_curves_defaults_zero(self, mock_load_strat, mock_years, mock_build):
+        """If a symbol has no entry in strategy_curves, its return should be 0."""
+        from backend import get_plan_bar_data
+        ref_data = pd.DataFrame(
+            {"Close": np.linspace(100, 110, 250)},
+            index=pd.bdate_range("2022-01-01", periods=250),
+        )
+        mock_load_strat.return_value = ([], [], ref_data, [], ["VBL", "TCS"])
+        mock_years.return_value = [2022]
+        mock_build.return_value = {
+            "combined_curve": [0.0, 4.0],
+            "bh_curve": [0.0, 2.0],
+            "strategy_curves": {"VBL": [0.0, 3.0]},  # TCS missing
+            "trades_count": 1,
+            "total_days": 30,
+            "dates": [],
+            "trades": [],
+            "symbols": ["VBL"],
+        }
+        result = get_plan_bar_data([
+            {"symbol": "VBL.NS", "window_size": 30, "threshold": 50},
+            {"symbol": "TCS.NS", "window_size": 30, "threshold": 50},
+        ])
+        entry = result["years"][0]
+        assert entry["stock_returns"]["VBL"] == 3.0
+        assert entry["stock_returns"]["TCS"] == 0.0
+
+    @patch("backend._build_equity_curve")
+    @patch("backend.get_years_from_data")
+    @patch("backend._load_strategy_windows")
+    def test_empty_curves_default_zero(self, mock_load_strat, mock_years, mock_build):
+        """Empty combined_curve and bh_curve should default to 0.0."""
+        from backend import get_plan_bar_data
+        ref_data = pd.DataFrame(
+            {"Close": np.linspace(100, 110, 250)},
+            index=pd.bdate_range("2022-01-01", periods=250),
+        )
+        mock_load_strat.return_value = ([], [], ref_data, [], ["SYM"])
+        mock_years.return_value = [2022]
+        mock_build.return_value = {
+            "combined_curve": [],
+            "bh_curve": [],
+            "strategy_curves": {"SYM": []},
+            "trades_count": 0,
+            "total_days": 0,
+            "dates": [],
+            "trades": [],
+            "symbols": ["SYM"],
+        }
+        result = get_plan_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
+        entry = result["years"][0]
+        assert entry["combined_return"] == 0.0
+        assert entry["bh_return"] == 0.0
+
+    @patch("backend._build_equity_curve")
+    @patch("backend.get_years_from_data")
+    @patch("backend._load_strategy_windows")
+    def test_multiple_years(self, mock_load_strat, mock_years, mock_build):
+        """Should produce one entry per year with data."""
+        from backend import get_plan_bar_data
+        ref_data = pd.DataFrame(
+            {"Close": np.linspace(100, 110, 500)},
+            index=pd.bdate_range("2021-01-01", periods=500),
+        )
+        mock_load_strat.return_value = ([], [], ref_data, [], ["SYM"])
+        mock_years.return_value = [2021, 2022, 2023]
+        mock_build.side_effect = [
+            {
+                "combined_curve": [0.0, 10.0],
+                "bh_curve": [0.0, 8.0],
+                "strategy_curves": {"SYM": [0.0, 10.0]},
+                "trades_count": 1, "total_days": 30, "dates": [], "trades": [], "symbols": ["SYM"],
+            },
+            {
+                "combined_curve": [0.0, 5.0],
+                "bh_curve": [0.0, 3.0],
+                "strategy_curves": {"SYM": [0.0, 5.0]},
+                "trades_count": 1, "total_days": 30, "dates": [], "trades": [], "symbols": ["SYM"],
+            },
+            {
+                "combined_curve": [0.0, -2.0],
+                "bh_curve": [0.0, -1.0],
+                "strategy_curves": {"SYM": [0.0, -2.0]},
+                "trades_count": 1, "total_days": 30, "dates": [], "trades": [], "symbols": ["SYM"],
+            },
+        ]
+        result = get_plan_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
+        assert len(result["years"]) == 3
+        years = [e["year"] for e in result["years"]]
+        assert years == [2021, 2022, 2023]
+        assert result["years"][0]["combined_return"] == 10.0
+        assert result["years"][1]["combined_return"] == 5.0
+        assert result["years"][2]["combined_return"] == -2.0

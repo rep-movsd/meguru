@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import calendar
 import datetime as dt
+import json as _json
+import re as _re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -18,6 +20,7 @@ import yfinance as yf
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 STOCKS_FILE = DATA_DIR / "stocks" / "nse_stocks.csv"
+PLANS_DIR = DATA_DIR / "plans"
 PERIOD_COUNTS = {"weekly": 52, "monthly": 12}
 OFFSET_LIMITS = {"weekly": 6, "monthly": 30}
 NUM_YEARS = 20
@@ -1024,6 +1027,87 @@ def narrow_window_fast(
     return best_window
 
 
+def narrow_window_edges(
+    cache: YearlyReturnsCache,
+    window: SlidingWindow,
+    threshold: float = 0.5,
+    min_length: int = 5,
+) -> SlidingWindow:
+    """
+    Trim weak days from the edges of a detected window.
+
+    Iteratively tries moving start_day forward by 1 or end_day backward by 1.
+    Keeps each trim if the resulting window has a strictly higher score
+    (avg_return * win_rate) while still meeting the threshold and minimum
+    length constraints.  Stops when neither edge can be improved.
+
+    This runs *after* detection and merging, so merged windows that
+    absorbed low-value boundary days can shed them here.
+
+    Args:
+        cache: Precomputed returns cache.
+        window: The window to narrow.
+        threshold: Minimum win rate (0-1).
+        min_length: Shortest allowed window in days.
+
+    Returns:
+        A (possibly shorter) SlidingWindow with the same or better score.
+    """
+    best = window
+    improved = True
+
+    while improved:
+        improved = False
+
+        # --- try trimming from the start ---
+        if best.end_day - (best.start_day + 1) + 1 >= min_length:
+            result = score_window_fast(cache, best.start_day + 1, best.end_day)
+            if result is not None:
+                avg_return, win_rate, score, year_returns = result
+                if (
+                    win_rate >= threshold
+                    and avg_return > 0
+                    and score > best.score
+                ):
+                    new_length = best.end_day - (best.start_day + 1) + 1
+                    best = SlidingWindow(
+                        start_day=best.start_day + 1,
+                        end_day=best.end_day,
+                        length=new_length,
+                        avg_return=avg_return,
+                        win_rate=win_rate,
+                        score=score,
+                        yield_per_day=avg_return / new_length,
+                        year_returns=year_returns,
+                    )
+                    improved = True
+
+        # --- try trimming from the end ---
+        if best.end_day - 1 - best.start_day + 1 >= min_length:
+            result = score_window_fast(cache, best.start_day, best.end_day - 1)
+            if result is not None:
+                avg_return, win_rate, score, year_returns = result
+                if (
+                    win_rate >= threshold
+                    and avg_return > 0
+                    and score > best.score
+                ):
+                    new_length = (best.end_day - 1) - best.start_day + 1
+                    best = SlidingWindow(
+                        start_day=best.start_day,
+                        end_day=best.end_day - 1,
+                        length=new_length,
+                        avg_return=avg_return,
+                        win_rate=win_rate,
+                        score=score,
+                        yield_per_day=avg_return / new_length,
+                        year_returns=year_returns,
+                    )
+                    improved = True
+
+    return best
+
+
 def find_best_fixed_window(
     cache: YearlyReturnsCache,
     window_size: int,
@@ -1099,6 +1183,8 @@ def detect_sliding_windows(
     4. That window splits the range into two sub-ranges (left and right)
     5. Recurse into each sub-range that can still fit a window
     6. Collect all found windows, sorted by start day
+    7. Merge nearby windows (gap <= 7 days)
+    8. Narrow edges: trim boundary days that drag score down
     
     Args:
         df: DataFrame with OHLC data
@@ -1176,6 +1262,14 @@ def detect_sliding_windows(
             else:
                 merged.append(w)
         windows = merged
+    
+    # Narrow window edges: trim weak boundary days that drag the score down.
+    # Especially useful after merging, where the gap days between the
+    # original chunks may have poor returns.
+    windows = [
+        narrow_window_edges(cache, w, threshold=threshold, min_length=5)
+        for w in windows
+    ]
     
     return windows
 
@@ -2633,3 +2727,202 @@ def _align_window_dates(windows: list[tuple[int, int, str]]) -> list[tuple[int, 
             mutable[i1][1] = mutable[i2][1]  # snap earlier exit to later
     
     return [(s, e, n) for s, e, n in mutable]
+
+
+# =============================================================================
+# Plan Save / Load
+# =============================================================================
+
+_PLAN_NAME_RE = _re.compile(r'^[A-Za-z0-9_\- ]{1,64}$')
+
+
+def _sanitize_plan_name(name: str) -> str:
+    """Validate and return a safe plan name (used as filename stem)."""
+    name = name.strip()
+    if not _PLAN_NAME_RE.match(name):
+        raise ValueError(
+            "Plan name must be 1-64 characters: letters, digits, spaces, hyphens, underscores"
+        )
+    return name
+
+
+def save_plan(name: str, strategies: list[dict]) -> dict:
+    """Save a plan (list of strategies) to data/plans/<name>.json."""
+    name = _sanitize_plan_name(name)
+    PLANS_DIR.mkdir(parents=True, exist_ok=True)
+    path = PLANS_DIR / f"{name}.json"
+    payload = {
+        "name": name,
+        "strategies": strategies,
+        "saved_at": dt.datetime.now().isoformat(timespec="seconds"),
+    }
+    path.write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+    return {"ok": True, "name": name}
+
+
+def load_plan(name: str) -> dict:
+    """Load a saved plan by name. Returns the full payload dict."""
+    name = _sanitize_plan_name(name)
+    path = PLANS_DIR / f"{name}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Plan '{name}' not found")
+    return _json.loads(path.read_text(encoding="utf-8"))
+
+
+def list_plans() -> list[dict]:
+    """List all saved plans (name + strategy count + saved_at)."""
+    if not PLANS_DIR.exists():
+        return []
+    plans = []
+    for path in sorted(PLANS_DIR.glob("*.json")):
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+            plans.append({
+                "name": data.get("name", path.stem),
+                "strategies": len(data.get("strategies", [])),
+                "saved_at": data.get("saved_at", ""),
+            })
+        except (ValueError, KeyError):
+            continue
+    return plans
+
+
+def delete_plan(name: str) -> dict:
+    """Delete a saved plan by name."""
+    name = _sanitize_plan_name(name)
+    path = PLANS_DIR / f"{name}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Plan '{name}' not found")
+    path.unlink()
+    return {"ok": True, "name": name}
+
+
+# ---------------------------------------------------------------------------
+# Bar chart data: per-year return summaries
+# ---------------------------------------------------------------------------
+
+def get_window_bar_data(
+    symbol: str,
+    window_size: int,
+    threshold: int,
+) -> dict:
+    """
+    Compute per-year strategy return and buy-and-hold return for bar chart.
+
+    For each complete year of data, runs the sliding-window strategy and
+    computes the final cumulative return percentage for both the strategy
+    and buy-and-hold.
+
+    Returns:
+        dict with "years" list of {year, strategy_return, bh_return}.
+    """
+    df = load_symbol_data(symbol)
+    if df.empty:
+        return {"error": "No data available", "years": []}
+
+    windows = detect_sliding_windows(
+        df, window_size=window_size, threshold=threshold / 100,
+    )
+    if not windows:
+        return {"error": "No windows detected", "years": []}
+
+    available_years = get_years_from_data(df)
+    if not available_years:
+        return {"error": "No complete years available", "years": []}
+
+    results: list[dict] = []
+    for year in available_years:
+        year_start = pd.Timestamp(year=year, month=1, day=1)
+        year_end = pd.Timestamp(year=year, month=12, day=31)
+        year_data = df.loc[year_start:year_end]
+
+        if year_data.empty or len(year_data) < 100:
+            continue
+
+        closes = year_data["Close"].values
+        daily_ret = np.empty(len(closes))
+        daily_ret[0] = 0.0
+        daily_ret[1:] = closes[1:] / closes[:-1] - 1.0
+
+        bh_return = float((np.cumprod(1.0 + daily_ret)[-1] - 1.0) * 100.0)
+
+        idx_values = year_data.index.values
+        in_market = np.zeros(len(idx_values), dtype=bool)
+        for w in windows:
+            start_date = dt.date(year, 1, 1) + dt.timedelta(days=w.start_day - 1)
+            end_date = dt.date(year, 1, 1) + dt.timedelta(days=w.end_day - 1)
+            entry_np = np.datetime64(pd.Timestamp(start_date))
+            exit_np = np.datetime64(pd.Timestamp(end_date))
+            in_market |= (idx_values >= entry_np) & (idx_values <= exit_np)
+
+        masked_ret = np.where(in_market, daily_ret, 0.0)
+        strategy_return = float(
+            (np.cumprod(1.0 + masked_ret)[-1] - 1.0) * 100.0,
+        )
+
+        results.append({
+            "year": year,
+            "strategy_return": round(strategy_return, 2),
+            "bh_return": round(bh_return, 2),
+        })
+
+    return {"years": results}
+
+
+def get_plan_bar_data(
+    strategies: list[dict],
+) -> dict:
+    """
+    Compute per-year combined plan return, B&H return, and per-stock
+    contribution for stacked bar chart.
+
+    For each complete year, builds the same dynamic equal-weight equity
+    curves used by the plan backtest, then reports:
+      - combined strategy return (%)
+      - equal-weight B&H return (%)
+      - per-stock individual strategy return (%)
+
+    Returns:
+        dict with "years" list of {year, combined_return, bh_return,
+        stock_returns: {symbol: return%}}, and "symbols" list.
+    """
+    if not strategies:
+        return {"error": "No strategies provided", "years": [], "symbols": []}
+
+    loaded = _load_strategy_windows(strategies)
+    if loaded is None:
+        return {"error": "No windows detected", "years": [], "symbols": []}
+
+    templates, day_ranges, ref_data, window_dfs, unique_symbols = loaded
+
+    available_years = get_years_from_data(ref_data)
+    if not available_years:
+        return {"error": "No complete years", "years": [], "symbols": []}
+
+    results: list[dict] = []
+    for year in available_years:
+        curve = _build_equity_curve(
+            ref_data, templates, day_ranges, year, window_dfs, unique_symbols,
+        )
+        if curve is None:
+            continue
+
+        combined_return = curve["combined_curve"][-1] if curve["combined_curve"] else 0.0
+        bh_return = curve["bh_curve"][-1] if curve["bh_curve"] else 0.0
+
+        stock_returns: dict[str, float] = {}
+        for sym in unique_symbols:
+            sym_curve = curve["strategy_curves"].get(sym)
+            if sym_curve:
+                stock_returns[sym] = round(sym_curve[-1], 2)
+            else:
+                stock_returns[sym] = 0.0
+
+        results.append({
+            "year": year,
+            "combined_return": round(combined_return, 2),
+            "bh_return": round(bh_return, 2),
+            "stock_returns": stock_returns,
+        })
+
+    return {"years": results, "symbols": unique_symbols}

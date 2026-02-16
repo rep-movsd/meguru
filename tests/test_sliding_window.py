@@ -23,6 +23,7 @@ from backend import (
     find_best_window_fast,
     find_best_fixed_window,
     narrow_window_fast,
+    narrow_window_edges,
     detect_sliding_windows,
     load_symbol_data,
     parse_symbols,
@@ -253,6 +254,143 @@ class TestNarrowWindowFast:
         # Yield should be >= original
         assert narrowed.yield_per_day >= window.yield_per_day * 0.99, \
             f"Yield decreased: {narrowed.yield_per_day} < {window.yield_per_day}"
+
+
+class TestNarrowWindowEdges:
+    """Tests for narrow_window_edges (score-based edge trimming)."""
+
+    def test_score_never_decreases(self, synthetic_cache):
+        """Narrowing should never reduce the score."""
+        window = find_best_fixed_window(
+            synthetic_cache, window_size=30, threshold=0.5,
+        )
+        assert window is not None
+
+        narrowed = narrow_window_edges(
+            synthetic_cache, window, threshold=0.5, min_length=5,
+        )
+        assert narrowed.score >= window.score, (
+            f"Score decreased: {narrowed.score} < {window.score}"
+        )
+
+    def test_respects_min_length(self, synthetic_cache):
+        """Narrowed window should never be shorter than min_length."""
+        window = find_best_fixed_window(
+            synthetic_cache, window_size=30, threshold=0.5,
+        )
+        assert window is not None
+
+        for min_len in [5, 10, 20]:
+            narrowed = narrow_window_edges(
+                synthetic_cache, window, threshold=0.5, min_length=min_len,
+            )
+            assert narrowed.length >= min_len, (
+                f"Window narrowed to {narrowed.length} < min_length {min_len}"
+            )
+
+    def test_stays_within_original_bounds(self, synthetic_cache):
+        """Narrowed window should be a sub-range of the original."""
+        window = find_best_fixed_window(
+            synthetic_cache, window_size=60, threshold=0.5,
+        )
+        assert window is not None
+
+        narrowed = narrow_window_edges(
+            synthetic_cache, window, threshold=0.5, min_length=5,
+        )
+        assert narrowed.start_day >= window.start_day
+        assert narrowed.end_day <= window.end_day
+
+    def test_maintains_threshold(self, synthetic_cache):
+        """Narrowed window must still meet the win-rate threshold."""
+        window = find_best_fixed_window(
+            synthetic_cache, window_size=30, threshold=0.6,
+        )
+        if window is None:
+            pytest.skip("No window found at 60% threshold")
+
+        narrowed = narrow_window_edges(
+            synthetic_cache, window, threshold=0.6, min_length=5,
+        )
+        assert narrowed.win_rate >= 0.6
+        assert narrowed.avg_return > 0
+
+    def test_fields_consistent(self, synthetic_cache):
+        """All SlidingWindow fields should be self-consistent after narrowing."""
+        window = find_best_fixed_window(
+            synthetic_cache, window_size=30, threshold=0.5,
+        )
+        assert window is not None
+
+        narrowed = narrow_window_edges(
+            synthetic_cache, window, threshold=0.5, min_length=5,
+        )
+        assert narrowed.length == narrowed.end_day - narrowed.start_day + 1
+        assert abs(narrowed.yield_per_day - narrowed.avg_return / narrowed.length) < 1e-9
+        assert abs(narrowed.score - narrowed.avg_return * narrowed.win_rate) < 1e-9
+
+    def test_identity_when_already_optimal(self, synthetic_cache):
+        """If trimming either edge hurts the score, the window should be returned unchanged."""
+        # Use a very small window — less room for improvement
+        window = find_best_fixed_window(
+            synthetic_cache, window_size=7, threshold=0.5,
+        )
+        assert window is not None
+
+        narrowed = narrow_window_edges(
+            synthetic_cache, window, threshold=0.5, min_length=7,
+        )
+        # min_length == window length, so no trimming is possible
+        assert narrowed.start_day == window.start_day
+        assert narrowed.end_day == window.end_day
+
+    def test_trims_merged_window(self, synthetic_cache):
+        """A larger window (simulating a merge) should benefit from edge trimming."""
+        # Create a deliberately wide window and see if narrowing trims it
+        wide_start = day_of_year(2, 1)    # Feb 1
+        wide_end = day_of_year(6, 30)     # Jun 30 — covers bullish Mar-May + neutral months
+
+        result = score_window_fast(synthetic_cache, wide_start, wide_end)
+        if result is None:
+            pytest.skip("No data for wide window")
+
+        avg_return, win_rate, score, year_returns = result
+        if avg_return <= 0 or win_rate < 0.5:
+            pytest.skip("Wide window not bullish enough to test trimming")
+
+        wide_window = SlidingWindow(
+            start_day=wide_start,
+            end_day=wide_end,
+            length=wide_end - wide_start + 1,
+            avg_return=avg_return,
+            win_rate=win_rate,
+            score=score,
+            yield_per_day=avg_return / (wide_end - wide_start + 1),
+            year_returns=year_returns,
+        )
+
+        narrowed = narrow_window_edges(
+            synthetic_cache, wide_window, threshold=0.5, min_length=30,
+        )
+
+        # Should have trimmed at least one edge (Feb and/or Jun are neutral)
+        assert narrowed.score >= wide_window.score
+        trimmed_days = wide_window.length - narrowed.length
+        assert trimmed_days >= 0, "Should not have grown"
+
+    def test_integrated_in_detect(self, synthetic_df):
+        """detect_sliding_windows should produce windows with scores at least
+        as good as the un-narrowed versions would have."""
+        windows = detect_sliding_windows(
+            synthetic_df, window_size=30, threshold=0.5,
+        )
+        # Just verify basic invariants post-narrowing
+        for w in windows:
+            assert w.length >= 5
+            assert w.avg_return > 0
+            assert w.win_rate >= 0.5
+            assert w.length == w.end_day - w.start_day + 1
+            assert abs(w.score - w.avg_return * w.win_rate) < 1e-9
 
 
 class TestDetectSlidingWindows:

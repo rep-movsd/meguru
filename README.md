@@ -18,14 +18,14 @@ meguru/
 ├── data/
 │   ├── stocks/
 │   │   └── nse_stocks.csv  # 2,500+ NSE equities, indices, ETFs
+│   ├── plans/              # Saved plans as JSON files
 │   └── *.csv               # Cached Yahoo Finance OHLC data per symbol
 ├── exports/                # Exported analysis CSVs
 ├── tests/
-│   ├── test_app.py         # Unit tests for core backend functions
-│   ├── test_sliding_window.py  # Sliding window tests (needs update)
-│   └── test_sliding_quick.py   # Quick integration test
+│   ├── test_app.py         # Unit tests for core backend, plan CRUD, bar chart data
+│   ├── test_sliding_window.py  # Sliding window algorithm tests
+│   └── test_sliding_quick.py   # Manual CLI script for inspecting results
 ├── requirements.txt        # pandas, numpy, yfinance, pytest
-└── run.sh                  # Legacy launcher (references old TUI app)
 ```
 
 **Key design decisions:**
@@ -42,7 +42,7 @@ meguru/
 | `main` | Stable release with period-based seasonal analysis (monthly/weekly) |
 | `feature/sliding-window-detection` | **Active.** Adds fixed-size sliding window detection algorithm |
 
-The `feature/sliding-window-detection` branch rewrites the analysis approach: instead of fixed calendar periods (months/weeks), it finds the optimal N-day investment windows using a greedy algorithm with day exclusion and merging. Several features from `main` are currently disabled in window mode: backtest charts, optimizer, add-to-plan, and CSV exports.
+The `feature/sliding-window-detection` branch rewrites the analysis approach: instead of fixed calendar periods (months/weeks), it finds the optimal N-day investment windows using a recursive range-splitting algorithm with merging of nearby windows (within 7-day gaps) and edge narrowing to maximize score. The parameter optimizer and per-stock CSV exports are currently disabled in window mode; backtest charts, plan builder, and plan exports are fully functional.
 
 ## Features
 
@@ -59,10 +59,14 @@ The `feature/sliding-window-detection` branch rewrites the analysis approach: in
 
 ### Sliding Window Detection (feature branch)
 - Fixed-size window scanning (1wk / 2wk / 1mo / 2mo / 3mo)
-- Greedy best-window selection with day exclusion
-- Adjacent window merging
+- Recursive range-splitting best-window selection
+- Contiguous window merging (within 7-day gaps)
+- Edge narrowing: trims weak boundary days to maximize score
 - Per-year return breakdown with win rate scoring
 - O(1) window return lookups via precomputed cumulative returns cache
+- Inline backtest chart (year-by-year or average) with equity curves
+- Bar chart view: per-year strategy vs B&H returns side-by-side
+- Plan builder with combined backtest and per-stock contribution bars
 
 ### Common
 - Browser-based UI with dark theme
@@ -190,7 +194,7 @@ Combine strategies from multiple stocks into a unified trading plan:
 2. Repeat for other stocks/parameters
 3. Click **Plan** in header to view combined backtest and export a unified trading calendar
 
-Plan is stored in browser localStorage.
+Active plan is stored in browser localStorage. Named plans can be saved to / loaded from the server (`data/plans/*.json`).
 
 ## Sliding Window Mode (feature branch)
 
@@ -200,16 +204,21 @@ Plan is stored in browser localStorage.
 
 ### How It Works
 1. Precomputes cumulative returns for all years (O(1) lookups)
-2. Scans all possible start dates for windows of exactly N days
-3. Selects the best-scoring window (avg_return x win_rate)
-4. Marks those days as used, repeats until no more valid windows
-5. Merges adjacent windows
+2. Starts with the full search range [1, 365]
+3. Finds the best-scoring window of exactly N days in the range (avg_return x win_rate)
+4. That window splits the range into left and right sub-ranges
+5. Recurses into each sub-range that can still fit a window
+6. Merges nearby windows within 7-day gaps and recomputes merged stats
+7. Narrows edges: iteratively trims boundary days that drag the score down
+
+### Backtest Views
+- **Line chart** (default): equity curve for a selected year or averaged across all years
+- **Bar chart** (toggle with **Bar** button): per-year strategy return vs B&H, side-by-side bars
+- In Plan view, the bar chart shows stacked bars with each stock's contribution drawn in its color
 
 ### Currently Disabled in Window Mode
-- Backtest charts
 - Parameter optimizer
-- Add-to-plan / plan builder
-- CSV exports
+- Per-stock CSV exports (stats, trades, strategy)
 
 ## Export Formats
 
@@ -223,7 +232,7 @@ Plan is stored in browser localStorage.
 ## Data & Caching
 
 - Data cached in `data/*.csv` by symbol
-- Auto-fetches from Yahoo Finance if missing or stale (15 years of history)
+- Auto-fetches from Yahoo Finance if missing or stale (20 years of history)
 - Supports NSE stocks, indices (`^NSEI`, `^NSEBANK`), and ETFs
 - Sparse data warning shown if year has <200 trading days
 
@@ -233,7 +242,7 @@ Plan is stored in browser localStorage.
 
 ## Seasonal Analysis
 
-For each period (month or week) across 15 years of history:
+For each period (month or week) across 20 years of history:
 1. Find first/last trading days of the period (adjusted by offset)
 2. Calculate return: `((Close_last / Open_first) - 1) x 100%`
 3. **Trend Likelihood** = `max(green_years, red_years) / total_years x 100`
@@ -247,14 +256,14 @@ Uses `YearlyReturnsCache` with precomputed cumulative products for O(1) window r
 - `cum_returns[year][doy]` = cumulative product from day 1 to day-of-year
 - Window return = `cum[end] / cum[start-1] - 1`
 - Score = `avg_return x win_rate` across all years
-- Greedy selection: best window first, exclude those days, repeat, merge adjacent
+- Recursive range-splitting: find best window in [1, 365], split into left/right sub-ranges, recurse; merge within 7-day gaps; narrow edges to maximize score
 
 ---
 
 # Limitations
 
 1. **Past performance** does not guarantee future results
-2. **Sample size**: ~14 years means even 71% trend = only 10 confirming years
+2. **Sample size**: ~19 years means even 71% trend = only ~13 confirming years
 3. **Survivorship bias**: only currently-listed stocks are analyzed
 4. **No transaction costs**: commissions, slippage, bid-ask spreads not modeled
 5. **Tax implications**: frequent short-term trades may be tax-disadvantaged vs B&H
