@@ -322,7 +322,6 @@ HTML_PAGE = """<!DOCTYPE html>
             min-height: 0;
             position: relative;
             overflow-x: auto;
-            overflow-y: hidden;
         }
         
         .window-chart-container svg {
@@ -1117,7 +1116,6 @@ HTML_PAGE = """<!DOCTYPE html>
             padding: 16px 16px 0 16px;
             min-height: 0;
             overflow-x: auto;
-            overflow-y: hidden;
         }
         
         .plan-chart svg {
@@ -2262,63 +2260,46 @@ HTML_PAGE = """<!DOCTYPE html>
 
             const container = windowChart.getBoundingClientRect();
             const containerWidth = container.width;
-            const rawHeight = container.height;
+            const rawHeight = container.height - 8;
 
-            const padding = { top: 10, right: 20, bottom: 70, left: 60 };
+            // 3-zone SVG: topZone (value labels above bars) | chartZone (bars) | bottomZone (year/days labels)
+            const topZone = 18;      // px for value labels above tallest bar
+            const bottomZone = 44;   // px for year + days labels below chart
+            const leftPad = 60;
+            const rightPad = 20;
             const n = years.length;
             const minPerGroup = 80;
-            const minWidth = padding.left + padding.right + n * minPerGroup;
+            const minWidth = leftPad + rightPad + n * minPerGroup;
             const width = Math.max(containerWidth, minWidth);
-            // If horizontal scrollbar will appear, reserve space for it (~20px)
-            const height = width > containerWidth ? rawHeight - 20 : rawHeight;
-            if (containerWidth < 50 || height < 50) return;
-            const chartWidth = width - padding.left - padding.right;
-            const chartHeight = height - padding.top - padding.bottom;
+            // If horizontal scrollbar will appear, reserve space for it
+            const svgHeight = width > containerWidth ? rawHeight - 20 : rawHeight;
+            if (containerWidth < 50 || svgHeight < 80) return;
+            const chartHeight = svgHeight - topZone - bottomZone;
+            const chartWidth = width - leftPad - rightPad;
 
-            // Find Y range — fit data with room for value labels above/below bars.
-            let dataMin = Infinity, dataMax = -Infinity;
-            years.forEach(d => {
-                dataMin = Math.min(dataMin, d.strategy_return, d.bh_return);
-                dataMax = Math.max(dataMax, d.strategy_return, d.bh_return);
-            });
-            // Always include 0 so bars have a baseline
-            let yMin = Math.min(dataMin, 0);
-            let yMax = Math.max(dataMax, 0);
-            // Reserve pixels for value labels: 14px above bars, 18px below bars.
-            // Convert pixel needs to data-space units using the available chart height.
-            const dataRange = (yMax - yMin) || 1;
-            const topLabelPx = 14;
-            const botLabelPx = 18;
-            const usableHeight = chartHeight - topLabelPx - botLabelPx;
-            const scale = dataRange / (usableHeight > 10 ? usableHeight : chartHeight);
-            yMax += topLabelPx * scale;
-            yMin -= botLabelPx * scale;
+            // Fixed Y range so bars never shift when toggling params
+            const yMin = -20;
+            const yMax = 120;
 
             const groupWidth = chartWidth / n;
             const barWidth = Math.min(groupWidth * 0.38, 50);
             const gap = barWidth * 0.2;
 
-            const yScale = (v) => padding.top + chartHeight - ((v - yMin) / (yMax - yMin)) * chartHeight;
+            // yScale maps data values to the chart zone (topZone to topZone+chartHeight)
+            const yScale = (v) => topZone + chartHeight - ((v - yMin) / (yMax - yMin)) * chartHeight;
             const zeroY = yScale(0);
 
             // Y ticks
             const yTicks = [];
-            const absRange = yMax - yMin;
-            let yStep;
-            if (absRange >= 200) yStep = 50;
-            else if (absRange >= 100) yStep = 25;
-            else if (absRange >= 50) yStep = 10;
-            else if (absRange >= 20) yStep = 5;
-            else if (absRange >= 10) yStep = 2;
-            else yStep = 1;
-            for (let v = Math.ceil(yMin / yStep) * yStep; v <= yMax; v += yStep) {
+            const yStep = 20;
+            for (let v = yMin; v <= yMax; v += yStep) {
                 yTicks.push(v);
             }
 
             let bars = '';
             let labels = '';
             years.forEach((d, i) => {
-                const cx = padding.left + (i + 0.5) * groupWidth;
+                const cx = leftPad + (i + 0.5) * groupWidth;
                 const bhX = cx - barWidth - gap / 2;
                 const stratX = cx + gap / 2;
 
@@ -2338,22 +2319,22 @@ HTML_PAGE = """<!DOCTYPE html>
                 bars += '<text x="' + (bhX + barWidth / 2).toFixed(1) + '" y="' + bhLabelY.toFixed(1) + '" fill="#6699ff" font-size="12" font-weight="600" text-anchor="middle">' + d.bh_return.toFixed(0) + '%</text>';
                 bars += '<text x="' + (stratX + barWidth / 2).toFixed(1) + '" y="' + sLabelY.toFixed(1) + '" fill="#00ff88" font-size="12" font-weight="600" text-anchor="middle">' + d.strategy_return.toFixed(0) + '%</text>';
 
-                // Year label
-                labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 18) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
+                // Year label — placed in the bottom zone
+                labels += '<text x="' + cx.toFixed(1) + '" y="' + (topZone + chartHeight + 16) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
                 // Days in market label
                 if (d.days_in_market != null) {
-                    labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 32) + '" fill="#666" font-size="10" text-anchor="middle">' + d.days_in_market + '/' + d.total_trading_days + 'd</text>';
+                    labels += '<text x="' + cx.toFixed(1) + '" y="' + (topZone + chartHeight + 30) + '" fill="#666" font-size="10" text-anchor="middle">' + d.days_in_market + '/' + d.total_trading_days + 'd</text>';
                 }
             });
 
-            const svg = '<svg width="' + width + '" height="' + height + '">' +
+            const svg = '<svg width="' + width + '" height="' + svgHeight + '">' +
                 yTicks.map(v =>
-                    '<line x1="' + padding.left + '" y1="' + yScale(v).toFixed(1) + '" x2="' + (width - padding.right) + '" y2="' + yScale(v).toFixed(1) + '" stroke="' + (v === 0 ? '#666' : '#333') + '" stroke-width="' + (v === 0 ? 2 : 1) + '"/>'
+                    '<line x1="' + leftPad + '" y1="' + yScale(v).toFixed(1) + '" x2="' + (width - rightPad) + '" y2="' + yScale(v).toFixed(1) + '" stroke="' + (v === 0 ? '#666' : '#333') + '" stroke-width="' + (v === 0 ? 2 : 1) + '"/>'
                 ).join('') +
                 yTicks.map(v =>
-                    '<text x="' + (padding.left - 8) + '" y="' + (yScale(v) + 4).toFixed(1) + '" fill="#888" font-size="11" text-anchor="end">' + v.toFixed(0) + '%</text>'
+                    '<text x="' + (leftPad - 8) + '" y="' + (yScale(v) + 4).toFixed(1) + '" fill="#888" font-size="11" text-anchor="end">' + v.toFixed(0) + '%</text>'
                 ).join('') +
-                '<line x1="' + padding.left + '" y1="' + zeroY.toFixed(1) + '" x2="' + (width - padding.right) + '" y2="' + zeroY.toFixed(1) + '" stroke="#666" stroke-width="1.5"/>' +
+                '<line x1="' + leftPad + '" y1="' + zeroY.toFixed(1) + '" x2="' + (width - rightPad) + '" y2="' + zeroY.toFixed(1) + '" stroke="#666" stroke-width="1.5"/>' +
                 bars + labels +
                 '</svg>';
 
@@ -3695,59 +3676,44 @@ HTML_PAGE = """<!DOCTYPE html>
             const containerWidth = container.width - 32;
             const rawHeight = container.height - 20;
 
-            const padding = { top: 10, right: 20, bottom: 70, left: 70 };
+            // 3-zone SVG: topZone (value labels above bars) | chartZone (bars) | bottomZone (year/days labels)
+            const topZone = 18;      // px for value labels above tallest bar
+            const bottomZone = 44;   // px for year + days labels below chart
+            const leftPad = 70;
+            const rightPad = 20;
             const n = years.length;
             const minPerGroup = 80;
-            const minWidth = padding.left + padding.right + n * minPerGroup;
+            const minWidth = leftPad + rightPad + n * minPerGroup;
             const width = Math.max(containerWidth, minWidth);
-            // If horizontal scrollbar will appear, reserve space for it (~20px)
-            const height = width > containerWidth ? rawHeight - 20 : rawHeight;
-            if (containerWidth < 50 || height < 50) return;
-            const chartWidth = width - padding.left - padding.right;
-            const chartHeight = height - padding.top - padding.bottom;
+            // If horizontal scrollbar will appear, reserve space for it
+            const svgHeight = width > containerWidth ? rawHeight - 20 : rawHeight;
+            if (containerWidth < 50 || svgHeight < 80) return;
+            const chartHeight = svgHeight - topZone - bottomZone;
+            const chartWidth = width - leftPad - rightPad;
 
-            // Find Y range — fit data with room for value labels above/below bars.
-            let dataMin = Infinity, dataMax = -Infinity;
-            years.forEach(d => {
-                dataMin = Math.min(dataMin, d.combined_return, d.bh_return);
-                dataMax = Math.max(dataMax, d.combined_return, d.bh_return);
-            });
-            let yMin = Math.min(dataMin, 0);
-            let yMax = Math.max(dataMax, 0);
-            // Reserve pixels for value labels: 14px above bars, 18px below bars.
-            const dataRange = (yMax - yMin) || 1;
-            const topLabelPx = 14;
-            const botLabelPx = 18;
-            const usableHeight = chartHeight - topLabelPx - botLabelPx;
-            const scale = dataRange / (usableHeight > 10 ? usableHeight : chartHeight);
-            yMax += topLabelPx * scale;
-            yMin -= botLabelPx * scale;
+            // Fixed Y range so bars never shift when toggling params
+            const yMin = -20;
+            const yMax = 120;
 
             const groupWidth = chartWidth / n;
             const barWidth = Math.min(groupWidth * 0.38, 50);
             const gap = barWidth * 0.2;
 
-            const yScale = (v) => padding.top + chartHeight - ((v - yMin) / (yMax - yMin)) * chartHeight;
+            // yScale maps data values to the chart zone (topZone to topZone+chartHeight)
+            const yScale = (v) => topZone + chartHeight - ((v - yMin) / (yMax - yMin)) * chartHeight;
             const zeroY = yScale(0);
 
             // Y ticks
             const yTicks = [];
-            const absRange = yMax - yMin;
-            let yStep;
-            if (absRange >= 200) yStep = 50;
-            else if (absRange >= 100) yStep = 25;
-            else if (absRange >= 50) yStep = 10;
-            else if (absRange >= 20) yStep = 5;
-            else if (absRange >= 10) yStep = 2;
-            else yStep = 1;
-            for (let v = Math.ceil(yMin / yStep) * yStep; v <= yMax; v += yStep) {
+            const yStep = 20;
+            for (let v = yMin; v <= yMax; v += yStep) {
                 yTicks.push(v);
             }
 
             let bars = '';
             let labels = '';
             years.forEach((d, i) => {
-                const cx = padding.left + (i + 0.5) * groupWidth;
+                const cx = leftPad + (i + 0.5) * groupWidth;
                 const bhX = cx - barWidth - gap / 2;
                 const stratX = cx + gap / 2;
 
@@ -3818,20 +3784,20 @@ HTML_PAGE = """<!DOCTYPE html>
                 const bhLabelY = d.bh_return >= 0 ? bhTop - 4 : bhBot + 14;
                 bars += '<text x="' + (bhX + barWidth / 2).toFixed(1) + '" y="' + bhLabelY.toFixed(1) + '" fill="#6699ff" font-size="12" font-weight="600" text-anchor="middle">' + d.bh_return.toFixed(0) + '%</text>';
 
-                // Year label
-                labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 18) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
+                // Year label — placed in the bottom zone
+                labels += '<text x="' + cx.toFixed(1) + '" y="' + (topZone + chartHeight + 16) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
                 // Days in market label
                 if (d.days_in_market != null) {
-                    labels += '<text x="' + cx.toFixed(1) + '" y="' + (height - padding.bottom + 32) + '" fill="#666" font-size="10" text-anchor="middle">' + d.days_in_market + '/' + d.total_trading_days + 'd</text>';
+                    labels += '<text x="' + cx.toFixed(1) + '" y="' + (topZone + chartHeight + 30) + '" fill="#666" font-size="10" text-anchor="middle">' + d.days_in_market + '/' + d.total_trading_days + 'd</text>';
                 }
             });
 
-            const svg = '<svg width="' + width + '" height="' + height + '">' +
+            const svg = '<svg width="' + width + '" height="' + svgHeight + '">' +
                 yTicks.map(v =>
-                    '<line x1="' + padding.left + '" y1="' + yScale(v).toFixed(1) + '" x2="' + (width - padding.right) + '" y2="' + yScale(v).toFixed(1) + '" stroke="' + (v === 0 ? '#666' : '#333') + '" stroke-width="' + (v === 0 ? 2 : 1) + '"/>'
+                    '<line x1="' + leftPad + '" y1="' + yScale(v).toFixed(1) + '" x2="' + (width - rightPad) + '" y2="' + yScale(v).toFixed(1) + '" stroke="' + (v === 0 ? '#666' : '#333') + '" stroke-width="' + (v === 0 ? 2 : 1) + '"/>'
                 ).join('') +
                 yTicks.map(v =>
-                    '<text x="' + (padding.left - 10) + '" y="' + (yScale(v) + 4).toFixed(1) + '" fill="#888" font-size="11" text-anchor="end">' + v.toFixed(0) + '%</text>'
+                    '<text x="' + (leftPad - 10) + '" y="' + (yScale(v) + 4).toFixed(1) + '" fill="#888" font-size="11" text-anchor="end">' + v.toFixed(0) + '%</text>'
                 ).join('') +
                 bars + labels +
                 '</svg>';

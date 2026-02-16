@@ -31,6 +31,10 @@ MONTH_NAMES = [calendar.month_abbr[i] for i in range(1, 13)]
 # Key: symbol string, Value: (DataFrame, timestamp of last load)
 _symbol_cache: dict[str, pd.DataFrame] = {}
 
+# In-memory cache for sliding window detection results.
+# Key: (symbol, window_size, threshold_pct_int), Value: list[SlidingWindow]
+_window_detect_cache: dict[tuple, list] = {}
+
 
 # =============================================================================
 # Data Classes
@@ -2027,7 +2031,12 @@ def get_window_backtest_data(
         return {"error": "No data available", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
     
     # Detect windows using the same params
-    windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+    cache_key = (symbol, window_size, threshold)
+    if cache_key in _window_detect_cache:
+        windows = _window_detect_cache[cache_key]
+    else:
+        windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+        _window_detect_cache[cache_key] = windows
     
     if not windows:
         return {"error": "No windows detected", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
@@ -2202,7 +2211,12 @@ def get_window_backtest_average(
         return {"error": "No data available", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
     
     # Detect windows once
-    windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+    cache_key = (symbol, window_size, threshold)
+    if cache_key in _window_detect_cache:
+        windows = _window_detect_cache[cache_key]
+    else:
+        windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+        _window_detect_cache[cache_key] = windows
     if not windows:
         return {"error": "No windows detected", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
     
@@ -2295,7 +2309,14 @@ def _load_strategy_windows(
         
         display_symbol = symbol.replace(".NS", "")
         
-        windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+        # Cache window detection: windows only depend on (symbol, window_size, threshold)
+        cache_key = (symbol, window_size, threshold)
+        if cache_key in _window_detect_cache:
+            windows = _window_detect_cache[cache_key]
+        else:
+            windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+            _window_detect_cache[cache_key] = windows
+
         
         if not windows:
             continue
@@ -2347,7 +2368,12 @@ def get_plan_overlap(
     if df.empty:
         return {"error": f"No data for {symbol}"}
 
-    stock_windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+    cache_key = (symbol, window_size, threshold)
+    if cache_key in _window_detect_cache:
+        stock_windows = _window_detect_cache[cache_key]
+    else:
+        stock_windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+        _window_detect_cache[cache_key] = stock_windows
 
     # Build DOY set for current stock
     stock_days: set[int] = set()
@@ -2865,7 +2891,12 @@ def export_plan_calendar_csv(strategies: list[dict], align_windows: bool = False
         if df.empty:
             continue
         
-        windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+        cache_key = (symbol, window_size, threshold)
+        if cache_key in _window_detect_cache:
+            windows = _window_detect_cache[cache_key]
+        else:
+            windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+            _window_detect_cache[cache_key] = windows
         if not windows:
             continue
         
@@ -3131,9 +3162,14 @@ def get_window_bar_data(
     if df.empty:
         return {"error": "No data available", "years": []}
 
-    windows = detect_sliding_windows(
-        df, window_size=window_size, threshold=threshold / 100,
-    )
+    cache_key = (symbol, window_size, threshold)
+    if cache_key in _window_detect_cache:
+        windows = _window_detect_cache[cache_key]
+    else:
+        windows = detect_sliding_windows(
+            df, window_size=window_size, threshold=threshold / 100,
+        )
+        _window_detect_cache[cache_key] = windows
     if not windows:
         return {"error": "No windows detected", "years": []}
 
