@@ -1302,6 +1302,10 @@ HTML_PAGE = """<!DOCTYPE html>
                         <input type="number" id="chart-sl-input" min="0" max="50" step="1" value="0" style="width:48px" title="Entry stop-loss %. Exits if price drops this % below entry. 0 = disabled.">
                         <label style="color:#888;font-size:0.9em">Re%:</label>
                         <input type="number" id="chart-re-input" min="0" max="50" step="1" value="0" style="width:48px" title="Re-entry % below stop price. May catch rebounds. 0 = disabled.">
+                        <label style="color:#888;font-size:0.9em">Fees%:</label>
+                        <input type="number" id="chart-fees-input" min="0" max="5" step="0.1" value="0.3" style="width:56px" title="Fees % of value per round-trip trade (brokerage + STT + charges).">
+                        <label style="color:#888;font-size:0.9em">Tax%:</label>
+                        <input type="number" id="chart-tax-input" min="0" max="50" step="1" value="20" style="width:48px" title="Tax % on net annual profits (STCG).">
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #00ff88;"></div>Strategy</div>
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #6699ff;"></div>Buy & Hold</div>
                         <button id="chart-add-plan-btn" class="btn-small btn-add-plan">+ Add to Plan</button>
@@ -1431,6 +1435,10 @@ HTML_PAGE = """<!DOCTYPE html>
                         <input type="number" id="plan-sl-input" min="0" max="50" step="1" value="0" style="width:48px" title="Entry stop-loss %. Exits if price drops this % below entry. 0 = disabled.">
                         <label>Re%:</label>
                         <input type="number" id="plan-re-input" min="0" max="50" step="1" value="0" style="width:48px" title="Re-entry % below stop price. May catch rebounds. 0 = disabled.">
+                        <label>Fees%:</label>
+                        <input type="number" id="plan-fees-input" min="0" max="5" step="0.1" value="0.3" style="width:56px" title="Fees % of value per round-trip trade (brokerage + STT + charges).">
+                        <label>Tax%:</label>
+                        <input type="number" id="plan-tax-input" min="0" max="50" step="1" value="20" style="width:48px" title="Tax % on net annual profits (STCG).">
                     </div>
                     <div class="plan-legend" id="plan-legend"></div>
                     <div class="plan-chart" id="plan-chart">
@@ -1506,6 +1514,8 @@ HTML_PAGE = """<!DOCTYPE html>
         const chartYearSelect = document.getElementById('chart-year-select');
         const chartSLInput = document.getElementById('chart-sl-input');
         const chartREInput = document.getElementById('chart-re-input');
+        const chartFeesInput = document.getElementById('chart-fees-input');
+        const chartTaxInput = document.getElementById('chart-tax-input');
         const windowChart = document.getElementById('window-chart');
         const windowChartMetrics = document.getElementById('window-chart-metrics');
         const spinner = document.getElementById('spinner');
@@ -1922,6 +1932,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 const re = parseFloat(chartREInput.value) || 0;
                 if (sl > 0) params.set('stop_loss', String(sl));
                 if (re > 0) params.set('reentry', String(re));
+                const fees = parseFloat(chartFeesInput.value) || 0;
+                const tax = parseFloat(chartTaxInput.value) || 0;
+                if (fees > 0) params.set('fees_pct', String(fees));
+                if (tax > 0) params.set('tax_pct', String(tax));
                 
                 const res = await fetch(`/api/windows/backtest?${params}`);
                 const data = await res.json();
@@ -2198,6 +2212,8 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         chartSLInput.addEventListener('change', onChartSLREChange);
         chartREInput.addEventListener('change', onChartSLREChange);
+        chartFeesInput.addEventListener('change', onChartSLREChange);
+        chartTaxInput.addEventListener('change', onChartSLREChange);
         
         async function loadWindowBarChart() {
             if (!state.symbol) return;
@@ -2213,6 +2229,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 const re = parseFloat(chartREInput.value) || 0;
                 if (sl > 0) params.set('stop_loss', String(sl));
                 if (re > 0) params.set('reentry', String(re));
+                const fees = parseFloat(chartFeesInput.value) || 0;
+                const tax = parseFloat(chartTaxInput.value) || 0;
+                if (fees > 0) params.set('fees_pct', String(fees));
+                if (tax > 0) params.set('tax_pct', String(tax));
                 const res = await fetch('/api/windows/bar?' + params);
                 const data = await res.json();
                 if (data.error) {
@@ -2915,6 +2935,8 @@ HTML_PAGE = """<!DOCTYPE html>
         const planAllocSelect = document.getElementById('plan-alloc-select');
         const planSLInput = document.getElementById('plan-sl-input');
         const planREInput = document.getElementById('plan-re-input');
+        const planFeesInput = document.getElementById('plan-fees-input');
+        const planTaxInput = document.getElementById('plan-tax-input');
         const planChart = document.getElementById('plan-chart');
         const planLegend = document.getElementById('plan-legend');
         const planMetrics = document.getElementById('plan-metrics');
@@ -3257,6 +3279,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 const re = parseFloat(planREInput.value) || 0;
                 if (sl > 0) params.set('stop_loss', String(sl));
                 if (re > 0) params.set('reentry', String(re));
+                const fees = parseFloat(planFeesInput.value) || 0;
+                const tax = parseFloat(planTaxInput.value) || 0;
+                if (fees > 0) params.set('fees_pct', String(fees));
+                if (tax > 0) params.set('tax_pct', String(tax));
                 
                 const res = await fetch(`/api/plan/backtest?${params}`);
                 const data = await res.json();
@@ -3631,6 +3657,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 const re = parseFloat(planREInput.value) || 0;
                 if (sl > 0) params.set('stop_loss', String(sl));
                 if (re > 0) params.set('reentry', String(re));
+                const fees = parseFloat(planFeesInput.value) || 0;
+                const tax = parseFloat(planTaxInput.value) || 0;
+                if (fees > 0) params.set('fees_pct', String(fees));
+                if (tax > 0) params.set('tax_pct', String(tax));
                 const res = await fetch('/api/plan/bar?' + params);
                 const data = await res.json();
                 if (data.error) {
@@ -4036,6 +4066,8 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         planSLInput.addEventListener('change', onSLREChange);
         planREInput.addEventListener('change', onSLREChange);
+        planFeesInput.addEventListener('change', onSLREChange);
+        planTaxInput.addEventListener('change', onSLREChange);
         planOverlay.addEventListener('click', (e) => {
             if (e.target === planOverlay) closePlanOverlay();
         });
@@ -4251,6 +4283,8 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 symbol_weights = json.loads(weights_json) if weights_json else None
                 stop_loss = float(params.get("stop_loss", "0"))
                 reentry = float(params.get("reentry", "0"))
+                fees_pct = float(params.get("fees_pct", "0"))
+                tax_pct = float(params.get("tax_pct", "0"))
                 
                 if not strategies:
                     self.send_json({"error": "No strategies provided"}, 400)
@@ -4373,6 +4407,8 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 year_str = params.get("year", "2024")
                 stop_loss = float(params.get("stop_loss", "0"))
                 reentry = float(params.get("reentry", "0"))
+                fees_pct = float(params.get("fees_pct", "0"))
+                tax_pct = float(params.get("tax_pct", "0"))
                 
                 if not symbols:
                     self.send_json({"error": "No symbol provided"}, 400)
@@ -4399,13 +4435,16 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 threshold = int(params.get("threshold", 50))
                 stop_loss = float(params.get("stop_loss", "0"))
                 reentry = float(params.get("reentry", "0"))
+                fees_pct = float(params.get("fees_pct", "0"))
+                tax_pct = float(params.get("tax_pct", "0"))
                 
                 if not symbols:
                     self.send_json({"error": "No symbol provided"}, 400)
                     return
                 
                 result = get_window_bar_data(symbols[0], window_size, threshold,
-                                             stop_loss_pct=stop_loss, reentry_pct=reentry)
+                                             stop_loss_pct=stop_loss, reentry_pct=reentry,
+                                             fees_pct=fees_pct, tax_pct=tax_pct)
                 self.send_json(result)
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
@@ -4419,12 +4458,15 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 symbol_weights = json.loads(weights_json) if weights_json else None
                 stop_loss = float(params.get("stop_loss", "0"))
                 reentry = float(params.get("reentry", "0"))
+                fees_pct = float(params.get("fees_pct", "0"))
+                tax_pct = float(params.get("tax_pct", "0"))
                 
                 if not strategies:
                     self.send_json({"error": "No strategies provided"}, 400)
                     return
                 
-                result = get_plan_bar_data(strategies, symbol_weights, stop_loss, reentry)
+                result = get_plan_bar_data(strategies, symbol_weights, stop_loss, reentry,
+                                           fees_pct=fees_pct, tax_pct=tax_pct)
                 self.send_json(result)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)

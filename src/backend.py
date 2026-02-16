@@ -3105,6 +3105,8 @@ def get_window_bar_data(
     threshold: int,
     stop_loss_pct: float = 0.0,
     reentry_pct: float = 0.0,
+    fees_pct: float = 0.0,
+    tax_pct: float = 0.0,
 ) -> dict:
     """
     Compute per-year strategy return and buy-and-hold return for bar chart.
@@ -3119,6 +3121,8 @@ def get_window_bar_data(
         threshold: Win rate threshold percentage (50-100)
         stop_loss_pct: Entry stop-loss % (0 = disabled)
         reentry_pct: Re-entry % below stop price (0 = disabled)
+        fees_pct: Fees % of value per round-trip trade (0 = disabled)
+        tax_pct: Tax % on net annual profits (0 = disabled)
 
     Returns:
         dict with "years" list of {year, strategy_return, bh_return}.
@@ -3174,6 +3178,28 @@ def get_window_bar_data(
             (np.cumprod(1.0 + masked_ret)[-1] - 1.0) * 100.0,
         )
 
+        # Count round-trip trades (windows active this year)
+        n_trades = 0
+        for w in windows:
+            start_date = dt.date(year, 1, 1) + dt.timedelta(days=w.start_day - 1)
+            end_date = dt.date(year, 1, 1) + dt.timedelta(days=w.end_day - 1)
+            entry_np = np.datetime64(pd.Timestamp(start_date))
+            exit_np = np.datetime64(pd.Timestamp(end_date))
+            if np.any((idx_values >= entry_np) & (idx_values <= exit_np)):
+                n_trades += 1
+
+        # Apply fees: each round-trip costs fees_pct% of capital
+        if fees_pct > 0 and n_trades > 0:
+            strategy_return = (
+                (1.0 + strategy_return / 100.0)
+                * (1.0 - fees_pct / 100.0) ** n_trades
+                - 1.0
+            ) * 100.0
+
+        # Apply tax on net positive annual return
+        if tax_pct > 0 and strategy_return > 0:
+            strategy_return *= 1.0 - tax_pct / 100.0
+
         results.append({
             "year": year,
             "strategy_return": round(strategy_return, 2),
@@ -3192,6 +3218,8 @@ def get_plan_bar_data(
     symbol_weights: dict[str, float] | None = None,
     stop_loss_pct: float = 0.0,
     reentry_pct: float = 0.0,
+    fees_pct: float = 0.0,
+    tax_pct: float = 0.0,
 ) -> dict:
     """
     Compute per-year combined plan return, B&H return, and per-stock
@@ -3202,6 +3230,10 @@ def get_plan_bar_data(
       - combined strategy return (%)
       - equal-weight B&H return (%)
       - per-stock individual strategy return (%)
+
+    Args:
+        fees_pct: Fees % of value per round-trip trade (0 = disabled)
+        tax_pct: Tax % on net annual profits (0 = disabled)
 
     Returns:
         dict with "years" list of {year, combined_return, bh_return,
@@ -3239,6 +3271,27 @@ def get_plan_bar_data(
                 stock_returns[sym] = round(sym_curve[-1], 2)
             else:
                 stock_returns[sym] = 0.0
+
+        # Apply fees: each strategy is one round-trip trade per year.
+        # Count strategies that were actually active (had non-zero return).
+        n_trades = sum(1 for v in stock_returns.values() if v != 0.0) or 0
+        if fees_pct > 0 and n_trades > 0:
+            fee_factor = (1.0 - fees_pct / 100.0) ** n_trades
+            combined_return = (
+                (1.0 + combined_return / 100.0) * fee_factor - 1.0
+            ) * 100.0
+            # Also adjust per-stock returns
+            for sym in stock_returns:
+                if stock_returns[sym] != 0.0:
+                    sr = stock_returns[sym]
+                    stock_returns[sym] = round(
+                        ((1.0 + sr / 100.0) * (1.0 - fees_pct / 100.0) - 1.0) * 100.0,
+                        2,
+                    )
+
+        # Apply tax on net positive annual return
+        if tax_pct > 0 and combined_return > 0:
+            combined_return *= 1.0 - tax_pct / 100.0
 
         results.append({
             "year": year,
