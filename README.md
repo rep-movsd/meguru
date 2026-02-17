@@ -66,6 +66,8 @@ meguru/
 - **Basket overlap**: when adding a stock, shows how many days overlap with existing basket coverage and how many new days would be added
 - **Save/Load/Delete** named baskets to server (`data/plans/*.json`)
 - Baskets also stored in browser `localStorage` for persistence
+- **Fees %**: Round-trip transaction costs per trade (brokerage + STT + charges), default 0.3%
+- **Tax %**: Short-term capital gains tax on net annual profits (STCG), default 20% for India
 
 ### Exports
 - **Trading Calendar CSV**: unified multi-stock trading calendar with optional window alignment (±2 days)
