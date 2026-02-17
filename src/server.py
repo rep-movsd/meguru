@@ -80,6 +80,19 @@ class MeguruHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
     
+    def send_static(self, filepath: Path, content_type: str) -> None:
+        """Send a static file."""
+        try:
+            body = filepath.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", len(body))
+            self.end_headers()
+            self.wfile.write(body)
+        except FileNotFoundError:
+            self.send_response(404)
+            self.end_headers()
+    
     def parse_params(self) -> dict:
         """Parse query parameters from URL."""
         parsed = urllib.parse.urlparse(self.path)
@@ -93,6 +106,12 @@ class MeguruHandler(BaseHTTPRequestHandler):
         
         if path == "/":
             self.send_html(HTML_PAGE)
+        
+        elif path == "/static/style.css":
+            self.send_static(_STATIC_DIR / "style.css", "text/css; charset=utf-8")
+        
+        elif path == "/static/app.js":
+            self.send_static(_STATIC_DIR / "app.js", "application/javascript; charset=utf-8")
         
         elif path == "/api/symbols":
             params = self.parse_params()
