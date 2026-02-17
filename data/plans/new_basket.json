@@ -1,0 +1,85 @@
+{
+  "name": "New Basket",
+  "strategies": [
+    {
+      "symbol": "VBL",
+      "window_size": 14,
+      "threshold": 75,
+      "color": "#e5794c"
+    },
+    {
+      "symbol": "MAZDOCK",
+      "window_size": 30,
+      "threshold": 80,
+      "color": "#d24ce5"
+    },
+    {
+      "symbol": "HDFCAMC",
+      "window_size": 30,
+      "threshold": 65,
+      "color": "#e5994c"
+    },
+    {
+      "symbol": "APOLLOHOSP",
+      "window_size": 30,
+      "threshold": 60,
+      "color": "#4ce5c5"
+    },
+    {
+      "symbol": "NAM-INDIA",
+      "window_size": 7,
+      "threshold": 75,
+      "color": "#e54cd8"
+    },
+    {
+      "symbol": "RPOWER",
+      "window_size": 7,
+      "threshold": 70,
+      "color": "#4c7fe5"
+    },
+    {
+      "symbol": "DIXON",
+      "window_size": 14,
+      "threshold": 60,
+      "color": "#9f4ce5"
+    },
+    {
+      "symbol": "SBIN",
+      "window_size": 14,
+      "threshold": 70,
+      "color": "#ace54c"
+    },
+    {
+      "symbol": "TVSMOTOR",
+      "window_size": 7,
+      "threshold": 75,
+      "color": "#e54c52"
+    },
+    {
+      "symbol": "BAJFINANCE",
+      "window_size": 7,
+      "threshold": 70,
+      "color": "#4ce572"
+    },
+    {
+      "symbol": "GNFC",
+      "window_size": 30,
+      "threshold": 95,
+      "color": "#e5cc4c"
+    },
+    {
+      "symbol": "NACLIND",
+      "window_size": 7,
+      "threshold": 70,
+      "color": "#4cd2e5"
+    },
+    {
+      "symbol": "KHAICHEM",
+      "window_size": 7,
+      "threshold": 80,
+      "color": "#e54ca5"
+    }
+  ],
+  "allocation": "marketcap",
+  "saved_at": "2026-02-17T12:00:00.000Z"
+}

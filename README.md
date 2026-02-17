@@ -4,7 +4,7 @@
 
 *"Meguru" means "to cycle" or "to revolve" in Japanese, capturing the essence of recurring market patterns.*
 
-A lightweight web application that identifies recurring seasonal investment windows in stock prices using a sliding window detection algorithm. Focused on Indian NSE stocks, it finds optimal N-day windows across 20 years of history, backtests strategies with equity curves and per-year breakdowns, and combines multiple stocks into unified trading plans. Data is fetched from Yahoo Finance and cached locally as CSV.
+A lightweight web application that identifies recurring seasonal investment windows in stock prices using a sliding window detection algorithm. Focused on Indian NSE stocks, it finds optimal N-day windows across 20 years of history, backtests strategies with equity curves and per-year breakdowns, and combines multiple stocks into unified trading baskets. Data is fetched from Yahoo Finance and cached locally as CSV.
 
 ## Architecture
 
@@ -12,17 +12,17 @@ A lightweight web application that identifies recurring seasonal investment wind
 meguru/
 ├── src/
 │   ├── backend.py          # Core engine: data loading, sliding window detection,
-│   │                       #   backtesting, plan builder, stop-loss, exports
+│   │                       #   backtesting, basket builder, stop-loss, exports
 │   ├── server.py           # HTTP server + embedded SPA (HTML/CSS/JS)
 │   └── download_stocks.py  # NSE stock list downloader for autocomplete
 ├── data/
 │   ├── stocks/
 │   │   └── nse_stocks.csv  # 2,500+ NSE equities, indices, ETFs
-│   ├── plans/              # Saved plans as JSON files
+│   ├── plans/              # Saved baskets as JSON files
 │   └── *.csv               # Cached Yahoo Finance OHLC data per symbol
 ├── exports/                # Exported analysis CSVs
 ├── tests/
-│   ├── test_app.py             # Unit tests for core backend, plan CRUD, bar chart data (98 tests)
+│   ├── test_app.py             # Unit tests for core backend, basket CRUD, bar chart data (98 tests)
 │   ├── test_sliding_window.py  # Sliding window algorithm tests (32 tests)
 │   └── test_sliding_quick.py   # Manual CLI script for inspecting results
 ├── requirements.txt        # pandas, numpy, yfinance, pytest
@@ -52,7 +52,7 @@ meguru/
 - Shaded bands showing investment windows on equity curves
 
 ### Entry Stop-Loss & Re-Entry
-- Configurable entry stop-loss (SL%) on both main screen and plan screen
+- Configurable entry stop-loss (SL%) on both main screen and basket screen
 - Records entry price on first day of each window; exits when close drops SL% below entry
 - Unlike trailing stops, intra-window run-ups don't tighten the stop -- only actual losses from entry trigger it
 - Optional re-entry (Re%): re-enters when price drops further below exit price, catching rebounds
@@ -61,20 +61,20 @@ meguru/
 - Stop-loss checked at daily close using EOD prices
 - Average-year mode skips stop-loss (no real price path to track)
 
-### Plan Builder
-- Combine strategies from multiple stocks into a unified trading plan
+### Basket Builder
+- Combine strategies from multiple stocks into a unified trading basket
 - Per-stock contribution bars in stacked bar chart view
 - Deterministic symbol-to-color mapping (djb2 hash) for consistent colors
 - **Allocation modes**: Equal weight or Return-weighted (with 5% floor)
 - **Capital options**: ₹1L / ₹5L / ₹10L
 - **Hide/show** individual strategies without removing them
-- **Plan overlap**: when adding a stock, shows how many days overlap with existing plan coverage and how many new days would be added
-- **Save/Load/Delete** named plans to server (`data/plans/*.json`)
-- Plans also stored in browser `localStorage` for persistence
+- **Basket overlap**: when adding a stock, shows how many days overlap with existing basket coverage and how many new days would be added
+- **Save/Load/Delete** named baskets to server (`data/plans/*.json`)
+- Baskets also stored in browser `localStorage` for persistence
 
 ### Exports
-- **Trading Plan CSV**: unified multi-stock trading calendar with optional window alignment (±2 days)
-- Export triggered from Plan panel "Export Trading Plan" button
+- **Trading Calendar CSV**: unified multi-stock trading calendar with optional window alignment (±2 days)
+- Export triggered from Basket panel "Export Trading Calendar" button
 
 ### Data & Caching
 - NSE symbol autocomplete (2,500+ stocks, indices, ETFs)
@@ -180,7 +180,7 @@ The `.NS` suffix is added automatically for NSE stocks.
 | Line / Bar toggle | Switch between equity curve and per-year bar chart |
 | SL% | Entry stop-loss percentage (0 = disabled) |
 | Re% | Re-entry percentage below stop price (0 = disabled) |
-| + Add to Plan | Add current stock's detected windows to the plan |
+| + Add to Basket | Add current stock's detected windows to the basket |
 
 ## Window Detection Results
 
@@ -190,7 +190,7 @@ The stats table shows each detected window with:
 - **Win Rate**: percentage of years with positive return
 - **Score**: `avg_return × win_rate`
 
-If a plan exists, a purple **Plan overlap** row shows coverage overlap and new days added.
+If a basket exists, a purple **Basket overlap** row shows coverage overlap and new days added.
 
 ## Backtest Views
 
@@ -198,7 +198,7 @@ If a plan exists, a purple **Plan overlap** row shows coverage overlap and new d
 - Green line: strategy equity curve (investing only during detected windows)
 - Blue line: Buy & Hold equity curve
 - Green/red shaded bands: individual window periods (profit/loss)
-- Purple bands: existing plan coverage (when overlap data available)
+- Purple bands: existing basket coverage (when overlap data available)
 - Metrics: total return, CAGR, max drawdown, days in market
 
 ### Bar Chart
@@ -206,15 +206,15 @@ If a plan exists, a purple **Plan overlap** row shows coverage overlap and new d
 - Days-in-market label below each year
 - Hover for exact values
 
-## Plan Builder
+## Basket Builder
 
 ### Adding Strategies
 1. Load a stock, review its detected windows
-2. Click **+ Add to Plan** to add it
+2. Click **+ Add to Basket** to add it
 3. Repeat for other stocks/parameters
-4. Click **Plan** in header to open the plan overlay
+4. Click **Basket** in header to open the basket overlay
 
-### Plan Controls
+### Basket Controls
 
 | Control | Function |
 |---------|----------|
@@ -222,10 +222,10 @@ If a plan exists, a purple **Plan overlap** row shows coverage overlap and new d
 | Year dropdown | Year selection or "Average" |
 | Capital dropdown | ₹1,00,000 / ₹5,00,000 / ₹10,00,000 |
 | Alloc dropdown | Equal weight or Return-weighted allocation |
-| SL% | Plan-level entry stop-loss (independent from main screen) |
-| Re% | Plan-level re-entry percentage |
+| SL% | Basket-level entry stop-loss (independent from main screen) |
+| Re% | Basket-level re-entry percentage |
 
-### Plan Bar Chart
+### Basket Bar Chart
 Shows stacked bars where each stock's contribution is drawn in its assigned color. Legend shows allocation percentages when return-weighted mode is active.
 
 ### Dynamic Capital Allocation
@@ -233,13 +233,13 @@ On each trading day, capital is split among all active windows. When one window'
 
 ### Managing Strategies
 - **Hide/Show**: Click "hide"/"show" on any strategy to exclude/include it from the backtest without deleting it
-- **Remove**: Click the delete button to permanently remove a strategy from the plan
-- **Save**: Save the plan with a name to the server for later retrieval
-- **Load**: Load a previously saved plan (replaces current plan in localStorage)
-- **Delete**: Remove a saved plan from the server
+- **Remove**: Click the delete button to permanently remove a strategy from the basket
+- **Save**: Save the basket with a name to the server for later retrieval
+- **Load**: Load a previously saved basket (replaces current basket in localStorage)
+- **Delete**: Remove a saved basket from the server
 
 ### Exporting
-Click **Export Trading Plan** to download a CSV trading calendar. The **Align windows** checkbox merges entry/exit dates within ±2 days of each other for cleaner execution.
+Click **Export Trading Calendar** to download a CSV trading calendar. The **Align windows** checkbox merges entry/exit dates within ±2 days of each other for cleaner execution.
 
 ---
 
@@ -273,7 +273,7 @@ Per-window entry-price-based stop tracking:
 
 ## Return-Weighted Allocation
 
-When "Return-wtd" allocation mode is selected in plan:
+When "Return-wtd" allocation mode is selected in basket:
 1. Compute unweighted (no stop-loss) bar chart returns for each stock
 2. Average each stock's per-year strategy returns
 3. Apply a 5% floor so weak performers still get minimal allocation
