@@ -1,8 +1,10 @@
- # Meguru 巡る
+  # Meguru 巡る
 
 **Seasonal Stock Pattern Detector**
 
 *"Meguru" means "to cycle" or "to revolve" in Japanese, capturing the essence of recurring market patterns.*
+
+> **Disclaimer**: This project was mostly developed by an LLM (Claude) with minimal code review by the repository owner. Use at your own risk.
 
 A lightweight web application that identifies recurring seasonal investment windows in stock prices using a sliding window detection algorithm. Focused on Indian NSE stocks, it finds optimal N-day windows across 20 years of history, backtests strategies with equity curves and per-year breakdowns, and combines multiple stocks into unified trading baskets. Data is fetched from Yahoo Finance and cached locally as CSV.
 
