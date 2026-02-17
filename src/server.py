@@ -2308,7 +2308,11 @@ HTML_PAGE = """<!DOCTYPE html>
                 '<div class="metric"><span class="label">Avg Strategy:</span><span class="' + (avgStrategy >= 0 ? 'positive' : 'negative') + '">' + avgStrategy.toFixed(1) + '%</span></div>' +
                 '<div class="metric"><span class="label">Avg B&H:</span><span class="' + (avgBH >= 0 ? 'positive' : 'negative') + '">' + avgBH.toFixed(1) + '%</span></div>' +
                 '<div class="metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>' +
-                '<div class="metric"><span class="label">Sharpe:</span><span style="color:' + sharpeColor(data.sharpe_ratio) + '">' + (data.sharpe_ratio != null ? data.sharpe_ratio.toFixed(2) : 'N/A') + ' (' + (data.sharpe_label || 'N/A') + ')</span></div>';
+                '<div class="metric"><span class="label">Sharpe:</span><span style="color:' + sharpeColor(data.sharpe_ratio) + '">' + (data.sharpe_ratio != null ? data.sharpe_ratio.toFixed(2) : 'N/A') + ' (' + (data.sharpe_label || 'N/A') + ')</span></div>' +
+                '<div class="metric" id="plan-impact"><span class="label">Plan Impact:</span><span style="color:#888">...</span></div>';
+            
+            // Async fetch plan impact
+            updatePlanImpact();
         }
         
         function renderTradesTable(data) {
@@ -2999,6 +3003,87 @@ HTML_PAGE = """<!DOCTYPE html>
             savePlan(plan);
             state.planWeights = null; // invalidate cached weights
             setStatus(`Added ${displaySymbol(state.symbol)} to plan (${plan.length} strateg${plan.length === 1 ? 'y' : 'ies'})`);
+        }
+        
+        // Show plan impact in single-stock bar chart view
+        async function updatePlanImpact() {
+            const impactDiv = document.getElementById('plan-impact');
+            if (!impactDiv) return;
+            
+            const plan = loadPlan();
+            if (plan.length === 0) {
+                impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#666">No plan yet</span>';
+                return;
+            }
+            
+            // Check if current stock (with same params) is already in plan
+            const isInPlan = plan.some(s => 
+                s.symbol === state.symbol && 
+                s.window_size === state.windowSize && 
+                s.threshold === state.threshold
+            );
+            
+            if (isInPlan) {
+                impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#888">Already in plan</span>';
+                return;
+            }
+            
+            impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#888">Computing...</span>';
+            
+            try {
+                // Fetch baseline plan metrics
+                const baseParams = new URLSearchParams({
+                    strategies: JSON.stringify(plan),
+                });
+                const baseRes = await fetch('/api/plan/bar?' + baseParams);
+                const baseData = await baseRes.json();
+                if (baseData.error) {
+                    impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#666">-</span>';
+                    return;
+                }
+                
+                // Create hypothetical plan with current stock added
+                const hypotheticalPlan = [...plan, {
+                    symbol: state.symbol,
+                    window_size: state.windowSize,
+                    threshold: state.threshold,
+                }];
+                const hypParams = new URLSearchParams({
+                    strategies: JSON.stringify(hypotheticalPlan),
+                });
+                const hypRes = await fetch('/api/plan/bar?' + hypParams);
+                const hypData = await hypRes.json();
+                if (hypData.error) {
+                    impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#666">-</span>';
+                    return;
+                }
+                
+                // Compute deltas
+                const baseYears = baseData.years || [];
+                const hypYears = hypData.years || [];
+                const baseAvgReturn = baseYears.length > 0 ? baseYears.reduce((s, d) => s + d.combined_return, 0) / baseYears.length : 0;
+                const hypAvgReturn = hypYears.length > 0 ? hypYears.reduce((s, d) => s + d.combined_return, 0) / hypYears.length : 0;
+                const baseSharpe = baseData.sharpe_ratio;
+                const hypSharpe = hypData.sharpe_ratio;
+                
+                const returnDelta = hypAvgReturn - baseAvgReturn;
+                const sharpeDelta = (hypSharpe != null && baseSharpe != null) ? hypSharpe - baseSharpe : null;
+                
+                // Format output
+                const returnSign = returnDelta >= 0 ? '+' : '';
+                const returnColor = returnDelta >= 0 ? '#44ff88' : '#ff4466';
+                const sharpeSign = sharpeDelta != null && sharpeDelta >= 0 ? '+' : '';
+                const sharpeColor = sharpeDelta != null ? (sharpeDelta >= 0 ? '#44ff88' : '#ff4466') : '#888';
+                
+                let html = '<span class="label">Plan Impact:</span>';
+                html += '<span style="color:' + returnColor + '">' + returnSign + returnDelta.toFixed(1) + '% return</span>';
+                if (sharpeDelta != null) {
+                    html += '<span style="margin-left:8px;color:' + sharpeColor + '">' + sharpeSign + sharpeDelta.toFixed(2) + ' Sharpe</span>';
+                }
+                impactDiv.innerHTML = html;
+            } catch (err) {
+                impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#666">-</span>';
+            }
         }
         
         // Remove strategy from plan
