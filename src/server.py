@@ -993,12 +993,8 @@ HTML_PAGE = """<!DOCTYPE html>
             font-weight: bold;
             color: #00d4ff;
             font-size: 12px;
-        }
-        
-        .plan-strategy-params {
-            font-size: 10px;
-            color: #bbb;
-            margin-top: 1px;
+            display: flex;
+            align-items: center;
         }
         
         .plan-strategy-remove {
@@ -1113,9 +1109,10 @@ HTML_PAGE = """<!DOCTYPE html>
         
         .plan-chart {
             flex: 1;
-            padding: 16px 16px 0 16px;
+            padding: 4px 16px 0 16px;
             min-height: 0;
             overflow-x: auto;
+            overflow-y: hidden;
         }
         
         .plan-chart svg {
@@ -3038,6 +3035,23 @@ HTML_PAGE = """<!DOCTYPE html>
             planOverlay.classList.remove('show');
         }
         
+        // Resize observer: redraw plan chart on container resize (e.g. zoom)
+        let planResizeTimer = null;
+        const planResizeObserver = new ResizeObserver(() => {
+            if (!planOverlay.classList.contains('show')) return;
+            clearTimeout(planResizeTimer);
+            planResizeTimer = setTimeout(() => {
+                if (getVisiblePlan().length > 0) {
+                    if (state.planBarMode) {
+                        if (state.planBarData) renderPlanBarChart(state.planBarData);
+                    } else {
+                        if (state.lastPlanData) renderPlanChart(state.lastPlanData, parseInt(planCapitalSelect.value));
+                    }
+                }
+            }, 150);
+        });
+        planResizeObserver.observe(planChart);
+        
         // Get plan filtered to only visible (non-hidden) strategies
         function getVisiblePlan() {
             const plan = loadPlan();
@@ -3062,18 +3076,28 @@ HTML_PAGE = """<!DOCTYPE html>
             
             planStrategiesList.innerHTML = plan.map((s, idx) => {
                 const isHidden = state.hiddenStrategies.has(idx);
-                return `
-                    <div class="plan-strategy-item${isHidden ? ' strategy-hidden' : ''}" data-index="${idx}">
-                        <div class="plan-strategy-info">
-                            <div class="plan-strategy-symbol">${displaySymbol(s.symbol)}</div>
-                            <div class="plan-strategy-params">${s.window_size}d window | ${s.threshold}% threshold</div>
-                        </div>
-                        <div class="plan-strategy-actions">
-                            <div class="plan-strategy-hide${isHidden ? ' is-hidden' : ''}" data-index="${idx}" title="${isHidden ? 'Show in chart' : 'Hide from chart'}">${isHidden ? 'show' : 'hide'}</div>
-                            <div class="plan-strategy-remove" data-index="${idx}">\u2715</div>
-                        </div>
-                    </div>
-                `;
+                const color = symbolToColor(s.symbol);
+                // Compute avg return from bar data if available
+                let avgReturnHTML = '';
+                if (state.planBarData && state.planBarData.years) {
+                    const sym = s.symbol;
+                    const yrs = state.planBarData.years;
+                    const returns = yrs.map(d => d.stock_returns && d.stock_returns[sym] != null ? d.stock_returns[sym] : null).filter(v => v != null);
+                    if (returns.length > 0) {
+                        const avg = returns.reduce((a, b) => a + b, 0) / returns.length;
+                        const valColor = avg >= 0 ? '#44ff88' : '#ff4466';
+                        avgReturnHTML = '<span style="color:' + valColor + ';font-weight:600;font-size:11px;margin-left:6px">' + avg.toFixed(1) + '%</span>';
+                    }
+                }
+                return '<div class="plan-strategy-item' + (isHidden ? ' strategy-hidden' : '') + '" data-index="' + idx + '">' +
+                    '<div class="plan-strategy-info" title="' + s.window_size + 'd window | ' + s.threshold + '% threshold">' +
+                        '<div class="plan-strategy-symbol"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:5px;vertical-align:middle"></span>' + displaySymbol(s.symbol) + avgReturnHTML + '</div>' +
+                    '</div>' +
+                    '<div class="plan-strategy-actions">' +
+                        '<div class="plan-strategy-hide' + (isHidden ? ' is-hidden' : '') + '" data-index="' + idx + '" title="' + (isHidden ? 'Show in chart' : 'Hide from chart') + '">' + (isHidden ? 'show' : 'hide') + '</div>' +
+                        '<div class="plan-strategy-remove" data-index="' + idx + '">\\u2715</div>' +
+                    '</div>' +
+                '</div>';
             }).join('');
             
             // Add remove handlers
@@ -3674,11 +3698,11 @@ HTML_PAGE = """<!DOCTYPE html>
 
             const container = planChart.getBoundingClientRect();
             const containerWidth = container.width - 32;
-            const rawHeight = container.height - 20;
+            const rawHeight = container.height - 8;
 
-            // 3-zone SVG: topZone (value labels above bars) | chartZone (bars) | bottomZone (year/days labels)
-            const topZone = 18;      // px for value labels above tallest bar
-            const bottomZone = 44;   // px for year + days labels below chart
+            // 3-zone SVG: topZone (year labels at top + value labels) | chartZone (bars) | bottomZone (small buffer)
+            const topZone = 34;      // px for year labels at top + value labels above tallest bar
+            const bottomZone = 4;    // minimal bottom buffer
             const leftPad = 70;
             const rightPad = 20;
             const n = years.length;
@@ -3784,12 +3808,10 @@ HTML_PAGE = """<!DOCTYPE html>
                 const bhLabelY = d.bh_return >= 0 ? bhTop - 4 : bhBot + 14;
                 bars += '<text x="' + (bhX + barWidth / 2).toFixed(1) + '" y="' + bhLabelY.toFixed(1) + '" fill="#6699ff" font-size="12" font-weight="600" text-anchor="middle">' + d.bh_return.toFixed(0) + '%</text>';
 
-                // Year label — placed in the bottom zone
-                labels += '<text x="' + cx.toFixed(1) + '" y="' + (topZone + chartHeight + 16) + '" fill="#888" font-size="12" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
-                // Days in market label
-                if (d.days_in_market != null) {
-                    labels += '<text x="' + cx.toFixed(1) + '" y="' + (topZone + chartHeight + 30) + '" fill="#666" font-size="10" text-anchor="middle">' + d.days_in_market + '/' + d.total_trading_days + 'd</text>';
-                }
+                // Year label — placed at the top of the SVG
+                labels += '<text x="' + cx.toFixed(1) + '" y="14" fill="#ccc" font-size="13" text-anchor="middle">&#39;' + String(d.year).slice(-2) + '</text>';
+                // Dotted vertical line from below year label down through chart area
+                labels += '<line x1="' + cx.toFixed(1) + '" y1="20" x2="' + cx.toFixed(1) + '" y2="' + (topZone + chartHeight).toFixed(1) + '" stroke="#333" stroke-width="1" stroke-dasharray="3,4"/>';
             });
 
             const svg = '<svg width="' + width + '" height="' + svgHeight + '">' +
@@ -3797,23 +3819,24 @@ HTML_PAGE = """<!DOCTYPE html>
                     '<line x1="' + leftPad + '" y1="' + yScale(v).toFixed(1) + '" x2="' + (width - rightPad) + '" y2="' + yScale(v).toFixed(1) + '" stroke="' + (v === 0 ? '#666' : '#333') + '" stroke-width="' + (v === 0 ? 2 : 1) + '"/>'
                 ).join('') +
                 yTicks.map(v =>
-                    '<text x="' + (leftPad - 10) + '" y="' + (yScale(v) + 4).toFixed(1) + '" fill="#888" font-size="11" text-anchor="end">' + v.toFixed(0) + '%</text>'
+                    '<text x="' + (leftPad - 10) + '" y="' + (yScale(v) + 4).toFixed(1) + '" fill="#bbb" font-size="13" text-anchor="end">' + v.toFixed(0) + '%</text>'
                 ).join('') +
                 bars + labels +
                 '</svg>';
 
             planChart.innerHTML = svg;
 
-            // Build legend showing per-stock colors and avg returns
+            // Build legend — only Combined and B&H (per-stock info is in sidebar)
             let legendHTML = '';
             const weights = state.planWeights;
-            symbols.forEach(sym => {
-                const color = symbolColorMap[sym] || '#888';
-                const avgReturn = years.reduce((s, d) => s + (d.stock_returns[sym] || 0), 0) / n;
-                const valColor = avgReturn >= 0 ? '#44ff88' : '#ff4466';
-                const weightLabel = weights && weights[sym] != null ? ' (' + (weights[sym] * 100).toFixed(0) + '%)' : '';
-                legendHTML += '<div class="plan-legend-item" style="pointer-events:none"><span class="plan-legend-dot" style="background:' + color + '"></span><span>' + sym + weightLabel + '</span><span style="color:' + valColor + ';font-weight:600">avg ' + avgReturn.toFixed(1) + '%</span></div>';
-            });
+            // Show allocation weights compactly if available
+            if (weights) {
+                symbols.forEach(sym => {
+                    const color = symbolColorMap[sym] || '#888';
+                    const w = weights[sym] != null ? (weights[sym] * 100).toFixed(0) + '%' : '';
+                    if (w) legendHTML += '<div class="plan-legend-item" style="pointer-events:none;padding:2px 5px"><span class="plan-legend-dot" style="background:' + color + ';width:8px;height:8px"></span><span style="font-size:11px">' + displaySymbol(sym) + ' ' + w + '</span></div>';
+                });
+            }
             // Combined
             const avgCombined = years.reduce((s, d) => s + d.combined_return, 0) / n;
             const combinedColor = avgCombined >= 0 ? '#44ff88' : '#ff4466';
@@ -3826,11 +3849,15 @@ HTML_PAGE = """<!DOCTYPE html>
 
             // Metrics
             const winYears = years.filter(d => d.combined_return > d.bh_return).length;
+            // Compute average time in market %
+            const dimYears = years.filter(d => d.days_in_market != null && d.total_trading_days > 0);
+            const avgTimeInMarket = dimYears.length > 0 ? dimYears.reduce((s, d) => s + (d.days_in_market / d.total_trading_days) * 100, 0) / dimYears.length : null;
             planMetrics.innerHTML =
                 '<div class="backtest-metric"><span class="label">Avg Plan:</span><span class="' + (avgCombined >= 0 ? 'positive' : 'negative') + '">' + avgCombined.toFixed(1) + '%</span></div>' +
                 '<div class="backtest-metric"><span class="label">Avg B&H:</span><span class="' + (avgBH >= 0 ? 'positive' : 'negative') + '">' + avgBH.toFixed(1) + '%</span></div>' +
                 '<div class="backtest-metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>' +
-                '<div class="backtest-metric"><span class="label">Sharpe:</span><span style="color:' + sharpeColor(data.sharpe_ratio) + '">' + (data.sharpe_ratio != null ? data.sharpe_ratio.toFixed(2) : 'N/A') + ' (' + (data.sharpe_label || 'N/A') + ')</span></div>';
+                '<div class="backtest-metric"><span class="label">Sharpe:</span><span style="color:' + sharpeColor(data.sharpe_ratio) + '">' + (data.sharpe_ratio != null ? data.sharpe_ratio.toFixed(2) : 'N/A') + ' (' + (data.sharpe_label || 'N/A') + ')</span></div>' +
+                (avgTimeInMarket != null ? '<div class="backtest-metric"><span class="label">Avg Time in Market:</span><span>' + avgTimeInMarket.toFixed(0) + '%</span></div>' : '');
         }
         
         // Export unified trading calendar
