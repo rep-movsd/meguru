@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import calendar
 import datetime as dt
+import json as _json
+import re as _re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -18,11 +20,20 @@ import yfinance as yf
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 STOCKS_FILE = DATA_DIR / "stocks" / "nse_stocks.csv"
+BASKETS_DIR = DATA_DIR / "baskets"
 PERIOD_COUNTS = {"weekly": 52, "monthly": 12}
 OFFSET_LIMITS = {"weekly": 6, "monthly": 30}
-NUM_YEARS = 15
+NUM_YEARS = 20
 
 MONTH_NAMES = [calendar.month_abbr[i] for i in range(1, 13)]
+
+# In-memory cache for loaded symbol DataFrames to avoid repeated CSV reads.
+# Key: symbol string, Value: (DataFrame, timestamp of last load)
+_symbol_cache: dict[str, pd.DataFrame] = {}
+
+# In-memory cache for sliding window detection results.
+# Key: (symbol, window_size, threshold_pct_int), Value: list[SlidingWindow]
+_window_detect_cache: dict[tuple, list] = {}
 
 
 # =============================================================================
@@ -189,6 +200,8 @@ def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     if idx.tz is not None:
         idx = idx.tz_localize(None)
     df.index = idx
+    # Drop rows with NaT in the index (from unparseable dates)
+    df = df[df.index.notna()]
     df = df.rename(columns=str.title)
     # Ensure required columns exist
     required = ["Open", "High", "Low", "Close"]
@@ -211,6 +224,15 @@ def _download_symbol(symbol: str, start: dt.date | None = None) -> pd.DataFrame:
 def load_symbol_data(symbol: str) -> pd.DataFrame:
     ensure_dirs()
     symbol_key = sanitize_symbol(symbol)
+    
+    # Return from in-memory cache if available and data is recent
+    # (use 4-day window to account for weekends and holidays)
+    if symbol_key in _symbol_cache:
+        cached_df = _symbol_cache[symbol_key]
+        cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=4)
+        if not cached_df.empty and cached_df.index.max().normalize() >= cutoff:
+            return cached_df
+    
     cache_path = DATA_DIR / f"{symbol_key}.csv"
     if cache_path.exists():
         cached = pd.read_csv(cache_path, index_col=0, parse_dates=True)
@@ -232,6 +254,7 @@ def load_symbol_data(symbol: str) -> pd.DataFrame:
 
     updated = updated.sort_index()
     updated.to_csv(cache_path)
+    _symbol_cache[symbol_key] = updated
     return updated
 
 
@@ -288,6 +311,77 @@ def synthesize_basket(symbols: Iterable[str]) -> pd.DataFrame:
             "Close": close_series,
         }
     )
+
+
+# =============================================================================
+# Market Cap Data
+# =============================================================================
+
+_MCAP_CACHE_FILE = DATA_DIR / "marketcap.json"
+_MCAP_MAX_AGE_DAYS = 7
+
+
+def _load_mcap_cache() -> dict:
+    """Load the market-cap JSON cache from disk."""
+    if _MCAP_CACHE_FILE.exists():
+        try:
+            return _json.loads(_MCAP_CACHE_FILE.read_text())
+        except (_json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def _save_mcap_cache(cache: dict) -> None:
+    """Write the market-cap cache to disk."""
+    ensure_dirs()
+    _MCAP_CACHE_FILE.write_text(_json.dumps(cache, indent=2))
+
+
+def get_market_caps(symbols: list[str]) -> dict[str, float]:
+    """Return market capitalisation for each symbol.
+
+    Values are cached in a JSON file and refreshed if older than
+    ``_MCAP_MAX_AGE_DAYS`` days.  Indices (starting with ``^``) have
+    no meaningful market cap and are returned as 0.
+
+    Returns a dict ``{display_symbol: market_cap}`` where
+    ``display_symbol`` strips the ``.NS`` suffix.
+    """
+    cache = _load_mcap_cache()
+    cutoff = (dt.datetime.now() - dt.timedelta(days=_MCAP_MAX_AGE_DAYS)).isoformat()
+    result: dict[str, float] = {}
+    dirty = False
+
+    for sym in symbols:
+        display = sym.replace(".NS", "")
+        # Indices have no market cap
+        if sym.startswith("^"):
+            result[display] = 0.0
+            continue
+
+        entry = cache.get(sym)
+        if entry and entry.get("fetched_at", "") >= cutoff:
+            result[display] = float(entry.get("value", 0))
+            continue
+
+        # Fetch from yfinance
+        try:
+            info = yf.Ticker(sym).info
+            mcap = float(info.get("marketCap", 0) or 0)
+        except Exception:
+            mcap = 0.0
+
+        cache[sym] = {
+            "value": mcap,
+            "fetched_at": dt.datetime.now().isoformat(),
+        }
+        dirty = True
+        result[display] = mcap
+
+    if dirty:
+        _save_mcap_cache(cache)
+
+    return result
 
 
 # =============================================================================
@@ -676,6 +770,583 @@ def simulate_all_years(
     for year in years:
         results[year] = simulate_trades_for_year(rows, runs, year, period_type)
     return results
+
+
+# =============================================================================
+# Sliding Window Detection
+# =============================================================================
+
+@dataclass
+class SlidingWindow:
+    """A detected investment window from sliding window analysis."""
+    start_day: int  # Day of year (1-366)
+    end_day: int    # Day of year (1-366), inclusive
+    length: int     # Number of days
+    avg_return: float  # Average return % across years
+    win_rate: float    # Fraction of years with positive return (0-1)
+    score: float       # avg_return * win_rate
+    yield_per_day: float  # avg_return / length (basis points per day)
+    year_returns: dict[int, float | None]  # Per-year returns
+    
+    @property
+    def start_date_str(self) -> str:
+        """Convert start_day to 'Mon-DD' format."""
+        # Use a non-leap year as reference
+        ref_date = dt.date(2023, 1, 1) + dt.timedelta(days=self.start_day - 1)
+        return f"{calendar.month_abbr[ref_date.month]}-{ref_date.day}"
+    
+    @property
+    def end_date_str(self) -> str:
+        """Convert end_day to 'Mon-DD' format."""
+        ref_date = dt.date(2023, 1, 1) + dt.timedelta(days=self.end_day - 1)
+        return f"{calendar.month_abbr[ref_date.month]}-{ref_date.day}"
+
+
+def day_of_year(month: int, day: int) -> int:
+    """Convert month/day to day of year (1-366)."""
+    ref_date = dt.date(2023, 1, 1)
+    target = dt.date(2023, month, day)
+    return (target - ref_date).days + 1
+
+
+def date_from_day_of_year(doy: int) -> tuple[int, int]:
+    """Convert day of year to (month, day)."""
+    ref_date = dt.date(2023, 1, 1) + dt.timedelta(days=doy - 1)
+    return ref_date.month, ref_date.day
+
+
+@dataclass
+class YearlyReturnsCache:
+    """
+    Precomputed cumulative returns for efficient window calculations.
+    
+    For each year, stores cumulative product of (1 + daily_return) indexed by day of year.
+    This allows O(1) calculation of any window's return via: cum[end] / cum[start-1] - 1
+    """
+    years: list[int]
+    # cum_returns[year][doy] = cumulative product from day 1 to day doy
+    # return for window [start, end] = cum[end] / cum[start-1] - 1
+    cum_returns: dict[int, dict[int, float]]
+    # Valid range for each year (first and last day with data)
+    valid_ranges: dict[int, tuple[int, int]]
+    
+    def get_return(self, year: int, start_doy: int, end_doy: int) -> float | None:
+        """
+        Get return for a window in O(1) time, using nearest trading days.
+        
+        Windows must be within a single year (end_doy <= 365).
+        """
+        if year not in self.cum_returns:
+            return None
+        
+        year_data = self.cum_returns[year]
+        valid_start, valid_end = self.valid_ranges.get(year, (366, 0))
+        
+        # Check if window is roughly within valid range
+        if start_doy < valid_start - 5 or end_doy > valid_end + 5:
+            return None
+        
+        # Find nearest trading day for end_doy (search nearby)
+        actual_end = self._find_nearest_day(year_data, end_doy, valid_start, valid_end)
+        if actual_end is None:
+            return None
+        
+        # Find nearest trading day for start_doy - 1
+        if start_doy == 1:
+            start_cum = 1.0
+        else:
+            actual_start_prev = self._find_nearest_day(year_data, start_doy - 1, valid_start, valid_end)
+            if actual_start_prev is None:
+                return None
+            start_cum = year_data[actual_start_prev]
+        
+        end_cum = year_data[actual_end]
+        
+        if start_cum == 0:
+            return None
+        
+        return (end_cum / start_cum - 1) * 100
+    
+    def _find_nearest_day(self, year_data: dict[int, float], target_doy: int, valid_start: int, valid_end: int) -> int | None:
+        """Find nearest trading day to target within a few days."""
+        # Check exact match first
+        if target_doy in year_data:
+            return target_doy
+        
+        # Search nearby (up to 5 days in each direction)
+        for offset in range(1, 6):
+            # Check before
+            if target_doy - offset >= valid_start and (target_doy - offset) in year_data:
+                return target_doy - offset
+            # Check after
+            if target_doy + offset <= valid_end and (target_doy + offset) in year_data:
+                return target_doy + offset
+        
+        return None
+
+
+def build_returns_cache(df: pd.DataFrame, years: list[int]) -> YearlyReturnsCache:
+    """
+    Build precomputed returns cache for efficient window scoring.
+    
+    Uses numpy vectorization instead of iterrows for ~20x speedup.
+    """
+    cum_returns: dict[int, dict[int, float]] = {}
+    valid_ranges: dict[int, tuple[int, int]] = {}
+    
+    for year in years:
+        year_start = pd.Timestamp(year=year, month=1, day=1)
+        year_end = pd.Timestamp(year=year, month=12, day=31)
+        
+        year_data = df.loc[year_start:year_end]
+        if year_data.empty:
+            continue
+        
+        closes = year_data["Close"].values
+        if len(closes) < 2:
+            continue
+        
+        # Vectorized: day-of-year extraction and cumulative product
+        doys = year_data.index.dayofyear.values
+        daily_rets = np.empty(len(closes))
+        daily_rets[0] = 1.0
+        daily_rets[1:] = closes[1:] / closes[:-1]
+        cum_arr = np.cumprod(daily_rets)
+        
+        # Build dict from numpy arrays (fast zip, no per-row overhead)
+        cum = dict(zip(doys.tolist(), cum_arr.tolist()))
+        first_doy = int(doys[0])
+        last_doy = int(doys[-1])
+        
+        cum_returns[year] = cum
+        valid_ranges[year] = (first_doy, last_doy)
+    
+    return YearlyReturnsCache(years=years, cum_returns=cum_returns, valid_ranges=valid_ranges)
+
+
+def score_window_fast(
+    cache: YearlyReturnsCache,
+    start_doy: int,
+    end_doy: int,
+    min_years: int = 5,
+) -> tuple[float, float, float, dict[int, float | None]] | None:
+    """
+    Score a window using precomputed cache - O(years) time.
+    
+    Returns:
+        (avg_return, win_rate, score, year_returns) or None if insufficient data
+    """
+    year_returns: dict[int, float | None] = {}
+    valid_returns: list[float] = []
+    
+    for year in cache.years:
+        ret = cache.get_return(year, start_doy, end_doy)
+        year_returns[year] = ret
+        if ret is not None:
+            valid_returns.append(ret)
+    
+    if len(valid_returns) < min_years:
+        return None
+    
+    avg_return = sum(valid_returns) / len(valid_returns)
+    win_count = sum(1 for r in valid_returns if r >= 0)
+    win_rate = win_count / len(valid_returns)
+    score = avg_return * win_rate
+    
+    return avg_return, win_rate, score, year_returns
+
+
+# NOTE: find_best_window_fast and narrow_window_fast are currently unused.
+# They support variable-length window search and yield optimization.
+# Kept for potential future use.
+
+def find_best_window_fast(
+    cache: YearlyReturnsCache,
+    max_days: int,
+    excluded_days: set[int] | None = None,
+    min_window: int = 5,
+    threshold: float = 0.5,
+) -> SlidingWindow | None:
+    """
+    Find the best investment window up to max_days length.
+    Uses precomputed cache for O(365 × max_days × years) total.
+    
+    Args:
+        cache: Precomputed returns cache
+        max_days: Maximum window length in days
+        excluded_days: Set of day-of-year values that are already used
+        min_window: Minimum window length in days
+        threshold: Minimum win rate to consider (0-1)
+    
+    Returns:
+        Best SlidingWindow or None if no valid window found
+    """
+    if excluded_days is None:
+        excluded_days = set()
+    
+    best_window: SlidingWindow | None = None
+    best_score = float('-inf')
+    
+    # Scan all possible start days
+    for start_doy in range(1, 366):
+        # Skip if start day is excluded
+        if start_doy in excluded_days:
+            continue
+        
+        # Try all window lengths from min to max
+        for length in range(min_window, max_days + 1):
+            end_doy = start_doy + length - 1
+            
+            # Keep windows within single year
+            if end_doy > 365:
+                break
+            
+            # Check if any day in window is excluded
+            if excluded_days:
+                has_excluded = False
+                for d in range(start_doy, end_doy + 1):
+                    if d in excluded_days:
+                        has_excluded = True
+                        break
+                if has_excluded:
+                    break  # This and longer windows from this start are invalid
+            
+            # Score the window using cache
+            result = score_window_fast(cache, start_doy, end_doy)
+            if result is None:
+                continue
+            
+            avg_return, win_rate, score, year_returns = result
+            
+            # Must meet threshold
+            if win_rate < threshold:
+                continue
+            
+            # Only consider bullish windows (positive avg return)
+            if avg_return <= 0:
+                continue
+            
+            if score > best_score:
+                best_score = score
+                best_window = SlidingWindow(
+                    start_day=start_doy,
+                    end_day=end_doy,
+                    length=length,
+                    avg_return=avg_return,
+                    win_rate=win_rate,
+                    score=score,
+                    yield_per_day=avg_return / length,
+                    year_returns=year_returns,
+                )
+    
+    return best_window
+
+
+def narrow_window_fast(
+    cache: YearlyReturnsCache,
+    window: SlidingWindow,
+    min_window: int = 5,
+    threshold: float = 0.5,
+) -> SlidingWindow:
+    """
+    Narrow a window to maximize yield (return per day).
+    Uses precomputed cache for efficiency.
+    
+    Args:
+        cache: Precomputed returns cache
+        window: The window to narrow
+        min_window: Minimum window length in days
+        threshold: Minimum win rate to consider (0-1)
+    
+    Returns:
+        Narrowed window (may be same as input if no improvement found)
+    """
+    best_window = window
+    best_yield = window.yield_per_day
+    
+    # Try all sub-windows
+    for trim_start in range(window.length - min_window + 1):
+        for trim_end in range(window.length - trim_start - min_window + 1):
+            new_start = window.start_day + trim_start
+            new_end = window.end_day - trim_end
+            new_length = new_end - new_start + 1
+            
+            if new_length < min_window:
+                continue
+            
+            result = score_window_fast(cache, new_start, new_end)
+            if result is None:
+                continue
+            
+            avg_return, win_rate, score, year_returns = result
+            
+            # Must meet threshold and be bullish
+            if win_rate < threshold or avg_return <= 0:
+                continue
+            
+            yield_per_day = avg_return / new_length
+            
+            if yield_per_day > best_yield:
+                best_yield = yield_per_day
+                best_window = SlidingWindow(
+                    start_day=new_start,
+                    end_day=new_end,
+                    length=new_length,
+                    avg_return=avg_return,
+                    win_rate=win_rate,
+                    score=score,
+                    yield_per_day=yield_per_day,
+                    year_returns=year_returns,
+                )
+    
+    return best_window
+
+
+def narrow_window_edges(
+    cache: YearlyReturnsCache,
+    window: SlidingWindow,
+    threshold: float = 0.5,
+    min_length: int = 5,
+) -> SlidingWindow:
+    """
+    Trim weak days from the edges of a detected window.
+
+    Iteratively tries moving start_day forward by 1 or end_day backward by 1.
+    Keeps each trim if the resulting window has a strictly higher score
+    (avg_return * win_rate) while still meeting the threshold and minimum
+    length constraints.  Stops when neither edge can be improved.
+
+    This runs *after* detection and merging, so merged windows that
+    absorbed low-value boundary days can shed them here.
+
+    Args:
+        cache: Precomputed returns cache.
+        window: The window to narrow.
+        threshold: Minimum win rate (0-1).
+        min_length: Shortest allowed window in days.
+
+    Returns:
+        A (possibly shorter) SlidingWindow with the same or better score.
+    """
+    best = window
+    improved = True
+
+    while improved:
+        improved = False
+
+        # --- try trimming from the start ---
+        if best.end_day - (best.start_day + 1) + 1 >= min_length:
+            result = score_window_fast(cache, best.start_day + 1, best.end_day)
+            if result is not None:
+                avg_return, win_rate, score, year_returns = result
+                if (
+                    win_rate >= threshold
+                    and avg_return > 0
+                    and score > best.score
+                ):
+                    new_length = best.end_day - (best.start_day + 1) + 1
+                    best = SlidingWindow(
+                        start_day=best.start_day + 1,
+                        end_day=best.end_day,
+                        length=new_length,
+                        avg_return=avg_return,
+                        win_rate=win_rate,
+                        score=score,
+                        yield_per_day=avg_return / new_length,
+                        year_returns=year_returns,
+                    )
+                    improved = True
+
+        # --- try trimming from the end ---
+        if best.end_day - 1 - best.start_day + 1 >= min_length:
+            result = score_window_fast(cache, best.start_day, best.end_day - 1)
+            if result is not None:
+                avg_return, win_rate, score, year_returns = result
+                if (
+                    win_rate >= threshold
+                    and avg_return > 0
+                    and score > best.score
+                ):
+                    new_length = (best.end_day - 1) - best.start_day + 1
+                    best = SlidingWindow(
+                        start_day=best.start_day,
+                        end_day=best.end_day - 1,
+                        length=new_length,
+                        avg_return=avg_return,
+                        win_rate=win_rate,
+                        score=score,
+                        yield_per_day=avg_return / new_length,
+                        year_returns=year_returns,
+                    )
+                    improved = True
+
+    return best
+
+
+def find_best_fixed_window(
+    cache: YearlyReturnsCache,
+    window_size: int,
+    range_start: int = 1,
+    range_end: int = 365,
+    threshold: float = 0.5,
+) -> SlidingWindow | None:
+    """
+    Find the best window of EXACTLY window_size days within [range_start, range_end].
+    
+    Only considers windows that fit entirely within the given range.
+    
+    Args:
+        cache: Precomputed returns cache
+        window_size: Exact window length in days
+        range_start: First allowed day-of-year (inclusive, 1-365)
+        range_end: Last allowed day-of-year (inclusive, 1-365)
+        threshold: Minimum win rate to consider (0-1)
+    
+    Returns:
+        Best SlidingWindow or None if no valid window found
+    """
+    best_window: SlidingWindow | None = None
+    best_score = float('-inf')
+    
+    # Window must fit within [range_start, range_end]
+    last_start = range_end - window_size + 1
+    if last_start < range_start:
+        return None
+    
+    for start_doy in range(range_start, last_start + 1):
+        end_doy = start_doy + window_size - 1
+        
+        result = score_window_fast(cache, start_doy, end_doy)
+        if result is None:
+            continue
+        
+        avg_return, win_rate, score, year_returns = result
+        
+        if win_rate < threshold:
+            continue
+        if avg_return <= 0:
+            continue
+        
+        if score > best_score:
+            best_score = score
+            best_window = SlidingWindow(
+                start_day=start_doy,
+                end_day=end_doy,
+                length=window_size,
+                avg_return=avg_return,
+                win_rate=win_rate,
+                score=score,
+                yield_per_day=avg_return / window_size,
+                year_returns=year_returns,
+            )
+    
+    return best_window
+
+
+def detect_sliding_windows(
+    df: pd.DataFrame,
+    window_size: int = 30,
+    threshold: float = 0.5,
+) -> list[SlidingWindow]:
+    """
+    Detect best investment windows using range-splitting algorithm.
+    
+    Algorithm:
+    1. Precompute cumulative returns for all years (done once)
+    2. Start with search range [1, 365]
+    3. Find the best window of exactly window_size days in the range
+    4. That window splits the range into two sub-ranges (left and right)
+    5. Recurse into each sub-range that can still fit a window
+    6. Collect all found windows, sorted by start day
+    7. Merge nearby windows (gap <= 7 days)
+    8. Narrow edges: trim boundary days that drag score down
+    
+    Args:
+        df: DataFrame with OHLC data
+        window_size: Fixed window length in days (e.g., 30)
+        threshold: Minimum win rate (0-1), default 0.5 (50%)
+    
+    Returns:
+        List of detected SlidingWindow objects, sorted by start day
+    """
+    if df.empty:
+        return []
+    
+    years = get_years_from_data(df)
+    if len(years) < 5:
+        return []
+    
+    # Build cache once for all window calculations
+    cache = build_returns_cache(df, years)
+    
+    def _find_in_range(range_start: int, range_end: int) -> list[SlidingWindow]:
+        """Recursively find windows by splitting ranges."""
+        # Can't fit a window in this range
+        if range_end - range_start + 1 < window_size:
+            return []
+        
+        window = find_best_fixed_window(
+            cache, window_size, range_start, range_end, threshold
+        )
+        
+        if window is None:
+            return []
+        
+        results = [window]
+        
+        # Left sub-range: [range_start, window.start_day - 1]
+        results.extend(_find_in_range(range_start, window.start_day - 1))
+        
+        # Right sub-range: [window.end_day + 1, range_end]
+        results.extend(_find_in_range(window.end_day + 1, range_end))
+        
+        return results
+    
+    windows = _find_in_range(1, 365)
+    windows.sort(key=lambda w: w.start_day)
+    
+    # Merge contiguous/near-contiguous windows.
+    # The fixed-size search splits continuous bullish periods into chunks.
+    # If the gap between consecutive windows is <= 7 days, they are really
+    # one seasonal period — merge and recompute stats from the cache.
+    max_merge_gap = 7
+    if len(windows) >= 2:
+        merged: list[SlidingWindow] = [windows[0]]
+        for w in windows[1:]:
+            prev = merged[-1]
+            gap = w.start_day - prev.end_day
+            if gap <= max_merge_gap:
+                new_start = prev.start_day
+                new_end = w.end_day
+                new_length = new_end - new_start + 1
+                result = score_window_fast(cache, new_start, new_end)
+                if result is not None:
+                    avg_return, win_rate, score, year_returns = result
+                    merged[-1] = SlidingWindow(
+                        start_day=new_start,
+                        end_day=new_end,
+                        length=new_length,
+                        avg_return=avg_return,
+                        win_rate=win_rate,
+                        score=score,
+                        yield_per_day=avg_return / new_length,
+                        year_returns=year_returns,
+                    )
+                else:
+                    merged.append(w)
+            else:
+                merged.append(w)
+        windows = merged
+    
+    # Narrow window edges: trim weak boundary days that drag the score down.
+    # Especially useful after merging, where the gap days between the
+    # original chunks may have poor returns.
+    windows = [
+        narrow_window_edges(cache, w, threshold=threshold, min_length=5)
+        for w in windows
+    ]
+    
+    return windows
 
 
 # =============================================================================
@@ -1218,48 +1889,37 @@ def get_backtest_data(
             if entry and exit_dt:
                 trading_periods.append((entry, exit_dt))
     
-    # Calculate daily returns
-    year_data["Daily_Return"] = year_data["Close"].pct_change()
+    # Vectorized daily returns
+    closes = year_data["Close"].values
+    daily_ret = np.empty(len(closes))
+    daily_ret[0] = 0.0
+    daily_ret[1:] = closes[1:] / closes[:-1] - 1.0
     
-    # Build equity curves
-    dates = []
-    seasonal_curve = []
-    bh_curve = []
+    # Vectorized buy-and-hold curve
+    bh_curve = (np.cumprod(1.0 + daily_ret) - 1.0) * 100.0
     
-    bh_cumulative = 0.0  # Cumulative P&L percentage for B&H
-    seasonal_cumulative = 0.0  # Cumulative P&L percentage for seasonal
+    # Build boolean mask for trading periods
+    idx_values = year_data.index.values
+    in_market = np.zeros(len(idx_values), dtype=bool)
+    for entry_ts, exit_ts in trading_periods:
+        entry_np = np.datetime64(entry_ts)
+        exit_np = np.datetime64(exit_ts)
+        in_market |= (idx_values >= entry_np) & (idx_values <= exit_np)
     
-    for idx, row in year_data.iterrows():
-        ts = pd.Timestamp(idx)
-        date_str = f"{calendar.month_abbr[ts.month]}-{ts.day}"
-        dates.append(date_str)
-        
-        daily_ret = row["Daily_Return"]
-        if pd.isna(daily_ret):
-            daily_ret = 0.0
-        
-        # Buy & Hold: always in the market
-        bh_cumulative = (1 + bh_cumulative / 100) * (1 + daily_ret) - 1
-        bh_cumulative *= 100
-        bh_curve.append(bh_cumulative)
-        
-        # Seasonal: only in market during green runs
-        # Check if we should be in position today
-        should_be_in = False
-        for entry, exit_dt in trading_periods:
-            if entry <= ts <= exit_dt:
-                should_be_in = True
-                break
-        
-        if should_be_in:
-            seasonal_cumulative = (1 + seasonal_cumulative / 100) * (1 + daily_ret) - 1
-            seasonal_cumulative *= 100
-        
-        seasonal_curve.append(seasonal_cumulative)
+    # Vectorized seasonal curve
+    masked_ret = np.where(in_market, daily_ret, 0.0)
+    seasonal_curve = (np.cumprod(1.0 + masked_ret) - 1.0) * 100.0
+    
+    # Vectorized date formatting
+    months = year_data.index.month.values
+    days_arr = year_data.index.day.values
+    month_abbrs = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    dates = [f"{month_abbrs[m]}-{d}" for m, d in zip(months.tolist(), days_arr.tolist())]
     
     result = {
-        "seasonal_curve": seasonal_curve,
-        "bh_curve": bh_curve,
+        "seasonal_curve": seasonal_curve.tolist(),
+        "bh_curve": bh_curve.tolist(),
         "trades": trades_info,
         "dates": dates,
     }
@@ -1268,237 +1928,1418 @@ def get_backtest_data(
     return result
 
 
-def get_plan_backtest_data(
-    strategies: list[dict],
+def _apply_entry_stop_loss(
+    in_market: np.ndarray,
+    daily_ret: np.ndarray,
+    closes: np.ndarray,
+    windows: list,
+    idx_values: np.ndarray,
     year: int,
+    stop_loss_pct: float,
+    reentry_pct: float,
+) -> None:
+    """
+    Apply per-window entry stop-loss (and optional re-entry) to a single
+    stock's in_market mask and daily_ret array, in place.
+
+    For each window, records the entry price (close on first active day).
+    When the close drops stop_loss_pct% from the entry price, marks remaining
+    window days as out-of-market. If reentry_pct > 0, re-enters when the
+    close drops that additional % below the stop-out price (may catch
+    rebounds). Only one re-entry per window; on re-entry the entry price
+    resets to the re-entry close.
+
+    Modifies in_market and daily_ret in place.
+    """
+    n_days = len(idx_values)
+
+    for w in windows:
+        start_date = dt.date(year, 1, 1) + dt.timedelta(days=w.start_day - 1)
+        end_date = dt.date(year, 1, 1) + dt.timedelta(days=w.end_day - 1)
+        entry_np = np.datetime64(pd.Timestamp(start_date))
+        exit_np = np.datetime64(pd.Timestamp(end_date))
+        w_mask = (idx_values >= entry_np) & (idx_values <= exit_np)
+
+        entry_price = np.nan
+        stopped_out = False
+        reentered = False
+        stop_price = 0.0
+
+        for d in range(n_days):
+            if not w_mask[d]:
+                continue
+
+            close = closes[d]
+            if np.isnan(close):
+                continue
+
+            # First active day: record entry price, no stop check
+            if np.isnan(entry_price):
+                entry_price = close
+                continue
+
+            if stopped_out and not reentered:
+                in_market[d] = False
+                daily_ret[d] = 0.0
+                if reentry_pct > 0 and close <= stop_price * (1.0 - reentry_pct / 100.0):
+                    reentered = True
+                    stopped_out = False
+                    entry_price = close
+                    in_market[d] = True
+                    daily_ret[d] = 0.0
+                continue
+
+            if stopped_out and reentered:
+                in_market[d] = False
+                daily_ret[d] = 0.0
+                continue
+
+            # Active position: check stop against entry price
+            loss_from_entry = (entry_price - close) / entry_price
+            if loss_from_entry >= stop_loss_pct / 100.0:
+                stop_price = close
+                stopped_out = True
+
+
+def get_window_backtest_data(
+    symbol: str,
+    window_size: int,
+    threshold: int,
+    year: int,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
 ) -> dict:
     """
-    Generate combined backtest data for multiple strategies.
+    Generate backtest data for sliding window mode.
+    
+    Uses detected windows as trading periods and builds daily equity curves
+    comparing the window strategy vs buy & hold.
     
     Args:
-        strategies: List of strategy dicts with symbol, period, offset, threshold
+        symbol: Stock symbol
+        window_size: Fixed window length in days
+        threshold: Win rate threshold percentage (50-100)
         year: Year to backtest
+        stop_loss_pct: Entry stop-loss % (0 = disabled)
+        reentry_pct: Re-entry % below stop price (0 = disabled)
     
     Returns:
-        dict with:
-        - combined_curve: list of daily P&L percentages for combined strategy
-        - bh_curve: list of daily P&L percentages for buy & hold (first symbol)
-        - strategy_curves: dict mapping strategy index to individual curves
-        - trades_count: total number of trade entries
-        - total_days: total days in market across all strategies
-        - dates: list of date strings
+        dict with seasonal_curve, bh_curve, trades, dates, and optional warning
     """
-    if not strategies:
-        return {"error": "No strategies provided"}
+    df = load_symbol_data(symbol)
+    if df.empty:
+        return {"error": "No data available", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
     
-    # Collect all trading periods from all strategies
-    all_trading_periods = []  # List of (entry, exit, symbol) tuples
-    
-    for strat in strategies:
-        symbols = parse_symbols(strat.get("symbol", ""))
-        period = strat.get("period", "monthly")
-        offset = int(strat.get("offset", 0))
-        threshold = int(strat.get("threshold", 50))
-        
-        if not symbols:
-            continue
-        
-        # Load data
-        if len(symbols) == 1:
-            data = load_symbol_data(symbols[0])
-        else:
-            data = synthesize_basket(symbols)
-        
-        if data.empty:
-            continue
-        
-        # Get seasonal analysis to find green runs
-        seasonal_rows = generate_seasonal_data(data, period, offset, NUM_YEARS)
-        runs = detect_runs(seasonal_rows, min_length=2, threshold_pct=threshold)
-        green_runs = [r for r in runs if r.is_bullish]
-        
-        # For monthly, only include runs that START in first 12 months
-        if period == "monthly":
-            green_runs = [r for r in green_runs if r.start_idx < 12]
-        
-        # Build trading periods for this strategy
-        for run in green_runs:
-            entry_label = seasonal_rows[run.start_idx].label
-            exit_label = seasonal_rows[run.end_idx].label
-            entry_date_str = get_period_date_label(entry_label, period, offset, is_entry=True)
-            exit_date_str = get_period_date_label(exit_label, period, offset, is_entry=False)
-            
-            all_trading_periods.append({
-                "entry_date": entry_date_str,
-                "exit_date": exit_date_str,
-                "symbol": strat.get("symbol", ""),
-            })
-    
-    if not all_trading_periods:
-        return {"error": "No trades found in any strategy"}
-    
-    # Use first strategy's symbol for B&H reference
-    first_symbols = parse_symbols(strategies[0].get("symbol", ""))
-    if len(first_symbols) == 1:
-        ref_data = load_symbol_data(first_symbols[0])
+    # Detect windows using the same params
+    cache_key = (symbol, window_size, threshold)
+    if cache_key in _window_detect_cache:
+        windows = _window_detect_cache[cache_key]
     else:
-        ref_data = synthesize_basket(first_symbols)
+        windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+        _window_detect_cache[cache_key] = windows
     
-    if ref_data.empty:
-        return {"error": "No data for first strategy"}
+    if not windows:
+        return {"error": "No windows detected", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
     
     # Filter data for the specified year
     year_start = pd.Timestamp(year=year, month=1, day=1)
     year_end = pd.Timestamp(year=year, month=12, day=31)
-    year_data = ref_data.loc[year_start:year_end].copy()
+    year_data = df.loc[year_start:year_end].copy()
     
     if year_data.empty:
-        return {"error": f"No data for year {year}"}
+        return {"error": f"No data for year {year}", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
     
-    # Convert trading period strings to date ranges
-    def parse_mmm_dd(mmm_dd: str, ref_year: int) -> pd.Timestamp | None:
-        """Parse 'Jan-15' format to timestamp."""
-        try:
-            month_map = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-                        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
-            parts = mmm_dd.split("-")
-            month = month_map.get(parts[0], 1)
-            day = int(parts[1])
-            max_day = calendar.monthrange(ref_year, month)[1]
-            day = min(day, max_day)
-            return pd.Timestamp(year=ref_year, month=month, day=day)
-        except (ValueError, IndexError, KeyError):
-            return None
+    # Check for sparse data
+    data_warning = None
+    if len(year_data) < 200:
+        data_warning = f"Incomplete data: only {len(year_data)} trading days (expected ~245)"
     
-    trading_ranges = []
-    for tp in all_trading_periods:
-        entry = parse_mmm_dd(tp["entry_date"], year)
-        exit_dt = parse_mmm_dd(tp["exit_date"], year)
-        if entry and exit_dt:
-            if exit_dt < entry:
-                exit_dt = parse_mmm_dd(tp["exit_date"], year + 1)
-            if entry and exit_dt:
-                trading_ranges.append((entry, exit_dt))
+    # Convert windows (day-of-year based) to actual date ranges for this year
+    trades_info = []
+    ts_ranges = []
+    for w in windows:
+        start_date = dt.date(year, 1, 1) + dt.timedelta(days=w.start_day - 1)
+        end_date = dt.date(year, 1, 1) + dt.timedelta(days=w.end_day - 1)
+        entry_str = f"{calendar.month_abbr[start_date.month]}-{start_date.day}"
+        exit_str = f"{calendar.month_abbr[end_date.month]}-{end_date.day}"
+        trades_info.append({
+            "entry_date": entry_str,
+            "exit_date": exit_str,
+            "days": w.length,
+        })
+        ts_ranges.append((
+            pd.Timestamp(start_date),
+            pd.Timestamp(end_date),
+        ))
     
-    # Calculate daily returns
-    year_data["Daily_Return"] = year_data["Close"].pct_change()
+    # Vectorized daily returns
+    closes = year_data["Close"].values
+    daily_ret = np.empty(len(closes))
+    daily_ret[0] = 0.0
+    daily_ret[1:] = closes[1:] / closes[:-1] - 1.0
     
-    # Build equity curves
-    dates = []
-    combined_curve = []
-    bh_curve = []
+    # Vectorized buy-and-hold curve
+    bh_curve = (np.cumprod(1.0 + daily_ret) - 1.0) * 100.0
     
-    bh_cumulative = 0.0
-    combined_cumulative = 0.0
-    total_days_in_market = 0
+    # Build boolean mask for window periods
+    idx_values = year_data.index.values
+    in_market = np.zeros(len(idx_values), dtype=bool)
+    for entry_ts, exit_ts in ts_ranges:
+        entry_np = np.datetime64(entry_ts)
+        exit_np = np.datetime64(exit_ts)
+        in_market |= (idx_values >= entry_np) & (idx_values <= exit_np)
     
-    for idx, row in year_data.iterrows():
-        ts = pd.Timestamp(idx)
-        date_str = f"{calendar.month_abbr[ts.month]}-{ts.day}"
-        dates.append(date_str)
+    # Apply entry stop-loss per window
+    if stop_loss_pct > 0:
+        _apply_entry_stop_loss(
+            in_market, daily_ret, closes, windows, idx_values, year,
+            stop_loss_pct, reentry_pct,
+        )
+    
+    # Vectorized seasonal curve
+    masked_ret = np.where(in_market, daily_ret, 0.0)
+    seasonal_curve = (np.cumprod(1.0 + masked_ret) - 1.0) * 100.0
+    
+    # Vectorized date formatting
+    months = year_data.index.month.values
+    days_arr = year_data.index.day.values
+    month_abbrs = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    dates = [f"{month_abbrs[m]}-{d}" for m, d in zip(months.tolist(), days_arr.tolist())]
+    
+    result = {
+        "seasonal_curve": seasonal_curve.tolist(),
+        "bh_curve": bh_curve.tolist(),
+        "trades": trades_info,
+        "dates": dates,
+    }
+    if data_warning:
+        result["warning"] = data_warning
+    return result
+
+
+def _build_average_year_series(
+    df: pd.DataFrame,
+    years: list[int],
+) -> tuple[np.ndarray, np.ndarray, list[str]] | None:
+    """
+    Build a synthetic average-year price series from daily returns.
+    
+    For each day-of-year, averages the daily return across all years that
+    have a trading day at that DOY. Reconstructs a synthetic price series
+    starting from 1.0. This represents "the average price behavior" of the
+    stock throughout the year.
+    
+    Args:
+        df: Full DataFrame with Close prices.
+        years: List of years to include.
+    
+    Returns:
+        Tuple of (avg_daily_returns, avg_doys, date_labels) or None.
+        avg_daily_returns: 1D array of average daily returns per trading DOY.
+        avg_doys: 1D int array of day-of-year values (sorted).
+        date_labels: List of "Mon-D" strings for each DOY.
+    """
+    from collections import defaultdict
+    
+    # Collect daily returns keyed by day-of-year
+    doy_returns: dict[int, list[float]] = defaultdict(list)
+    
+    for year in years:
+        year_start = pd.Timestamp(year=year, month=1, day=1)
+        year_end = pd.Timestamp(year=year, month=12, day=31)
+        year_data = df.loc[year_start:year_end]
         
-        daily_ret = row["Daily_Return"]
-        if pd.isna(daily_ret):
-            daily_ret = 0.0
+        if year_data.empty or len(year_data) < 100:
+            continue
         
-        # Buy & Hold
-        bh_cumulative = (1 + bh_cumulative / 100) * (1 + daily_ret) - 1
-        bh_cumulative *= 100
-        bh_curve.append(bh_cumulative)
+        closes = year_data["Close"].values
+        doys = year_data.index.dayofyear.values
         
-        # Combined: in market if ANY strategy says to be in
-        should_be_in = False
-        for entry, exit_dt in trading_ranges:
-            if entry <= ts <= exit_dt:
-                should_be_in = True
-                break
+        # Daily returns (first day = 0.0)
+        rets = np.empty(len(closes))
+        rets[0] = 0.0
+        rets[1:] = closes[1:] / closes[:-1] - 1.0
         
-        if should_be_in:
-            combined_cumulative = (1 + combined_cumulative / 100) * (1 + daily_ret) - 1
-            combined_cumulative *= 100
-            total_days_in_market += 1
-        
-        combined_curve.append(combined_cumulative)
+        for doy, ret in zip(doys.tolist(), rets.tolist()):
+            doy_returns[doy].append(ret)
+    
+    if not doy_returns:
+        return None
+    
+    # Sort by DOY and compute average return per DOY
+    sorted_doys = sorted(doy_returns.keys())
+    avg_rets = np.array([np.mean(doy_returns[d]) for d in sorted_doys])
+    avg_doys = np.array(sorted_doys)
+    
+    # First trading day should have 0 return (no prior day to compare)
+    avg_rets[0] = 0.0
+    
+    # Build date labels from DOY using a reference non-leap year
+    month_abbrs = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    date_labels = []
+    for doy in sorted_doys:
+        ref_date = dt.date(2023, 1, 1) + dt.timedelta(days=doy - 1)
+        date_labels.append(f"{month_abbrs[ref_date.month]}-{ref_date.day}")
+    
+    return avg_rets, avg_doys, date_labels
+
+
+def get_window_backtest_average(
+    symbol: str,
+    window_size: int,
+    threshold: int,
+) -> dict:
+    """
+    Generate average backtest data across all available years.
+    
+    Builds a synthetic average-year price series by averaging daily returns
+    per day-of-year across all years, then simulates buying/selling on that
+    single synthetic series.
+    
+    Args:
+        symbol: Stock symbol
+        window_size: Fixed window length in days
+        threshold: Win rate threshold percentage (50-100)
+    
+    Returns:
+        dict with seasonal_curve, bh_curve, trades, dates (same format as single year)
+    """
+    df = load_symbol_data(symbol)
+    if df.empty:
+        return {"error": "No data available", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
+    
+    # Detect windows once
+    cache_key = (symbol, window_size, threshold)
+    if cache_key in _window_detect_cache:
+        windows = _window_detect_cache[cache_key]
+    else:
+        windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+        _window_detect_cache[cache_key] = windows
+    if not windows:
+        return {"error": "No windows detected", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
+    
+    years = get_years_from_data(df)
+    if not years:
+        return {"error": "No complete years available", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
+    
+    # Build synthetic average-year series
+    avg_result = _build_average_year_series(df, years)
+    if avg_result is None:
+        return {"error": "No valid years for averaging", "seasonal_curve": [], "bh_curve": [], "trades": [], "dates": []}
+    
+    avg_rets, avg_doys, date_labels = avg_result
+    
+    # Build trades info (based on detected windows)
+    trades_info = []
+    for w in windows:
+        ref_date_start = dt.date(2023, 1, 1) + dt.timedelta(days=w.start_day - 1)
+        ref_date_end = dt.date(2023, 1, 1) + dt.timedelta(days=w.end_day - 1)
+        trades_info.append({
+            "entry_date": f"{calendar.month_abbr[ref_date_start.month]}-{ref_date_start.day}",
+            "exit_date": f"{calendar.month_abbr[ref_date_end.month]}-{ref_date_end.day}",
+            "days": w.length,
+        })
+    
+    # Buy-and-hold curve on the synthetic series
+    bh_curve = (np.cumprod(1.0 + avg_rets) - 1.0) * 100.0
+    
+    # Build boolean mask: in market if DOY falls within any window
+    in_market = np.zeros(len(avg_doys), dtype=bool)
+    for w in windows:
+        in_market |= (avg_doys >= w.start_day) & (avg_doys <= w.end_day)
+    
+    # Seasonal curve: only capture returns when in market
+    masked_ret = np.where(in_market, avg_rets, 0.0)
+    seasonal_curve = (np.cumprod(1.0 + masked_ret) - 1.0) * 100.0
     
     return {
-        "combined_curve": combined_curve,
-        "bh_curve": bh_curve,
-        "strategy_curves": {},  # Could add individual curves if needed
-        "trades_count": len(all_trading_periods),
-        "total_days": total_days_in_market,
-        "dates": dates,
-        "trades": all_trading_periods,  # Include trade details for chart shading
+        "seasonal_curve": seasonal_curve.tolist(),
+        "bh_curve": bh_curve.tolist(),
+        "trades": trades_info,
+        "dates": date_labels,
+        "avg_years": len(years),
     }
 
 
-def export_plan_calendar_csv(strategies: list[dict]) -> str:
+def _load_strategy_windows(
+    strategies: list[dict],
+) -> tuple[list[dict], list[tuple[int, int]], pd.DataFrame, list[pd.DataFrame], list[str]] | None:
     """
-    Generate unified trading calendar CSV from multiple strategies.
+    Load data and detect windows for each strategy (once).
     
-    Format: date,stockname,action (no headers)
-    Sorted by date for easy execution.
+    Returns:
+        Tuple of (trading_period_templates, window_day_ranges, ref_data, window_dfs, unique_symbols)
+        or None if no valid windows found.
+        
+        trading_period_templates: list of {start_day, end_day, symbol} dicts.
+        window_day_ranges: list of (start_day, end_day) 1-365 pairs.
+        ref_data: DataFrame for B&H reference (first strategy's data).
+        window_dfs: list of DataFrames, one per window (each window's own stock data).
+        unique_symbols: ordered list of unique display symbols (for coloring).
+    """
+    all_templates: list[dict] = []
+    all_day_ranges: list[tuple[int, int]] = []
+    all_window_dfs: list[pd.DataFrame] = []
+    all_strategy_dfs: list[pd.DataFrame] = []  # one per unique strategy
+    unique_symbols: list[str] = []
+    ref_data = pd.DataFrame()
+    
+    for i, strat in enumerate(strategies):
+        symbol = strat.get("symbol", "")
+        window_size = int(strat.get("window_size", 30))
+        threshold = int(strat.get("threshold", 50))
+        
+        if not symbol:
+            continue
+        
+        symbols = parse_symbols(symbol)
+        if len(symbols) == 1:
+            df = load_symbol_data(symbols[0])
+        else:
+            df = synthesize_basket(symbols)
+        
+        if df.empty:
+            continue
+        
+        # Keep first strategy's data as B&H reference
+        if i == 0:
+            ref_data = df
+        
+        display_symbol = symbol.replace(".NS", "")
+        
+        # Cache window detection: windows only depend on (symbol, window_size, threshold)
+        cache_key = (symbol, window_size, threshold)
+        if cache_key in _window_detect_cache:
+            windows = _window_detect_cache[cache_key]
+        else:
+            windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+            _window_detect_cache[cache_key] = windows
+
+        
+        if not windows:
+            continue
+        
+        if display_symbol not in unique_symbols:
+            unique_symbols.append(display_symbol)
+            all_strategy_dfs.append(df)
+        
+        for w in windows:
+            all_templates.append({
+                "start_day": w.start_day,
+                "end_day": w.end_day,
+                "symbol": display_symbol,
+            })
+            all_day_ranges.append((w.start_day, w.end_day))
+            all_window_dfs.append(df)
+    
+    if not all_templates or ref_data.empty:
+        return None
+    
+    return all_templates, all_day_ranges, ref_data, all_window_dfs, unique_symbols
+
+
+def get_basket_overlap(
+    symbol: str,
+    window_size: int,
+    threshold: int,
+    strategies: list[dict],
+) -> dict:
+    """
+    Compute DOY overlap between a stock's windows and the existing basket's windows.
+
+    Args:
+        symbol: Current stock symbol (e.g. "RELIANCE.NS")
+        window_size: Window size for current stock
+        threshold: Win rate threshold (0-100) for current stock
+        strategies: Existing basket strategies (list of dicts with symbol, window_size, threshold)
+
+    Returns:
+        dict with basket_windows, stock_days, basket_days, overlap_days, new_days
+    """
+    # Detect windows for current stock
+    symbols = parse_symbols(symbol)
+    if len(symbols) == 1:
+        df = load_symbol_data(symbols[0])
+    else:
+        df = synthesize_basket(symbols)
+
+    if df.empty:
+        return {"error": f"No data for {symbol}"}
+
+    cache_key = (symbol, window_size, threshold)
+    if cache_key in _window_detect_cache:
+        stock_windows = _window_detect_cache[cache_key]
+    else:
+        stock_windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+        _window_detect_cache[cache_key] = stock_windows
+
+    # Build DOY set for current stock
+    stock_days: set[int] = set()
+    for w in stock_windows:
+        stock_days.update(range(w.start_day, w.end_day + 1))
+
+    # Load basket windows
+    loaded = _load_strategy_windows(strategies)
+    if loaded is None:
+        return {
+            "basket_windows": [],
+            "stock_days": len(stock_days),
+            "basket_days": 0,
+            "overlap_days": 0,
+            "new_days": len(stock_days),
+        }
+
+    _templates, basket_day_ranges, _ref_data, _window_dfs, _syms = loaded
+
+    # Build DOY set for basket
+    basket_days: set[int] = set()
+    for start_day, end_day in basket_day_ranges:
+        basket_days.update(range(start_day, end_day + 1))
+
+    overlap = stock_days & basket_days
+    new_days = stock_days - basket_days
+
+    return {
+        "basket_windows": list(basket_day_ranges),
+        "stock_days": len(stock_days),
+        "basket_days": len(basket_days),
+        "overlap_days": len(overlap),
+        "new_days": len(new_days),
+    }
+
+
+def _build_equity_curve(
+    ref_data: pd.DataFrame,
+    templates: list[dict],
+    day_ranges: list[tuple[int, int]],
+    year: int,
+    window_dfs: list[pd.DataFrame] | None = None,
+    unique_symbols: list[str] | None = None,
+    symbol_weights: dict[str, float] | None = None,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
+) -> dict | None:
+    """
+    Build equity curves for a single year using pre-computed window ranges.
+    
+    Uses dynamic allocation: on each day, capital is split among all strategies
+    whose windows are active. With equal weighting (default), each gets 1/N.
+    With symbol_weights, each strategy is weighted by its symbol's weight,
+    renormalized among active windows on each day.
+    
+    Also builds per-strategy individual curves (each strategy traded alone)
+    and an equal-weight B&H curve across all unique stocks.
     
     Args:
-        strategies: List of strategy dicts with symbol, period, offset, threshold
+        ref_data: DataFrame for B&H reference and date index.
+        templates: list of {start_day, end_day, symbol} dicts.
+        day_ranges: list of (start_day, end_day) 1-365 DOY pairs.
+        year: Year to backtest.
+        window_dfs: list of DataFrames, one per window. If None, falls back to
+                    ref_data for all windows (single-stock behavior).
+        unique_symbols: ordered list of unique display symbols.
+        symbol_weights: optional {symbol: weight} for return-weighted allocation.
+        stop_loss_pct: entry stop-loss percentage (0 = disabled). When the
+                       close drops this % from the entry price, the window
+                       is exited early.
+        reentry_pct: re-entry percentage below the stop-out price (0 = disabled).
+                     After a stop-loss exit, if the close drops this additional %
+                     from the exit price, re-enter for the remainder of the window.
+                     Entry price resets to the re-entry close.
+                     Only one re-entry per window.
+    
+    Returns:
+        Result dict or None if no data for that year.
+    """
+    year_start = pd.Timestamp(year=year, month=1, day=1)
+    year_end = pd.Timestamp(year=year, month=12, day=31)
+    year_data = ref_data.loc[year_start:year_end]
+    
+    if year_data.empty:
+        return None
+    
+    if unique_symbols is None:
+        unique_symbols = []
+    
+    # Convert day-of-year ranges to actual date ranges for this year
+    all_trading_periods = []
+    ts_ranges = []
+    for tmpl, (start_day, end_day) in zip(templates, day_ranges):
+        start_date = dt.date(year, 1, 1) + dt.timedelta(days=start_day - 1)
+        end_date = dt.date(year, 1, 1) + dt.timedelta(days=end_day - 1)
+        entry_str = f"{calendar.month_abbr[start_date.month]}-{start_date.day}"
+        exit_str = f"{calendar.month_abbr[end_date.month]}-{end_date.day}"
+        
+        all_trading_periods.append({
+            "entry_date": entry_str,
+            "exit_date": exit_str,
+            "symbol": tmpl["symbol"],
+        })
+        ts_ranges.append((
+            pd.Timestamp(start_date),
+            pd.Timestamp(end_date),
+        ))
+    
+    # Build per-window daily return arrays and boolean masks
+    idx_values = year_data.index.values
+    n_days = len(idx_values)
+    n_windows = len(ts_ranges)
+    
+    # Per-window masks: which days each window is active
+    window_masks = np.zeros((n_windows, n_days), dtype=bool)
+    # Per-window daily returns aligned to ref_data's date index
+    window_rets = np.zeros((n_windows, n_days))
+    
+    # Track per-stock daily returns for B&H (keyed by df id to avoid duplicates)
+    df_id_to_rets: dict[int, np.ndarray] = {}
+    # Track per-stock close prices for stop-loss (keyed by df id)
+    df_id_to_closes: dict[int, np.ndarray] = {}
+    
+    for w_idx, (entry_ts, exit_ts) in enumerate(ts_ranges):
+        entry_np = np.datetime64(entry_ts)
+        exit_np = np.datetime64(exit_ts)
+        window_masks[w_idx] = (idx_values >= entry_np) & (idx_values <= exit_np)
+        
+        # Get this window's stock data
+        if window_dfs is not None:
+            w_df = window_dfs[w_idx]
+            df_id = id(w_df)
+            
+            if df_id not in df_id_to_rets:
+                w_year = w_df.loc[year_start:year_end]
+                if not w_year.empty:
+                    w_closes = w_year["Close"].reindex(year_data.index)
+                    w_vals = w_closes.values
+                    w_ret = np.empty(n_days)
+                    w_ret[0] = 0.0
+                    for j in range(1, n_days):
+                        if np.isnan(w_vals[j]) or np.isnan(w_vals[j - 1]) or w_vals[j - 1] == 0:
+                            w_ret[j] = 0.0
+                        else:
+                            w_ret[j] = w_vals[j] / w_vals[j - 1] - 1.0
+                    df_id_to_rets[df_id] = w_ret
+                    df_id_to_closes[df_id] = w_vals.copy()
+                else:
+                    df_id_to_rets[df_id] = np.zeros(n_days)
+                    df_id_to_closes[df_id] = np.full(n_days, np.nan)
+            
+            window_rets[w_idx] = df_id_to_rets[df_id]
+            if np.all(df_id_to_rets[df_id] == 0):
+                window_masks[w_idx] = False
+        else:
+            # Fallback: all windows use ref_data returns
+            closes = year_data["Close"].values
+            daily_ret = np.empty(len(closes))
+            daily_ret[0] = 0.0
+            daily_ret[1:] = closes[1:] / closes[:-1] - 1.0
+            window_rets[w_idx] = daily_ret
+    
+    # Apply entry stop-loss and re-entry logic per window
+    if stop_loss_pct > 0:
+        for w_idx in range(n_windows):
+            # Get close prices for this window's stock
+            if window_dfs is not None:
+                w_closes = df_id_to_closes[id(window_dfs[w_idx])]
+            else:
+                w_closes = year_data["Close"].values
+            
+            entry_price = np.nan
+            stopped_out = False
+            reentered = False
+            stop_price = 0.0
+            
+            for d in range(n_days):
+                if not window_masks[w_idx, d]:
+                    # Outside the original window range — skip
+                    continue
+                
+                close = w_closes[d]
+                if np.isnan(close):
+                    continue
+                
+                # First active day: record entry price, no stop check
+                if np.isnan(entry_price):
+                    entry_price = close
+                    continue
+                
+                if stopped_out and not reentered:
+                    # We're stopped out, watching for re-entry
+                    window_masks[w_idx, d] = False
+                    window_rets[w_idx, d] = 0.0
+                    if reentry_pct > 0 and close <= stop_price * (1.0 - reentry_pct / 100.0):
+                        # Re-enter: price dropped enough below stop price
+                        reentered = True
+                        stopped_out = False
+                        entry_price = close  # reset entry price to re-entry price
+                        window_masks[w_idx, d] = True
+                        # Return on re-entry day is 0 (fresh position)
+                        window_rets[w_idx, d] = 0.0
+                    continue
+                
+                if stopped_out and reentered:
+                    # Already stopped out after re-entry — stay out
+                    window_masks[w_idx, d] = False
+                    window_rets[w_idx, d] = 0.0
+                    continue
+                
+                # Active position: check stop against entry price
+                loss_from_entry = (entry_price - close) / entry_price
+                if loss_from_entry >= stop_loss_pct / 100.0:
+                    # Stop-loss triggered at today's close
+                    stop_price = close
+                    stopped_out = True
+                    # Today's return is already captured (we exited at close)
+                    # but mark subsequent days as inactive
+    
+    # Weighted blended return per day
+    if symbol_weights:
+        # Build per-window weight vector
+        w_weights = np.array([symbol_weights.get(tmpl["symbol"], 0.0) for tmpl in templates])
+        # On each day, normalize weights among active windows
+        active_weight_sum = (window_masks * w_weights[:, None]).sum(axis=0)  # shape (n_days,)
+        safe_weight = np.where(active_weight_sum > 0, active_weight_sum, 1.0)
+        # Each window's contribution = (its weight / sum of active weights) * its return
+        weighted_ret_sum = (window_masks * w_weights[:, None] * window_rets).sum(axis=0)
+        blended_ret = np.where(active_weight_sum > 0, weighted_ret_sum / safe_weight, 0.0)
+    else:
+        # Dynamic equal-weight blended return per day
+        active_count = window_masks.sum(axis=0)  # shape (n_days,)
+        active_ret_sum = (window_masks * window_rets).sum(axis=0)  # shape (n_days,)
+        safe_count = np.where(active_count > 0, active_count, 1)
+        blended_ret = np.where(active_count > 0, active_ret_sum / safe_count, 0.0)
+    
+    active_any = window_masks.sum(axis=0) > 0
+    
+    combined_curve = (np.cumprod(1.0 + blended_ret) - 1.0) * 100.0
+    total_days_in_market = int(np.sum(active_any))
+    
+    # Build per-strategy curves: each strategy's windows traded in isolation
+    strategy_curves: dict[str, list[float]] = {}
+    for sym in unique_symbols:
+        # Find all windows belonging to this symbol
+        sym_mask = np.zeros(n_days, dtype=bool)
+        sym_ret_sum = np.zeros(n_days)
+        sym_count = np.zeros(n_days, dtype=int)
+        for w_idx, tmpl in enumerate(templates):
+            if tmpl["symbol"] == sym:
+                sym_mask |= window_masks[w_idx]
+                sym_ret_sum += window_masks[w_idx] * window_rets[w_idx]
+                sym_count += window_masks[w_idx].astype(int)
+        
+        sym_safe = np.where(sym_count > 0, sym_count, 1)
+        sym_blended = np.where(sym_mask, sym_ret_sum / sym_safe, 0.0)
+        sym_curve = (np.cumprod(1.0 + sym_blended) - 1.0) * 100.0
+        strategy_curves[sym] = sym_curve.tolist()
+    
+    # Equal-weight B&H: average daily returns across all unique stocks
+    if window_dfs is not None and df_id_to_rets:
+        unique_rets = list(df_id_to_rets.values())
+        bh_blended = np.mean(unique_rets, axis=0)
+    else:
+        closes = year_data["Close"].values
+        bh_blended = np.empty(len(closes))
+        bh_blended[0] = 0.0
+        bh_blended[1:] = closes[1:] / closes[:-1] - 1.0
+    bh_curve = (np.cumprod(1.0 + bh_blended) - 1.0) * 100.0
+    
+    # Vectorized date formatting
+    months = year_data.index.month.values
+    days = year_data.index.day.values
+    month_abbrs = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    dates = [f"{month_abbrs[m]}-{d}" for m, d in zip(months.tolist(), days.tolist())]
+    
+    return {
+        "combined_curve": combined_curve.tolist(),
+        "bh_curve": bh_curve.tolist(),
+        "strategy_curves": strategy_curves,
+        "trades_count": len(all_trading_periods),
+        "total_days": total_days_in_market,
+        "dates": dates,
+        "trades": all_trading_periods,
+        "symbols": unique_symbols,
+    }
+
+
+def get_basket_backtest_data(
+    strategies: list[dict],
+    year: int,
+    symbol_weights: dict[str, float] | None = None,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
+) -> dict:
+    """
+    Generate combined backtest data for multiple window-mode strategies.
+    
+    Each strategy has: symbol, window_size, threshold.
+    For a given year, detects windows for each strategy, combines all trading
+    periods, and builds a unified equity curve vs buy & hold.
+    
+    Args:
+        strategies: List of strategy dicts with symbol, window_size, threshold
+        year: Year to backtest
+        symbol_weights: Optional {symbol: weight} for return-weighted allocation
+        stop_loss_pct: Entry stop-loss % (0 = disabled)
+        reentry_pct: Re-entry % below stop price (0 = disabled)
+    
+    Returns:
+        dict with combined_curve, bh_curve, trades_count, total_days, dates, trades
+    """
+    if not strategies:
+        return {"error": "No strategies provided"}
+    
+    loaded = _load_strategy_windows(strategies)
+    if loaded is None:
+        return {"error": "No windows detected in any strategy"}
+    
+    templates, day_ranges, ref_data, window_dfs, unique_symbols = loaded
+    result = _build_equity_curve(ref_data, templates, day_ranges, year, window_dfs, unique_symbols, symbol_weights, stop_loss_pct, reentry_pct)
+    
+    if result is None:
+        return {"error": f"No data for year {year}"}
+    
+    return result
+
+
+def get_basket_backtest_average(
+    strategies: list[dict],
+    symbol_weights: dict[str, float] | None = None,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
+) -> dict:
+    """
+    Generate average basket backtest across all available years.
+    
+    Builds a synthetic average-year return series for each strategy's stock,
+    then simulates dynamic allocation: on each day, capital is split among
+    all strategies whose windows are active, using equal or return-weighted
+    allocation.
+    
+    Note: stop_loss_pct and reentry_pct are accepted for API consistency but
+    are not applied to the average-year series (entry stops require real
+    price data, not synthetic averages).
+    
+    Args:
+        strategies: List of strategy dicts with symbol, window_size, threshold
+        symbol_weights: Optional {symbol: weight} for return-weighted allocation
+        stop_loss_pct: Accepted but not applied (no real prices in average mode)
+        reentry_pct: Accepted but not applied
+    
+    Returns:
+        dict with combined_curve, bh_curve, dates, trades (same format + avg_years)
+    """
+    if not strategies:
+        return {"error": "No strategies provided"}
+    
+    loaded = _load_strategy_windows(strategies)
+    if loaded is None:
+        return {"error": "No windows detected in any strategy"}
+    
+    templates, day_ranges, ref_data, window_dfs, unique_symbols = loaded
+    
+    years = get_years_from_data(ref_data)
+    if not years:
+        return {"error": "No complete years available"}
+    
+    # Build synthetic average-year series from reference data (for DOY grid)
+    avg_result = _build_average_year_series(ref_data, years)
+    if avg_result is None:
+        return {"error": "No valid years for averaging"}
+    
+    avg_rets, avg_doys, date_labels = avg_result
+    n_days = len(avg_doys)
+    
+    # Build trades info from templates
+    month_abbrs = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    trades_info = []
+    for tmpl, (start_day, end_day) in zip(templates, day_ranges):
+        ref_start = dt.date(2023, 1, 1) + dt.timedelta(days=start_day - 1)
+        ref_end = dt.date(2023, 1, 1) + dt.timedelta(days=end_day - 1)
+        trades_info.append({
+            "entry_date": f"{month_abbrs[ref_start.month]}-{ref_start.day}",
+            "exit_date": f"{month_abbrs[ref_end.month]}-{ref_end.day}",
+            "symbol": tmpl["symbol"],
+        })
+    
+    # Build per-window average return series and masks
+    n_windows = len(day_ranges)
+    window_masks = np.zeros((n_windows, n_days), dtype=bool)
+    window_avg_rets = np.zeros((n_windows, n_days))
+    
+    # Cache: avoid rebuilding average series for the same DataFrame
+    df_id_to_avg: dict[int, np.ndarray] = {}
+    
+    for w_idx, ((start_day, end_day), w_df) in enumerate(zip(day_ranges, window_dfs)):
+        window_masks[w_idx] = (avg_doys >= start_day) & (avg_doys <= end_day)
+        
+        df_id = id(w_df)
+        if df_id not in df_id_to_avg:
+            w_years = get_years_from_data(w_df)
+            w_avg = _build_average_year_series(w_df, w_years) if w_years else None
+            if w_avg is not None:
+                w_rets, w_doys, _ = w_avg
+                # Map w_rets by DOY for lookup
+                doy_to_ret = dict(zip(w_doys.tolist(), w_rets.tolist()))
+                aligned = np.array([doy_to_ret.get(d, 0.0) for d in avg_doys.tolist()])
+                df_id_to_avg[df_id] = aligned
+            else:
+                df_id_to_avg[df_id] = avg_rets  # fallback to ref
+        
+        window_avg_rets[w_idx] = df_id_to_avg[df_id]
+    
+    # Weighted or equal-weight blended return per day
+    if symbol_weights:
+        w_weights = np.array([symbol_weights.get(tmpl["symbol"], 0.0) for tmpl in templates])
+        active_weight_sum = (window_masks * w_weights[:, None]).sum(axis=0)
+        safe_weight = np.where(active_weight_sum > 0, active_weight_sum, 1.0)
+        weighted_ret_sum = (window_masks * w_weights[:, None] * window_avg_rets).sum(axis=0)
+        blended_ret = np.where(active_weight_sum > 0, weighted_ret_sum / safe_weight, 0.0)
+    else:
+        active_count = window_masks.sum(axis=0)
+        active_ret_sum = (window_masks * window_avg_rets).sum(axis=0)
+        safe_count = np.where(active_count > 0, active_count, 1)
+        blended_ret = np.where(active_count > 0, active_ret_sum / safe_count, 0.0)
+    
+    active_any = window_masks.sum(axis=0) > 0
+    combined_curve = (np.cumprod(1.0 + blended_ret) - 1.0) * 100.0
+    total_days_in_market = int(np.sum(active_any))
+    
+    # Per-strategy curves
+    strategy_curves: dict[str, list[float]] = {}
+    for sym in unique_symbols:
+        sym_mask = np.zeros(n_days, dtype=bool)
+        sym_ret_sum = np.zeros(n_days)
+        sym_count = np.zeros(n_days, dtype=int)
+        for w_idx, tmpl in enumerate(templates):
+            if tmpl["symbol"] == sym:
+                sym_mask |= window_masks[w_idx]
+                sym_ret_sum += window_masks[w_idx] * window_avg_rets[w_idx]
+                sym_count += window_masks[w_idx].astype(int)
+        
+        sym_safe = np.where(sym_count > 0, sym_count, 1)
+        sym_blended = np.where(sym_mask, sym_ret_sum / sym_safe, 0.0)
+        sym_curve = (np.cumprod(1.0 + sym_blended) - 1.0) * 100.0
+        strategy_curves[sym] = sym_curve.tolist()
+    
+    # Equal-weight B&H: average daily returns across all unique stocks
+    unique_avg_rets = list(df_id_to_avg.values())
+    if len(unique_avg_rets) > 1:
+        bh_blended = np.mean(unique_avg_rets, axis=0)
+    else:
+        bh_blended = avg_rets
+    bh_curve = (np.cumprod(1.0 + bh_blended) - 1.0) * 100.0
+    
+    return {
+        "combined_curve": combined_curve.tolist(),
+        "bh_curve": bh_curve.tolist(),
+        "strategy_curves": strategy_curves,
+        "trades_count": len(trades_info),
+        "total_days": total_days_in_market,
+        "dates": date_labels,
+        "trades": trades_info,
+        "avg_years": len(years),
+        "symbols": unique_symbols,
+    }
+
+
+def export_trading_calendar_csv(strategies: list[dict], align_windows: bool = False) -> str:
+    """
+    Generate a target-allocation trading calendar CSV.
+    
+    Format: Date column + one column per stock.
+    Each row is an event date (window open/close). Cell values show
+    the target portfolio allocation % for that stock after rebalancing.
+    Empty cell = no change. On the far right, an Action column describes
+    what triggered the rebalance.
+    
+    Equal-weight: all active positions get 1/N of portfolio.
+    
+    Args:
+        strategies: List of strategy dicts with symbol, window_size, threshold
+        align_windows: If True, merge entry/exit dates within 2 days of each other
     
     Returns:
         CSV content string
     """
-    all_entries = []  # List of (month_idx, day, symbol, action) for sorting
+    import io
+    import calendar as cal
     
-    month_order = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-                   "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+    month_order = {cal.month_abbr[i]: i for i in range(1, 13)}
+    
+    # Collect all windows across strategies
+    # Each window: (start_doy, end_doy, stock_name)
+    all_windows: list[tuple[int, int, str]] = []
+    stock_names: list[str] = []  # ordered unique names
     
     for strat in strategies:
-        symbols = parse_symbols(strat.get("symbol", ""))
-        period = strat.get("period", "monthly")
-        offset = int(strat.get("offset", 0))
+        symbol = strat.get("symbol", "")
+        window_size = int(strat.get("window_size", 30))
         threshold = int(strat.get("threshold", 50))
         
+        symbols = parse_symbols(symbol)
         if not symbols:
             continue
         
-        # Get trades for this strategy
-        trades_data = get_trades(symbols, period, offset, threshold)
+        if len(symbols) == 1:
+            df = load_symbol_data(symbols[0])
+        else:
+            df = synthesize_basket(symbols)
         
-        if not trades_data.get("trades"):
+        if df.empty:
             continue
         
-        # Create display name
+        cache_key = (symbol, window_size, threshold)
+        if cache_key in _window_detect_cache:
+            windows = _window_detect_cache[cache_key]
+        else:
+            windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+            _window_detect_cache[cache_key] = windows
+        if not windows:
+            continue
+        
         if len(symbols) == 1:
             stock_name = symbols[0].replace(".NS", "")
         else:
             stock_name = "+".join(s.replace(".NS", "") for s in symbols)
         
-        # Add entries
-        for trade in trades_data["trades"]:
-            entry_date = trade["entry_date"]  # e.g., "Jan-15"
-            exit_date = trade["exit_date"]
-            
-            # Parse for sorting
-            entry_parts = entry_date.split("-")
-            exit_parts = exit_date.split("-")
-            
-            entry_month_idx = month_order.get(entry_parts[0], 0)
-            entry_day = int(entry_parts[1])
-            exit_month_idx = month_order.get(exit_parts[0], 0)
-            exit_day = int(exit_parts[1])
-            
-            # Handle wraparound (exit month < entry month means next year)
-            if exit_month_idx < entry_month_idx:
-                exit_month_idx += 12  # Treat as month 13-24 for sorting
-            
-            all_entries.append((entry_month_idx, entry_day, entry_date, stock_name, "BUY"))
-            all_entries.append((exit_month_idx, exit_day, exit_date, stock_name, "SELL"))
+        if stock_name not in stock_names:
+            stock_names.append(stock_name)
+        
+        for w in windows:
+            all_windows.append((w.start_day, w.end_day, stock_name))
     
-    # Sort by month, then day
-    all_entries.sort(key=lambda x: (x[0], x[1]))
+    if not all_windows or not stock_names:
+        return ""
+    
+    # Apply alignment: merge entries/exits within 2 days of each other
+    if align_windows:
+        all_windows = _align_window_dates(all_windows)
+    
+    # Build chronological event list
+    # Each event: (doy, stock_name, event_type)  where event_type = "enter" | "exit"
+    events: list[tuple[int, str, str]] = []
+    for start_doy, end_doy, name in all_windows:
+        events.append((start_doy, name, "enter"))
+        events.append((end_doy, name, "exit"))
+    
+    # Sort by doy, then exits before entries on same day (exit frees capital first)
+    events.sort(key=lambda e: (e[0], 0 if e[2] == "exit" else 1))
+    
+    # Group events on the same day
+    grouped: list[tuple[int, list[tuple[str, str]]]] = []
+    i = 0
+    while i < len(events):
+        doy = events[i][0]
+        day_events: list[tuple[str, str]] = []
+        while i < len(events) and events[i][0] == doy:
+            day_events.append((events[i][1], events[i][2]))
+            i += 1
+        grouped.append((doy, day_events))
+    
+    # Walk through events, tracking active positions and computing target allocations
+    active: set[str] = set()  # currently active stock names
+    rows: list[tuple[str, dict[str, str], str]] = []  # (date_str, {stock: alloc}, action_desc)
+    
+    for doy, day_events in grouped:
+        # Determine action description
+        entering = [name for name, typ in day_events if typ == "enter"]
+        exiting = [name for name, typ in day_events if typ == "exit"]
+        
+        # Apply exits first
+        for name in exiting:
+            active.discard(name)
+        # Apply entries
+        for name in entering:
+            active.add(name)
+        
+        # Build action description
+        actions = []
+        if entering:
+            actions.append("Enter " + ", ".join(entering))
+        if exiting:
+            actions.append("Exit " + ", ".join(exiting))
+        action_desc = "; ".join(actions)
+        
+        # Compute target allocations (equal weight)
+        allocs: dict[str, str] = {}
+        if active:
+            pct = 100 // len(active)
+            # Distribute remainder to first positions
+            remainder = 100 - pct * len(active)
+            sorted_active = sorted(active, key=lambda s: stock_names.index(s))
+            for j, name in enumerate(sorted_active):
+                p = pct + (1 if j < remainder else 0)
+                allocs[name] = f"{p}%"
+        
+        # Convert doy to date string
+        month, day = date_from_day_of_year(doy)
+        date_str = f"{cal.month_abbr[month]}-{day}"
+        
+        rows.append((date_str, allocs, action_desc))
     
     # Generate CSV
-    import io
     output = io.StringIO()
     
-    for _, _, date_str, stock_name, action in all_entries:
-        output.write(f"{date_str},{stock_name},{action}\n")
+    # Header
+    header = ["Date"] + stock_names + ["Action"]
+    output.write(",".join(header) + "\n")
+    
+    for date_str, allocs, action_desc in rows:
+        cells = [date_str]
+        for name in stock_names:
+            cells.append(allocs.get(name, ""))
+        cells.append(action_desc)
+        output.write(",".join(cells) + "\n")
     
     return output.getvalue()
+
+
+def _align_window_dates(windows: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
+    """
+    Merge entry/exit dates that are within 2 days of each other.
+    
+    For entries within 2 days: snap the later one to the earlier.
+    For exits within 2 days: snap the earlier one to the later.
+    This reduces the number of distinct trading days.
+    """
+    # Build mutable list of [start_doy, end_doy, name]
+    mutable = [[s, e, n] for s, e, n in windows]
+    
+    # Align entries: sort by start_doy, merge nearby
+    by_start = sorted(range(len(mutable)), key=lambda i: mutable[i][0])
+    for k in range(len(by_start) - 1):
+        i1 = by_start[k]
+        i2 = by_start[k + 1]
+        if 0 < mutable[i2][0] - mutable[i1][0] <= 2:
+            mutable[i2][0] = mutable[i1][0]  # snap later entry to earlier
+    
+    # Align exits: sort by end_doy, merge nearby
+    by_end = sorted(range(len(mutable)), key=lambda i: mutable[i][1])
+    for k in range(len(by_end) - 1):
+        i1 = by_end[k]
+        i2 = by_end[k + 1]
+        if 0 < mutable[i2][1] - mutable[i1][1] <= 2:
+            mutable[i1][1] = mutable[i2][1]  # snap earlier exit to later
+    
+    return [(s, e, n) for s, e, n in mutable]
+
+
+# =============================================================================
+# Basket Save / Load
+# =============================================================================
+
+_BASKET_NAME_RE = _re.compile(r'^[A-Za-z0-9_\- ]{1,64}$')
+
+
+def _sanitize_basket_name(name: str) -> str:
+    """Validate and return a safe basket name (used as filename stem)."""
+    name = name.strip()
+    if not _BASKET_NAME_RE.match(name):
+        raise ValueError(
+            "Basket name must be 1-64 characters: letters, digits, spaces, hyphens, underscores"
+        )
+    return name
+
+
+def save_basket(name: str, strategies: list[dict], allocation: str = "equal") -> dict:
+    """Save a basket (list of strategies) to data/baskets/<name>.json."""
+    name = _sanitize_basket_name(name)
+    BASKETS_DIR.mkdir(parents=True, exist_ok=True)
+    path = BASKETS_DIR / f"{name}.json"
+    payload = {
+        "name": name,
+        "strategies": strategies,
+        "allocation": allocation,
+        "saved_at": dt.datetime.now().isoformat(timespec="seconds"),
+    }
+    path.write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+    return {"ok": True, "name": name}
+
+
+def load_basket(name: str) -> dict:
+    """Load a saved basket by name. Returns the full payload dict."""
+    name = _sanitize_basket_name(name)
+    path = BASKETS_DIR / f"{name}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Basket '{name}' not found")
+    return _json.loads(path.read_text(encoding="utf-8"))
+
+
+def list_baskets() -> list[dict]:
+    """List all saved baskets (name + strategy count + saved_at)."""
+    if not BASKETS_DIR.exists():
+        return []
+    baskets = []
+    for path in sorted(BASKETS_DIR.glob("*.json")):
+        try:
+            data = _json.loads(path.read_text(encoding="utf-8"))
+            baskets.append({
+                "name": data.get("name", path.stem),
+                "strategies": len(data.get("strategies", [])),
+                "saved_at": data.get("saved_at", ""),
+            })
+        except (ValueError, KeyError):
+            continue
+    return baskets
+
+
+def delete_basket(name: str) -> dict:
+    """Delete a saved basket by name."""
+    name = _sanitize_basket_name(name)
+    path = BASKETS_DIR / f"{name}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Basket '{name}' not found")
+    path.unlink()
+    return {"ok": True, "name": name}
+
+
+# ---------------------------------------------------------------------------
+# Sharpe ratio helper
+# ---------------------------------------------------------------------------
+
+
+def _compute_sharpe(annual_returns: list[float]) -> tuple[float, str]:
+    """Compute Sharpe ratio from annual percentage returns.
+
+    Returns (sharpe_value, label) where label is one of:
+    'poor', 'average', 'good', 'excellent'.
+    """
+    if len(annual_returns) < 2:
+        return 0.0, "poor"
+    mean_r = float(np.mean(annual_returns))
+    std_r = float(np.std(annual_returns, ddof=1))
+    if std_r == 0:
+        sharpe = 0.0 if mean_r == 0 else float("inf")
+    else:
+        sharpe = mean_r / std_r
+    sharpe = round(sharpe, 2)
+    if sharpe < 0.5:
+        label = "poor"
+    elif sharpe < 1.0:
+        label = "average"
+    elif sharpe < 2.0:
+        label = "good"
+    else:
+        label = "excellent"
+    return sharpe, label
+
+
+# ---------------------------------------------------------------------------
+# Bar chart data: per-year return summaries
+# ---------------------------------------------------------------------------
+
+def get_window_bar_data(
+    symbol: str,
+    window_size: int,
+    threshold: int,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
+    fees_pct: float = 0.0,
+    tax_pct: float = 0.0,
+) -> dict:
+    """
+    Compute per-year strategy return and buy-and-hold return for bar chart.
+
+    For each complete year of data, runs the sliding-window strategy and
+    computes the final cumulative return percentage for both the strategy
+    and buy-and-hold.
+
+    Args:
+        symbol: Stock symbol
+        window_size: Fixed window length in days
+        threshold: Win rate threshold percentage (50-100)
+        stop_loss_pct: Entry stop-loss % (0 = disabled)
+        reentry_pct: Re-entry % below stop price (0 = disabled)
+        fees_pct: Fees % of value per round-trip trade (0 = disabled)
+        tax_pct: Tax % on net annual profits (0 = disabled)
+
+    Returns:
+        dict with "years" list of {year, strategy_return, bh_return}.
+    """
+    df = load_symbol_data(symbol)
+    if df.empty:
+        return {"error": "No data available", "years": []}
+
+    cache_key = (symbol, window_size, threshold)
+    if cache_key in _window_detect_cache:
+        windows = _window_detect_cache[cache_key]
+    else:
+        windows = detect_sliding_windows(
+            df, window_size=window_size, threshold=threshold / 100,
+        )
+        _window_detect_cache[cache_key] = windows
+    if not windows:
+        return {"error": "No windows detected", "years": []}
+
+    available_years = get_years_from_data(df)
+    if not available_years:
+        return {"error": "No complete years available", "years": []}
+
+    results: list[dict] = []
+    for year in available_years:
+        year_start = pd.Timestamp(year=year, month=1, day=1)
+        year_end = pd.Timestamp(year=year, month=12, day=31)
+        year_data = df.loc[year_start:year_end]
+
+        if year_data.empty or len(year_data) < 100:
+            continue
+
+        closes = year_data["Close"].values
+        daily_ret = np.empty(len(closes))
+        daily_ret[0] = 0.0
+        daily_ret[1:] = closes[1:] / closes[:-1] - 1.0
+
+        bh_return = float((np.cumprod(1.0 + daily_ret)[-1] - 1.0) * 100.0)
+
+        idx_values = year_data.index.values
+        in_market = np.zeros(len(idx_values), dtype=bool)
+        for w in windows:
+            start_date = dt.date(year, 1, 1) + dt.timedelta(days=w.start_day - 1)
+            end_date = dt.date(year, 1, 1) + dt.timedelta(days=w.end_day - 1)
+            entry_np = np.datetime64(pd.Timestamp(start_date))
+            exit_np = np.datetime64(pd.Timestamp(end_date))
+            in_market |= (idx_values >= entry_np) & (idx_values <= exit_np)
+
+        # Apply entry stop-loss per window
+        if stop_loss_pct > 0:
+            _apply_entry_stop_loss(
+                in_market, daily_ret, closes, windows, idx_values, year,
+                stop_loss_pct, reentry_pct,
+            )
+
+        masked_ret = np.where(in_market, daily_ret, 0.0)
+        strategy_return = float(
+            (np.cumprod(1.0 + masked_ret)[-1] - 1.0) * 100.0,
+        )
+
+        # Count round-trip trades (windows active this year)
+        n_trades = 0
+        for w in windows:
+            start_date = dt.date(year, 1, 1) + dt.timedelta(days=w.start_day - 1)
+            end_date = dt.date(year, 1, 1) + dt.timedelta(days=w.end_day - 1)
+            entry_np = np.datetime64(pd.Timestamp(start_date))
+            exit_np = np.datetime64(pd.Timestamp(end_date))
+            if np.any((idx_values >= entry_np) & (idx_values <= exit_np)):
+                n_trades += 1
+
+        # Apply fees: each round-trip costs fees_pct% of capital
+        if fees_pct > 0 and n_trades > 0:
+            strategy_return = (
+                (1.0 + strategy_return / 100.0)
+                * (1.0 - fees_pct / 100.0) ** n_trades
+                - 1.0
+            ) * 100.0
+
+        # Apply tax on net positive annual return
+        if tax_pct > 0 and strategy_return > 0:
+            strategy_return *= 1.0 - tax_pct / 100.0
+
+        results.append({
+            "year": year,
+            "strategy_return": round(strategy_return, 2),
+            "bh_return": round(bh_return, 2),
+            "days_in_market": int(in_market.sum()),
+            "total_trading_days": len(year_data),
+        })
+
+    annual_rets = [r["strategy_return"] for r in results]
+    sharpe, sharpe_label = _compute_sharpe(annual_rets)
+    return {"years": results, "sharpe_ratio": sharpe, "sharpe_label": sharpe_label}
+
+
+def get_basket_bar_data(
+    strategies: list[dict],
+    symbol_weights: dict[str, float] | None = None,
+    stop_loss_pct: float = 0.0,
+    reentry_pct: float = 0.0,
+    fees_pct: float = 0.0,
+    tax_pct: float = 0.0,
+) -> dict:
+    """
+    Compute per-year combined basket return, B&H return, and per-stock
+    contribution for stacked bar chart.
+
+    For each complete year, builds equity curves using the basket backtest
+    engine (with optional return-weighted allocation and stop-loss), then reports:
+      - combined strategy return (%)
+      - equal-weight B&H return (%)
+      - per-stock individual strategy return (%)
+
+    Args:
+        fees_pct: Fees % of value per round-trip trade (0 = disabled)
+        tax_pct: Tax % on net annual profits (0 = disabled)
+
+    Returns:
+        dict with "years" list of {year, combined_return, bh_return,
+        stock_returns: {symbol: return%}}, and "symbols" list.
+    """
+    if not strategies:
+        return {"error": "No strategies provided", "years": [], "symbols": []}
+
+    loaded = _load_strategy_windows(strategies)
+    if loaded is None:
+        return {"error": "No windows detected", "years": [], "symbols": []}
+
+    templates, day_ranges, ref_data, window_dfs, unique_symbols = loaded
+
+    available_years = get_years_from_data(ref_data)
+    if not available_years:
+        return {"error": "No complete years", "years": [], "symbols": []}
+
+    results: list[dict] = []
+    for year in available_years:
+        curve = _build_equity_curve(
+            ref_data, templates, day_ranges, year, window_dfs, unique_symbols,
+            symbol_weights, stop_loss_pct, reentry_pct,
+        )
+        if curve is None:
+            continue
+
+        combined_return = curve["combined_curve"][-1] if curve["combined_curve"] else 0.0
+        bh_return = curve["bh_curve"][-1] if curve["bh_curve"] else 0.0
+
+        stock_returns: dict[str, float] = {}
+        for sym in unique_symbols:
+            sym_curve = curve["strategy_curves"].get(sym)
+            if sym_curve:
+                stock_returns[sym] = round(sym_curve[-1], 2)
+            else:
+                stock_returns[sym] = 0.0
+
+        # Apply fees: each strategy is one round-trip trade per year.
+        # Count strategies that were actually active (had non-zero return).
+        n_trades = sum(1 for v in stock_returns.values() if v != 0.0) or 0
+        if fees_pct > 0 and n_trades > 0:
+            fee_factor = (1.0 - fees_pct / 100.0) ** n_trades
+            combined_return = (
+                (1.0 + combined_return / 100.0) * fee_factor - 1.0
+            ) * 100.0
+            # Also adjust per-stock returns
+            for sym in stock_returns:
+                if stock_returns[sym] != 0.0:
+                    sr = stock_returns[sym]
+                    stock_returns[sym] = round(
+                        ((1.0 + sr / 100.0) * (1.0 - fees_pct / 100.0) - 1.0) * 100.0,
+                        2,
+                    )
+
+        # Apply tax on net positive annual return
+        if tax_pct > 0 and combined_return > 0:
+            combined_return *= 1.0 - tax_pct / 100.0
+
+        results.append({
+            "year": year,
+            "combined_return": round(combined_return, 2),
+            "bh_return": round(bh_return, 2),
+            "stock_returns": stock_returns,
+            "days_in_market": curve["total_days"],
+            "total_trading_days": len(curve["dates"]),
+        })
+
+    annual_rets = [r["combined_return"] for r in results]
+    sharpe, sharpe_label = _compute_sharpe(annual_rets)
+    return {"years": results, "symbols": unique_symbols,
+            "sharpe_ratio": sharpe, "sharpe_label": sharpe_label}

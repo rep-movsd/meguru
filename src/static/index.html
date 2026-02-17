@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meguru - Seasonal Stock Pattern Detector</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="controls">
+        <div class="controls-section">
+            <div class="symbol-container">
+                <input type="text" id="symbol-input" placeholder="Type symbol..." value="" autocomplete="off">
+                <div class="autocomplete-dropdown" id="autocomplete"></div>
+            </div>
+            <button id="multi-btn" class="btn-secondary">+ Multi</button>
+            <button id="load-btn" class="btn-primary">Load</button>
+        </div>
+        
+        <div class="controls-section center">
+            <div class="control-group">
+                <label>Window:</label>
+                <select id="window-size-select">
+                    <option value="7">1 week</option>
+                    <option value="14">2 weeks</option>
+                    <option value="30" selected>1 month</option>
+                    <option value="60">2 months</option>
+                    <option value="90">3 months</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>Threshold:</label>
+                <div class="stepper">
+                    <button id="threshold-minus">-</button>
+                    <span class="stepper-value" id="threshold-value">50%</span>
+                    <button id="threshold-plus">+</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls-section right">
+            <button id="find-max-profit-btn" class="btn-secondary" style="display:none;">Find max profit trades</button>
+            <button id="find-max-yield-btn" class="btn-secondary" style="display:none;">Find max yield trades</button>
+            <button id="show-basket-btn" class="btn-basket">Basket<span id="basket-badge" class="basket-badge" style="display:none;">0</span></button>
+        </div>
+    </div>
+    
+    <div class="main-content">
+        <div class="stats-panel">
+            <div class="panel-header">
+                <h3>Stats</h3>
+                <button id="export-stats-btn" class="btn-small">Export</button>
+            </div>
+            <div class="table-container">
+                <table id="stats-table">
+                    <thead><tr><th>Period</th><th>Days</th><th>Return%</th><th>Win%</th><th>bps/day</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="trades-panel" id="trades-panel">
+            <div class="panel-header">
+                <h3 id="trades-panel-title">Strategy</h3>
+                <div class="panel-header-actions" id="strategy-actions" style="display: none;">
+                    <button id="export-trades-btn" class="btn-small btn-secondary">Export Data</button>
+                    <button id="export-strategy-btn" class="btn-small btn-secondary">Export Strategy</button>
+                    <button id="show-backtest-btn" class="btn-small btn-primary">Backtest</button>
+                    <button id="add-to-basket-btn" class="btn-small btn-add-basket">+ Add to Basket</button>
+                </div>
+                <div id="chart-controls" style="display: none;">
+                    <div class="chart-legend">
+                        <select id="chart-year-select" class="chart-year-select"></select>
+                        <div class="chart-view-toggle">
+                            <button id="chart-line-btn" class="chart-view-btn active">Line</button>
+                            <button id="chart-bar-btn" class="chart-view-btn">Bar</button>
+                        </div>
+                        <label style="color:#888;font-size:0.9em">SL%:</label>
+                        <input type="number" id="chart-sl-input" min="0" max="50" step="1" value="0" style="width:48px" title="Entry stop-loss %. Exits if price drops this % below entry. 0 = disabled.">
+                        <label style="color:#888;font-size:0.9em">Re%:</label>
+                        <input type="number" id="chart-re-input" min="0" max="50" step="1" value="0" style="width:48px" title="Re-entry % below stop price. May catch rebounds. 0 = disabled.">
+                        <label style="color:#888;font-size:0.9em">Fees%:</label>
+                        <input type="number" id="chart-fees-input" min="0" max="5" step="0.1" value="0.3" style="width:56px" title="Fees % of value per round-trip trade (brokerage + STT + charges).">
+                        <label style="color:#888;font-size:0.9em">Tax%:</label>
+                        <input type="number" id="chart-tax-input" min="0" max="50" step="1" value="20" style="width:48px" title="Tax % on net annual profits (STCG).">
+                        <div class="chart-legend-item"><div class="chart-legend-color" style="background: #00ff88;"></div>Strategy</div>
+                        <div class="chart-legend-item"><div class="chart-legend-color" style="background: #6699ff;"></div>Buy & Hold</div>
+                        <button id="chart-add-basket-btn" class="btn-small btn-add-basket">+ Add to Basket</button>
+                    </div>
+                </div>
+            </div>
+            <div class="trades-content">
+                <div class="trades-table-container">
+                    <table id="trades-table">
+                        <thead><tr><th>Entry</th><th>Exit</th><th>Profit</th><th>Days</th><th>Yield/day</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+                <div class="summary" id="summary"></div>
+                <div class="window-chart-container" id="window-chart" style="display: none;">
+                    <div class="window-chart-buffer" id="window-buffer-0"></div>
+                    <div class="window-chart-buffer back" id="window-buffer-1"></div>
+                </div>
+                <div class="window-chart-metrics" id="window-chart-metrics" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="status" id="status">Ready</div>
+    
+    <div class="spinner-overlay" id="spinner">
+        <div class="spinner"></div>
+    </div>
+    
+    <div class="multi-overlay" id="multi-overlay">
+        <div class="multi-panel">
+            <div class="multi-header">
+                <h3>Select Stocks (max 5)</h3>
+                <div class="multi-header-actions">
+                    <button id="multi-clear-btn" class="btn-small btn-secondary">Clear All</button>
+                    <button id="multi-close-btn" class="btn-small">X</button>
+                </div>
+            </div>
+            <div class="multi-search">
+                <input type="text" id="multi-search-input" placeholder="Search stocks...">
+            </div>
+            <div class="multi-selected" id="multi-selected">
+                <div class="multi-selected-label">Selected:</div>
+                <div class="multi-selected-chips" id="multi-chips"></div>
+            </div>
+            <div class="multi-list" id="multi-list"></div>
+            <div class="multi-footer">
+                <span class="multi-count" id="multi-count">0/5 selected</span>
+                <button id="multi-cancel-btn" class="btn-secondary">Cancel</button>
+                <button id="multi-apply-btn" class="btn-primary">Apply</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="backtest-overlay" id="backtest-overlay">
+        <div class="backtest-panel">
+            <div class="backtest-header">
+                <h3>Backtest: <span id="backtest-title">-</span></h3>
+                <div class="backtest-controls">
+                    <label>Year:</label>
+                    <select id="backtest-year-select"></select>
+                    <label>Capital:</label>
+                    <select id="backtest-capital-select">
+                        <option value="100000" selected>₹1,00,000</option>
+                        <option value="500000">₹5,00,000</option>
+                        <option value="1000000">₹10,00,000</option>
+                    </select>
+                    <button id="backtest-close-btn" class="btn-small">✕</button>
+                </div>
+            </div>
+            <div class="backtest-chart" id="backtest-chart"></div>
+            <div class="backtest-legend">
+                <div class="backtest-legend-item">
+                    <div class="backtest-legend-color" style="background: #00ff88;"></div>
+                    <span>Seasonal Strategy</span>
+                </div>
+                <div class="backtest-legend-item">
+                    <div class="backtest-legend-color" style="background: #6699ff;"></div>
+                    <span>Buy & Hold</span>
+                </div>
+                <div class="backtest-legend-item">
+                    <div class="backtest-legend-color" style="background: #333; height: 1px;"></div>
+                    <span>Zero Line</span>
+                </div>
+            </div>
+            <div class="backtest-metrics" id="backtest-metrics"></div>
+        </div>
+    </div>
+    
+    <div class="basket-overlay" id="basket-overlay">
+        <div class="basket-panel">
+            <div class="basket-header">
+                <h3>Trading Basket<span id="basket-title-name"></span></h3>
+                <div class="basket-header-actions">
+                    <button id="basket-clear-btn" class="btn-small btn-secondary">Clear All</button>
+                    <button id="basket-close-btn" class="btn-small">✕</button>
+                </div>
+            </div>
+            <div class="basket-content">
+                <div class="basket-strategies">
+                    <div class="basket-strategies-header">
+                        <span>Strategies</span>
+                        <button id="basket-shuffle-colors" title="Shuffle strategy colors" style="background:none;border:1px solid #555;color:#aaa;cursor:pointer;padding:1px 6px;border-radius:3px;font-size:11px;">Shuffle</button>
+                        <span id="basket-strategy-count">0 strategies</span>
+                    </div>
+                    <div class="basket-strategies-list" id="basket-strategies-list">
+                        <div class="basket-empty">No strategies added yet. Analyze a stock and click "Add to Basket".</div>
+                    </div>
+                </div>
+                <div class="basket-chart-area">
+                    <div class="basket-chart-controls">
+                        <div class="chart-view-toggle">
+                            <button id="basket-line-btn" class="chart-view-btn active">Line</button>
+                            <button id="basket-bar-btn" class="chart-view-btn">Bar</button>
+                        </div>
+                        <label>Year:</label>
+                        <select id="basket-year-select"></select>
+                        <label>Capital:</label>
+                        <select id="basket-capital-select">
+                            <option value="100000" selected>₹1,00,000</option>
+                            <option value="500000">₹5,00,000</option>
+                            <option value="1000000">₹10,00,000</option>
+                        </select>
+                        <label>Alloc:</label>
+                        <select id="basket-alloc-select">
+                            <option value="equal" selected>Equal</option>
+                            <option value="return">Return-wtd</option>
+                            <option value="marketcap">Mkt-cap</option>
+                        </select>
+                        <label>Show:</label>
+                        <select id="basket-years-show" title="Number of years to display on bar chart">
+                            <option value="0">All</option>
+                            <option value="3">Last 3</option>
+                            <option value="5" selected>Last 5</option>
+                            <option value="7">Last 7</option>
+                            <option value="10">Last 10</option>
+                        </select>
+                        <label>Fees%:</label>
+                        <input type="number" id="basket-fees-input" min="0" max="5" step="0.1" value="0.3" style="width:56px" title="Fees % of value per round-trip trade (brokerage + STT + charges).">
+                        <label>Tax%:</label>
+                        <input type="number" id="basket-tax-input" min="0" max="50" step="1" value="20" style="width:48px" title="Tax % on net annual profits (STCG).">
+                    </div>
+                    <div class="basket-chart" id="basket-chart">
+                        <div class="basket-chart-buffer" id="basket-buffer-0">
+                            <div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>
+                        </div>
+                        <div class="basket-chart-buffer back" id="basket-buffer-1"></div>
+                    </div>
+                    <div class="basket-metrics" id="basket-metrics"></div>
+                </div>
+            </div>
+            <div class="basket-footer">
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#999;margin-right:auto;cursor:pointer">
+                    <input type="checkbox" id="basket-align-check"> Align windows (±2 days)
+                </label>
+                <button id="basket-load-btn" class="btn-secondary">Load Basket</button>
+                <button id="basket-save-btn" class="btn-secondary">Save Basket</button>
+                <button id="basket-export-btn" class="btn-secondary">Export Trading Calendar</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Hidden file input for loading baskets -->
+    <input type="file" id="basket-file-input" accept=".json" style="display: none;">
+    
+    <script src="/static/app.js"></script>
+</body>
+</html>
