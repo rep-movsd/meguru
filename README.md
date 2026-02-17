@@ -52,13 +52,13 @@ meguru/
 - **Line chart**: year-by-year or averaged equity curve with strategy vs Buy & Hold
 - **Bar chart**: per-year strategy return vs B&H, side-by-side bars
 - Days-in-market tracking (e.g. "120/252d")
-- Shaded bands showing investment windows on equity curves
+- Shaded bands showing investment windows with BUY/SELL markers
 
 ### Basket Builder
 - Combine strategies from multiple stocks into a unified trading basket
 - Per-stock contribution bars in stacked bar chart view
-- Deterministic symbol-to-color mapping (djb2 hash) for consistent colors
-- **Allocation modes**: Equal weight or Return-weighted (with 5% floor)
+- 16-color palette for strategy colors
+- **Allocation modes**: Equal weight or Return-weighted
 - **Capital options**: ₹1L / ₹5L / ₹10L
 - **Hide/show** individual strategies without removing them
 - **Basket overlap**: when adding a stock, shows how many days overlap with existing basket coverage and how many new days would be added
@@ -188,7 +188,7 @@ If a basket exists, a purple **Basket overlap** row shows coverage overlap and n
 ### Line Chart
 - Green line: strategy equity curve (investing only during detected windows)
 - Blue line: Buy & Hold equity curve
-- Green/red shaded bands: individual window periods (profit/loss)
+- Green/red shaded bands: individual window periods with return %
 - Purple bands: existing basket coverage (when overlap data available)
 - Metrics: total return, CAGR, max drawdown, days in market
 
