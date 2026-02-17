@@ -3099,13 +3099,15 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
         grouped.append((doy, day_events))
     
     # Generate CSV
+    import csv
     output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
     
     # Row 1: Parameters
-    output.write("Year,2026,,,Capital,100000\n")
+    writer.writerow(["Year", "2026", "", "", "Capital", "100000"])
     
     # Row 2: Blank
-    output.write("\n")
+    writer.writerow([])
     
     # Row 3: Headers
     # Date, Cash, [Stock_Shares, Stock_Holdings, Stock_Price]..., Value, Action
@@ -3117,7 +3119,7 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
         headers.append(f"{safe_name}_Price")
     headers.append("Value")
     headers.append("Action")
-    output.write(",".join(headers) + "\n")
+    writer.writerow(headers)
     
     # Column letter helper
     def col_letter(idx: int) -> str:
@@ -3273,9 +3275,9 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
         cells.append(value_formula)
         
         # Action
-        cells.append(f'"{action_desc}"')
+        cells.append(action_desc)
         
-        output.write(",".join(cells) + "\n")
+        writer.writerow(cells)
         row_num += 1
     
     return output.getvalue()
