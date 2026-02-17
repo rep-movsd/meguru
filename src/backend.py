@@ -2997,6 +2997,290 @@ def export_trading_calendar_csv(strategies: list[dict], align_windows: bool = Fa
     return output.getvalue()
 
 
+def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = False) -> str:
+    """
+    Generate a trading simulation CSV for Google Sheets with GOOGLEFINANCE formulas.
+    
+    Format:
+    - Row 1: Year input cell (B1), Capital input cell (E1)
+    - Row 3: Headers - Date, Cash, [Stock_Shares, Stock_Holdings, Stock_Price]..., Value, Action
+    - Row 4+: Data rows with formulas
+    
+    Each event row shows:
+    - Date: Formula referencing year input
+    - Cash: Running cash balance
+    - Stock_Shares: +N (buy) or -N (sell) change in shares
+    - Stock_Holdings: Cumulative shares held
+    - Stock_Price: GOOGLEFINANCE formula with future-date guard
+    - Value: Total portfolio value (cash + stock holdings * prices)
+    - Action: Description of the trade
+    
+    Args:
+        strategies: List of strategy dicts with symbol, window_size, threshold
+        align_windows: If True, merge entry/exit dates within 2 days of each other
+    
+    Returns:
+        CSV content string for import into Google Sheets
+    """
+    import io
+    
+    # Collect all windows across strategies
+    all_windows: list[tuple[int, int, str]] = []
+    stock_names: list[str] = []  # ordered unique stock names (cleaned)
+    stock_tickers: dict[str, list[str]] = {}  # stock_name -> list of NSE tickers
+    
+    for strat in strategies:
+        symbol = strat.get("symbol", "")
+        window_size = int(strat.get("window_size", 30))
+        threshold = int(strat.get("threshold", 50))
+        
+        symbols = parse_symbols(symbol)
+        if not symbols:
+            continue
+        
+        # Load data to get windows
+        if len(symbols) == 1:
+            df = load_symbol_data(symbols[0])
+        else:
+            df = synthesize_basket(symbols)
+        
+        if df.empty:
+            continue
+        
+        cache_key = (symbol, window_size, threshold)
+        if cache_key in _window_detect_cache:
+            windows = _window_detect_cache[cache_key]
+        else:
+            windows = detect_sliding_windows(df, window_size=window_size, threshold=threshold / 100)
+            _window_detect_cache[cache_key] = windows
+        if not windows:
+            continue
+        
+        # Build stock name and ticker mapping
+        if len(symbols) == 1:
+            stock_name = symbols[0].replace(".NS", "")
+            tickers = [symbols[0].replace(".NS", "")]
+        else:
+            stock_name = "+".join(s.replace(".NS", "") for s in symbols)
+            tickers = [s.replace(".NS", "") for s in symbols]
+        
+        if stock_name not in stock_names:
+            stock_names.append(stock_name)
+            stock_tickers[stock_name] = tickers
+        
+        for w in windows:
+            all_windows.append((w.start_day, w.end_day, stock_name))
+    
+    if not all_windows or not stock_names:
+        return ""
+    
+    # Apply alignment if requested
+    if align_windows:
+        all_windows = _align_window_dates(all_windows)
+    
+    # Build chronological event list
+    events: list[tuple[int, str, str]] = []
+    for start_doy, end_doy, name in all_windows:
+        events.append((start_doy, name, "enter"))
+        events.append((end_doy, name, "exit"))
+    
+    # Sort by doy, exits before entries on same day
+    events.sort(key=lambda e: (e[0], 0 if e[2] == "exit" else 1))
+    
+    # Group events on the same day
+    grouped: list[tuple[int, list[tuple[str, str]]]] = []
+    i = 0
+    while i < len(events):
+        doy = events[i][0]
+        day_events: list[tuple[str, str]] = []
+        while i < len(events) and events[i][0] == doy:
+            day_events.append((events[i][1], events[i][2]))
+            i += 1
+        grouped.append((doy, day_events))
+    
+    # Generate CSV
+    output = io.StringIO()
+    
+    # Row 1: Parameters
+    output.write("Year,2026,,,Capital,100000\n")
+    
+    # Row 2: Blank
+    output.write("\n")
+    
+    # Row 3: Headers
+    # Date, Cash, [Stock_Shares, Stock_Holdings, Stock_Price]..., Value, Action
+    headers = ["Date", "Cash"]
+    for name in stock_names:
+        safe_name = name.replace("+", "_")
+        headers.append(f"{safe_name}_Shares")
+        headers.append(f"{safe_name}_Holdings")
+        headers.append(f"{safe_name}_Price")
+    headers.append("Value")
+    headers.append("Action")
+    output.write(",".join(headers) + "\n")
+    
+    # Column letter helper
+    def col_letter(idx: int) -> str:
+        """Convert 0-based index to column letter (A, B, ..., Z, AA, AB, ...)"""
+        result = ""
+        idx += 1
+        while idx > 0:
+            idx -= 1
+            result = chr(ord('A') + idx % 26) + result
+            idx //= 26
+        return result
+    
+    # Column indices: A=Date, B=Cash, then triplets (Shares, Holdings, Price) per stock, then Value, Action
+    date_col = 0
+    cash_col = 1
+    stock_cols: dict[str, tuple[int, int, int]] = {}  # stock_name -> (shares_col, holdings_col, price_col)
+    col_idx = 2
+    for name in stock_names:
+        stock_cols[name] = (col_idx, col_idx + 1, col_idx + 2)
+        col_idx += 3
+    value_col = col_idx
+    
+    # Track state
+    active: set[str] = set()
+    row_num = 4  # First data row (1-indexed for Sheets)
+    
+    for doy, day_events in grouped:
+        entering = [name for name, typ in day_events if typ == "enter"]
+        exiting = [name for name, typ in day_events if typ == "exit"]
+        
+        # Build action description
+        actions = []
+        if entering:
+            actions.append("Enter " + ", ".join(entering))
+        if exiting:
+            actions.append("Exit " + ", ".join(exiting))
+        action_desc = "; ".join(actions)
+        
+        # Convert doy to month/day
+        month, day = date_from_day_of_year(doy)
+        
+        # Build row cells
+        cells: list[str] = []
+        
+        # Date formula with future guard
+        date_formula = f'=IF(DATE($B$1,{month},{day})<=TODAY(),DATE($B$1,{month},{day}),"")'
+        cells.append(date_formula)
+        
+        date_ref = f"{col_letter(date_col)}{row_num}"
+        
+        # Apply state changes
+        for name in exiting:
+            active.discard(name)
+        for name in entering:
+            active.add(name)
+        
+        # Cash formula
+        if row_num == 4:
+            # First row: Cash = Capital - cost of shares bought
+            buy_costs = []
+            for name in entering:
+                shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
+                shares_ref = f"{col_letter(shares_col_idx)}{row_num}"
+                price_ref = f"{col_letter(price_col_idx)}{row_num}"
+                buy_costs.append(f"{shares_ref}*{price_ref}")
+            
+            if buy_costs:
+                cost_expr = "+".join(buy_costs)
+                cash_formula = f'=IF({date_ref}="",$E$1,$E$1-({cost_expr}))'
+            else:
+                cash_formula = f'=IF({date_ref}="",$E$1,$E$1)'
+        else:
+            prev_row = row_num - 1
+            prev_cash = f"{col_letter(cash_col)}{prev_row}"
+            
+            # Cash changes: +proceeds from sells, -cost of buys
+            changes = []
+            for name in exiting:
+                shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
+                # Selling: we sell the holdings from previous row
+                prev_holdings = f"{col_letter(holdings_col_idx)}{prev_row}"
+                curr_price = f"{col_letter(price_col_idx)}{row_num}"
+                changes.append(f"+{prev_holdings}*{curr_price}")
+            
+            for name in entering:
+                shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
+                curr_shares = f"{col_letter(shares_col_idx)}{row_num}"
+                curr_price = f"{col_letter(price_col_idx)}{row_num}"
+                changes.append(f"-{curr_shares}*{curr_price}")
+            
+            if changes:
+                change_expr = "".join(changes)
+                cash_formula = f'=IF({date_ref}="",{prev_cash},{prev_cash}{change_expr})'
+            else:
+                cash_formula = f'=IF({date_ref}="",{prev_cash},{prev_cash})'
+        
+        cells.append(cash_formula)
+        
+        # Stock columns (Shares, Holdings, Price for each)
+        for name in stock_names:
+            shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
+            tickers = stock_tickers[name]
+            
+            # Shares change
+            if name in entering:
+                # Buy: allocate equal portion of previous value (or capital if first row)
+                n_active = len(active)
+                alloc_frac = round(1.0 / n_active, 4) if n_active > 0 else 0
+                if row_num == 4:
+                    portfolio_ref = "$E$1"
+                else:
+                    portfolio_ref = f"{col_letter(value_col)}{row_num - 1}"
+                price_ref = f"{col_letter(price_col_idx)}{row_num}"
+                shares_formula = f'=IF({date_ref}="","",FLOOR({alloc_frac}*{portfolio_ref}/{price_ref},1))'
+            elif name in exiting:
+                # Sell all holdings
+                prev_holdings = f"{col_letter(holdings_col_idx)}{row_num - 1}"
+                shares_formula = f'=IF({date_ref}="","",-{prev_holdings})'
+            else:
+                shares_formula = ""
+            cells.append(shares_formula)
+            
+            # Holdings (cumulative)
+            if row_num == 4:
+                curr_shares = f"{col_letter(shares_col_idx)}{row_num}"
+                holdings_formula = f'=IF({date_ref}="",0,IFERROR({curr_shares},0))'
+            else:
+                prev_holdings = f"{col_letter(holdings_col_idx)}{row_num - 1}"
+                curr_shares = f"{col_letter(shares_col_idx)}{row_num}"
+                holdings_formula = f'=IF({date_ref}="",{prev_holdings},{prev_holdings}+IFERROR({curr_shares},0))'
+            cells.append(holdings_formula)
+            
+            # Price (GOOGLEFINANCE)
+            if len(tickers) == 1:
+                ticker = tickers[0]
+                price_formula = f'=IF({date_ref}="","",IFERROR(INDEX(GOOGLEFINANCE("NSE:{ticker}","price",{date_ref}),2,2),"N/A"))'
+            else:
+                # Average multiple tickers
+                price_parts = [f'IFERROR(INDEX(GOOGLEFINANCE("NSE:{t}","price",{date_ref}),2,2),0)' for t in tickers]
+                avg_expr = f'({"+".join(price_parts)})/{len(tickers)}'
+                price_formula = f'=IF({date_ref}="","",{avg_expr})'
+            cells.append(price_formula)
+        
+        # Value = Cash + sum(Holdings * Price) for all stocks
+        value_parts = [f"{col_letter(cash_col)}{row_num}"]
+        for name in stock_names:
+            shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
+            holdings_ref = f"{col_letter(holdings_col_idx)}{row_num}"
+            price_ref = f"{col_letter(price_col_idx)}{row_num}"
+            value_parts.append(f"IFERROR({holdings_ref}*{price_ref},0)")
+        
+        value_formula = f'=IF({date_ref}="","",' + "+".join(value_parts) + ")"
+        cells.append(value_formula)
+        
+        # Action
+        cells.append(f'"{action_desc}"')
+        
+        output.write(",".join(cells) + "\n")
+        row_num += 1
+    
+    return output.getvalue()
+
+
 def _align_window_dates(windows: list[tuple[int, int, str]]) -> list[tuple[int, int, str]]:
     """
     Merge entry/exit dates that are within 2 days of each other.

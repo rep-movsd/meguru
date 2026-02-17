@@ -22,6 +22,7 @@ from backend import (
     get_basket_backtest_data,
     get_basket_backtest_average,
     export_trading_calendar_csv,
+    export_trading_simulation_csv,
     detect_sliding_windows,
     load_symbol_data,
     get_window_backtest_data,
@@ -290,6 +291,25 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 align = params.get("align", "0") == "1"
                 content = export_trading_calendar_csv(strategies, align_windows=align)
                 filename = "trading-calendar.csv"
+                self.send_csv(content, filename)
+            except json.JSONDecodeError:
+                self.send_json({"error": "Invalid strategies JSON"}, 400)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+        
+        elif path == "/api/basket/export-simulation":
+            params = self.parse_params()
+            try:
+                strategies_json = params.get("strategies", "[]")
+                strategies = json.loads(strategies_json)
+                
+                if not strategies:
+                    self.send_json({"error": "No strategies provided"}, 400)
+                    return
+                
+                align = params.get("align", "0") == "1"
+                content = export_trading_simulation_csv(strategies, align_windows=align)
+                filename = "trading-simulation.csv"
                 self.send_csv(content, filename)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)

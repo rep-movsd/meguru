@@ -2495,6 +2495,22 @@
             window.location.href = `/api/basket/export?${params}`;
         }
         
+        // Export simulation CSV with Google Sheets formulas
+        async function exportTradingSimulation() {
+            const basket = loadBasket();
+            if (basket.length === 0) {
+                return;
+            }
+            
+            const align = document.getElementById('basket-align-check').checked;
+            const params = new URLSearchParams({
+                strategies: JSON.stringify(basket),
+                align: align ? '1' : '0'
+            });
+            
+            window.location.href = `/api/basket/export-simulation?${params}`;
+        }
+        
         // =====================
         // Basket Save / Load (File-based)
         // =====================
@@ -2606,6 +2622,7 @@
             basketMetrics.innerHTML = '';
         });
         document.getElementById('basket-export-btn').addEventListener('click', exportTradingCalendar);
+        document.getElementById('basket-export-sim-btn').addEventListener('click', exportTradingSimulation);
         basketYearSelect.addEventListener('change', loadBasketBacktest);
         basketCapitalSelect.addEventListener('change', loadBasketBacktest);
         basketAllocSelect.addEventListener('change', () => {
