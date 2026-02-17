@@ -13,8 +13,12 @@ meguru/
 ├── src/
 │   ├── backend.py          # Core engine: data loading, sliding window detection,
 │   │                       #   backtesting, basket builder, exports
-│   ├── server.py           # HTTP server + embedded SPA (HTML/CSS/JS)
-│   └── download_stocks.py  # NSE stock list downloader for autocomplete
+│   ├── server.py           # HTTP server serving static files
+│   ├── download_stocks.py  # NSE stock list downloader for autocomplete
+│   └── static/
+│       ├── index.html      # Main HTML page
+│       ├── app.js          # Frontend JavaScript application
+│       └── style.css       # CSS styles
 ├── data/
 │   ├── stocks/
 │   │   └── nse_stocks.csv  # 2,500+ NSE equities, indices, ETFs
@@ -30,7 +34,6 @@ meguru/
 
 **Key design decisions:**
 - No web framework -- uses Python stdlib `http.server`
-- Entire SPA frontend embedded as a single string in `server.py`
 - SVG charts rendered inline (no charting library)
 - Local CSV caching with incremental Yahoo Finance updates
 - Precomputed cumulative returns (`YearlyReturnsCache`) for O(1) window scoring
