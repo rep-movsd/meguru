@@ -3103,8 +3103,8 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
     output = io.StringIO()
     writer = csv.writer(output, quoting=csv.QUOTE_ALL)
     
-    # Row 1: Parameters
-    writer.writerow(["Year", "2026", "", "", "Capital", "100000"])
+    # Row 1: Parameters (Year in B1, Capital in E1)
+    writer.writerow(["Year", "2026", "", "Capital", "100000"])
     
     # Row 2: Blank
     writer.writerow([])
