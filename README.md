@@ -12,7 +12,7 @@ A lightweight web application that identifies recurring seasonal investment wind
 meguru/
 ├── src/
 │   ├── backend.py          # Core engine: data loading, sliding window detection,
-│   │                       #   backtesting, basket builder, stop-loss, exports
+│   │                       #   backtesting, basket builder, exports
 │   ├── server.py           # HTTP server + embedded SPA (HTML/CSS/JS)
 │   └── download_stocks.py  # NSE stock list downloader for autocomplete
 ├── data/
@@ -50,16 +50,6 @@ meguru/
 - **Bar chart**: per-year strategy return vs B&H, side-by-side bars
 - Days-in-market tracking (e.g. "120/252d")
 - Shaded bands showing investment windows on equity curves
-
-### Entry Stop-Loss & Re-Entry
-- Configurable entry stop-loss (SL%) on both main screen and basket screen
-- Records entry price on first day of each window; exits when close drops SL% below entry
-- Unlike trailing stops, intra-window run-ups don't tighten the stop -- only actual losses from entry trigger it
-- Optional re-entry (Re%): re-enters when price drops further below exit price, catching rebounds
-- On re-entry, entry price resets to the re-entry close
-- One re-entry per window max; second stop-out is permanent
-- Stop-loss checked at daily close using EOD prices
-- Average-year mode skips stop-loss (no real price path to track)
 
 ### Basket Builder
 - Combine strategies from multiple stocks into a unified trading basket
@@ -178,8 +168,6 @@ The `.NS` suffix is added automatically for NSE stocks.
 | Threshold `[-]` `[+]` | Minimum win rate filter (50-100%). Higher = only strong windows |
 | Year dropdown | Select specific year or "Average" for backtest |
 | Line / Bar toggle | Switch between equity curve and per-year bar chart |
-| SL% | Entry stop-loss percentage (0 = disabled) |
-| Re% | Re-entry percentage below stop price (0 = disabled) |
 | + Add to Basket | Add current stock's detected windows to the basket |
 
 ## Window Detection Results
@@ -222,14 +210,12 @@ If a basket exists, a purple **Basket overlap** row shows coverage overlap and n
 | Year dropdown | Year selection or "Average" |
 | Capital dropdown | ₹1,00,000 / ₹5,00,000 / ₹10,00,000 |
 | Alloc dropdown | Equal weight or Return-weighted allocation |
-| SL% | Basket-level entry stop-loss (independent from main screen) |
-| Re% | Basket-level re-entry percentage |
 
 ### Basket Bar Chart
 Shows stacked bars where each stock's contribution is drawn in its assigned color. Legend shows allocation percentages when return-weighted mode is active.
 
 ### Dynamic Capital Allocation
-On each trading day, capital is split among all active windows. When one window's stop-loss triggers, its capital redistributes to remaining active windows.
+On each trading day, capital is split among all active windows.
 
 ### Managing Strategies
 - **Hide/Show**: Click "hide"/"show" on any strategy to exclude/include it from the backtest without deleting it
@@ -261,20 +247,10 @@ Uses `YearlyReturnsCache` with precomputed cumulative products for O(1) window r
 6. Merges nearby windows within 7-day gaps and recomputes merged stats
 7. Narrows edges: iteratively trims boundary days that drag the score down
 
-## Entry Stop-Loss
-
-Per-window entry-price-based stop tracking:
-1. Record entry price (close) on the first active day of each window
-2. If close drops ≥ SL% below the entry price, exit at close (that day's return is captured)
-3. If Re% > 0, watch for price to drop another Re% below the exit price to re-enter
-4. Re-entry resets entry price to the re-entry close; stop is measured from new cost basis
-5. Re-entry day return = 0 (fresh position); subsequent days resume tracking
-6. Maximum one re-entry per window; second stop-out is permanent for that window
-
 ## Return-Weighted Allocation
 
 When "Return-wtd" allocation mode is selected in basket:
-1. Compute unweighted (no stop-loss) bar chart returns for each stock
+1. Compute bar chart returns for each stock
 2. Average each stock's per-year strategy returns
 3. Apply a 5% floor so weak performers still get minimal allocation
 4. Normalize to sum to 1.0
