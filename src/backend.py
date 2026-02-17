@@ -3198,12 +3198,12 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
             # Price (GOOGLEFINANCE) - calculate first as other formulas reference it
             if len(tickers) == 1:
                 ticker = tickers[0]
-                price_formula = f'=IF({date_ref}="","",IFERROR(INDEX(GOOGLEFINANCE("NSE:{ticker}","price",{date_ref}),2,2),"N/A"))'
+                price_formula = f'=IFERROR(INDEX(GOOGLEFINANCE("NSE:{ticker}","price",{date_ref}),2,2),"")'
             else:
                 # Average multiple tickers
                 price_parts = [f'IFERROR(INDEX(GOOGLEFINANCE("NSE:{t}","price",{date_ref}),2,2),0)' for t in tickers]
                 avg_expr = f'({"+".join(price_parts)})/{len(tickers)}'
-                price_formula = f'=IF({date_ref}="","",{avg_expr})'
+                price_formula = f'={avg_expr}'
             cells[price_col_idx] = price_formula
             
             price_ref = f"{col_letter(price_col_idx)}{row_num}"
