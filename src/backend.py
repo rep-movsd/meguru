@@ -3044,7 +3044,7 @@ def _sanitize_plan_name(name: str) -> str:
     return name
 
 
-def save_plan(name: str, strategies: list[dict]) -> dict:
+def save_plan(name: str, strategies: list[dict], allocation: str = "equal") -> dict:
     """Save a plan (list of strategies) to data/plans/<name>.json."""
     name = _sanitize_plan_name(name)
     PLANS_DIR.mkdir(parents=True, exist_ok=True)
@@ -3052,6 +3052,7 @@ def save_plan(name: str, strategies: list[dict]) -> dict:
     payload = {
         "name": name,
         "strategies": strategies,
+        "allocation": allocation,
         "saved_at": dt.datetime.now().isoformat(timespec="seconds"),
     }
     path.write_text(_json.dumps(payload, indent=2), encoding="utf-8")

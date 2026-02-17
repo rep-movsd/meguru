@@ -950,8 +950,8 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         
         .plan-strategies {
-            width: 180px;
-            min-width: 180px;
+            width: 220px;
+            min-width: 220px;
             flex-shrink: 0;
             border-right: 1px solid #333;
             display: flex;
@@ -1063,48 +1063,6 @@ HTML_PAGE = """<!DOCTYPE html>
         .plan-chart-controls label {
             color: #888;
             font-size: 0.9em;
-        }
-        
-        .plan-legend {
-            padding: 6px 16px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px 14px;
-            align-items: center;
-            border-bottom: 1px solid #222;
-        }
-        
-        .plan-legend-item {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            cursor: pointer;
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            user-select: none;
-            transition: opacity 0.15s;
-        }
-        
-        .plan-legend-item:hover {
-            background: rgba(255,255,255,0.06);
-        }
-        
-        .plan-legend-item.hidden {
-            opacity: 0.35;
-        }
-        
-        .plan-legend-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-        
-        .plan-legend-line {
-            width: 18px;
-            height: 2px;
-            flex-shrink: 0;
         }
         
         .plan-chart {
@@ -1400,6 +1358,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 <div class="plan-strategies">
                     <div class="plan-strategies-header">
                         <span>Strategies</span>
+                        <button id="plan-shuffle-colors" title="Shuffle strategy colors" style="background:none;border:1px solid #555;color:#aaa;cursor:pointer;padding:1px 6px;border-radius:3px;font-size:11px;">Shuffle</button>
                         <span id="plan-strategy-count">0 strategies</span>
                     </div>
                     <div class="plan-strategies-list" id="plan-strategies-list">
@@ -1426,16 +1385,19 @@ HTML_PAGE = """<!DOCTYPE html>
                             <option value="return">Return-wtd</option>
                             <option value="marketcap">Mkt-cap</option>
                         </select>
-                        <label>SL%:</label>
-                        <input type="number" id="plan-sl-input" min="0" max="50" step="1" value="0" style="width:48px" title="Entry stop-loss %. Exits if price drops this % below entry. 0 = disabled.">
-                        <label>Re%:</label>
-                        <input type="number" id="plan-re-input" min="0" max="50" step="1" value="0" style="width:48px" title="Re-entry % below stop price. May catch rebounds. 0 = disabled.">
+                        <label>Show:</label>
+                        <select id="plan-years-show" title="Number of years to display on bar chart">
+                            <option value="0">All</option>
+                            <option value="3">Last 3</option>
+                            <option value="5" selected>Last 5</option>
+                            <option value="7">Last 7</option>
+                            <option value="10">Last 10</option>
+                        </select>
                         <label>Fees%:</label>
                         <input type="number" id="plan-fees-input" min="0" max="5" step="0.1" value="0.3" style="width:56px" title="Fees % of value per round-trip trade (brokerage + STT + charges).">
                         <label>Tax%:</label>
                         <input type="number" id="plan-tax-input" min="0" max="50" step="1" value="20" style="width:48px" title="Tax % on net annual profits (STCG).">
                     </div>
-                    <div class="plan-legend" id="plan-legend"></div>
                     <div class="plan-chart" id="plan-chart">
                         <div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>
                     </div>
@@ -2911,33 +2873,80 @@ HTML_PAGE = """<!DOCTYPE html>
         const planYearSelect = document.getElementById('plan-year-select');
         const planCapitalSelect = document.getElementById('plan-capital-select');
         const planAllocSelect = document.getElementById('plan-alloc-select');
-        const planSLInput = document.getElementById('plan-sl-input');
-        const planREInput = document.getElementById('plan-re-input');
+        const planYearsShow = document.getElementById('plan-years-show');
         const planFeesInput = document.getElementById('plan-fees-input');
         const planTaxInput = document.getElementById('plan-tax-input');
         const planChart = document.getElementById('plan-chart');
-        const planLegend = document.getElementById('plan-legend');
         const planMetrics = document.getElementById('plan-metrics');
         const planBadge = document.getElementById('plan-badge');
         const showPlanBtn = document.getElementById('show-plan-btn');
         
-        // Strategy colors for plan chart (up to 8)
-        const STRATEGY_COLORS = ['#ff6b6b', '#4ecdc4', '#f7b731', '#a55eea', '#26de81', '#fd9644', '#45aaf2', '#fc5c65'];
+        // 16-color golden angle palette: maximally distinct hues at HSL(h, 75%, 60%)
+        const PLAN_COLORS = [
+            '#e5994c', '#4ce5c5', '#e54cd8', '#ace54c',
+            '#4c7fe5', '#e54c52', '#4ce572', '#9f4ce5',
+            '#e5cc4c', '#4cd2e5', '#e54ca5', '#78e54c',
+            '#4c4ce5', '#e5794c', '#4ce5a6', '#d24ce5'
+        ];
         
-        // Deterministic symbol-to-color: hash the symbol name so the color
-        // stays stable regardless of plan order or removals.
-        function symbolToColor(sym) {
-            let h = 0;
-            for (let i = 0; i < sym.length; i++) {
-                h = ((h << 5) - h + sym.charCodeAt(i)) | 0;
+        // Get the next available color from the palette not already used in the plan
+        function getNextPlanColor(plan) {
+            const usedColors = new Set(plan.map(s => s.color).filter(Boolean));
+            for (let i = 0; i < PLAN_COLORS.length; i++) {
+                if (!usedColors.has(PLAN_COLORS[i])) return PLAN_COLORS[i];
             }
-            return STRATEGY_COLORS[((h % STRATEGY_COLORS.length) + STRATEGY_COLORS.length) % STRATEGY_COLORS.length];
+            // All 16 used — wrap around
+            return PLAN_COLORS[plan.length % PLAN_COLORS.length];
+        }
+        
+        // Ensure every strategy in the plan has a color assigned
+        function ensurePlanColors(plan) {
+            let changed = false;
+            plan.forEach(s => {
+                if (!s.color) {
+                    s.color = getNextPlanColor(plan);
+                    changed = true;
+                }
+            });
+            return changed;
+        }
+        
+        // Build a symbol-to-color map from the current plan
+        function buildPlanColorMap() {
+            const plan = loadPlan();
+            const map = {};
+            plan.forEach(s => {
+                if (s.color && !map[s.symbol]) map[s.symbol] = s.color;
+            });
+            return map;
+        }
+        
+        function shuffleColors() {
+            const plan = loadPlan();
+            if (plan.length === 0) return;
+            const offset = Math.floor(Math.random() * PLAN_COLORS.length);
+            plan.forEach((s, i) => {
+                s.color = PLAN_COLORS[(offset + i) % PLAN_COLORS.length];
+            });
+            savePlan(plan);
+            renderPlanStrategies();
+            if (state.planBarMode && state.planBarData) {
+                renderPlanBarChart(state.planBarData);
+            } else if (state.lastPlanData) {
+                const capital = parseInt(planCapitalSelect.value) || 100000;
+                renderPlanChart(state.lastPlanData, capital);
+            }
         }
         
         // Load plan from localStorage
         function loadPlan() {
             const saved = localStorage.getItem('meguru_plan');
-            return saved ? JSON.parse(saved) : [];
+            const plan = saved ? JSON.parse(saved) : [];
+            // Ensure all strategies have colors (backward compat)
+            if (ensurePlanColors(plan)) {
+                localStorage.setItem('meguru_plan', JSON.stringify(plan));
+            }
+            return plan;
         }
         
         // Save plan to localStorage
@@ -2984,6 +2993,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 symbol: state.symbol,
                 window_size: state.windowSize,
                 threshold: state.threshold,
+                color: getNextPlanColor(plan),
             });
             
             savePlan(plan);
@@ -3008,11 +3018,9 @@ HTML_PAGE = """<!DOCTYPE html>
             } else if (plan.length > 0) {
                 planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">All strategies hidden</div>';
                 planMetrics.innerHTML = '';
-                planLegend.innerHTML = '';
             } else {
                 planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>';
                 planMetrics.innerHTML = '';
-                planLegend.innerHTML = '';
             }
         }
         
@@ -3076,7 +3084,7 @@ HTML_PAGE = """<!DOCTYPE html>
             
             planStrategiesList.innerHTML = plan.map((s, idx) => {
                 const isHidden = state.hiddenStrategies.has(idx);
-                const color = symbolToColor(s.symbol);
+                const color = s.color || '#888';
                 // Compute avg return from bar data if available
                 let avgReturnHTML = '';
                 if (state.planBarData && state.planBarData.years) {
@@ -3139,7 +3147,6 @@ HTML_PAGE = """<!DOCTYPE html>
                     } else {
                         planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">All strategies hidden</div>';
                         planMetrics.innerHTML = '';
-                        planLegend.innerHTML = '';
                     }
                 });
             });
@@ -3280,10 +3287,6 @@ HTML_PAGE = """<!DOCTYPE html>
                     year: yearVal
                 });
                 if (weights) params.set('weights', JSON.stringify(weights));
-                const sl = parseFloat(planSLInput.value) || 0;
-                const re = parseFloat(planREInput.value) || 0;
-                if (sl > 0) params.set('stop_loss', String(sl));
-                if (re > 0) params.set('reentry', String(re));
                 const fees = parseFloat(planFeesInput.value) || 0;
                 const tax = parseFloat(planTaxInput.value) || 0;
                 if (fees > 0) params.set('fees_pct', String(fees));
@@ -3309,13 +3312,8 @@ HTML_PAGE = """<!DOCTYPE html>
             const { combined_curve, bh_curve, strategy_curves, trades_count, total_days, dates, trades } = data;
             const symbols = data.symbols || Object.keys(strategy_curves);
             
-            // Build symbol-to-color map (deterministic by name)
-            const symbolColorMap = {};
-            symbols.forEach(sym => {
-                if (!symbolColorMap[sym]) {
-                    symbolColorMap[sym] = symbolToColor(sym);
-                }
-            });
+            // Build symbol-to-color map from plan colors
+            const symbolColorMap = buildPlanColorMap();
             
             // Build per-strategy PnL arrays (needed for legend values)
             const combinedPnL = combined_curve.map(p => (p / 100) * capital);
@@ -3335,50 +3333,6 @@ HTML_PAGE = """<!DOCTYPE html>
                 if (abs >= 1000) return sign + '₹' + (abs / 1000).toFixed(0) + 'K';
                 return sign + '₹' + abs.toFixed(0);
             };
-            
-            // Render interactive legend
-            let legendHTML = '';
-            const weights = state.planWeights;
-            // Per-strategy items
-            for (const sym of symbols) {
-                if (!strategyPnLs[sym]) continue;
-                const color = symbolColorMap[sym] || '#888';
-                const finalVal = strategyPnLs[sym][strategyPnLs[sym].length - 1];
-                const isHidden = state.planVisible[sym] === false;
-                const valColor = finalVal >= 0 ? '#44ff88' : '#ff4466';
-                const weightLabel = weights && weights[sym] != null ? ' (' + (weights[sym] * 100).toFixed(0) + '%)' : '';
-                legendHTML += `<div class="plan-legend-item${isHidden ? ' hidden' : ''}" data-legend-sym="${sym}">
-                    <span class="plan-legend-dot" style="background:${color}"></span>
-                    <span>${sym}${weightLabel}</span>
-                    <span style="color:${valColor};font-weight:600">${formatCurrency(finalVal)}</span>
-                </div>`;
-            }
-            // Combined item
-            const finalCombinedVal = combinedPnL[combinedPnL.length - 1];
-            const combinedValColor = finalCombinedVal >= 0 ? '#44ff88' : '#ff4466';
-            legendHTML += `<div class="plan-legend-item" style="pointer-events:none">
-                <span class="plan-legend-line" style="background:#ffffff"></span>
-                <span>Total</span>
-                <span style="color:${combinedValColor};font-weight:600">${formatCurrency(finalCombinedVal)}</span>
-            </div>`;
-            // B&H item
-            const finalBHVal = bhPnL[bhPnL.length - 1];
-            const bhValColor = finalBHVal >= 0 ? '#44ff88' : '#ff4466';
-            legendHTML += `<div class="plan-legend-item" style="pointer-events:none">
-                <span class="plan-legend-line" style="background:#6699ff;border-top:2px dashed #6699ff;height:0"></span>
-                <span>B&H</span>
-                <span style="color:${bhValColor};font-weight:600">${formatCurrency(finalBHVal)}</span>
-            </div>`;
-            planLegend.innerHTML = legendHTML;
-            
-            // Attach legend click handlers
-            planLegend.querySelectorAll('[data-legend-sym]').forEach(el => {
-                el.addEventListener('click', () => {
-                    const sym = el.getAttribute('data-legend-sym');
-                    state.planVisible[sym] = state.planVisible[sym] === false ? true : false;
-                    renderPlanChart(state.lastPlanData, capital);
-                });
-            });
             
             // Chart dimensions
             const container = planChart.getBoundingClientRect();
@@ -3651,17 +3605,12 @@ HTML_PAGE = """<!DOCTYPE html>
             if (plan.length === 0) return;
             planChart.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">Loading...</div>';
             planMetrics.innerHTML = '';
-            planLegend.innerHTML = '';
             try {
                 const weights = await getPlanWeights();
                 const params = new URLSearchParams({
                     strategies: JSON.stringify(plan),
                 });
                 if (weights) params.set('weights', JSON.stringify(weights));
-                const sl = parseFloat(planSLInput.value) || 0;
-                const re = parseFloat(planREInput.value) || 0;
-                if (sl > 0) params.set('stop_loss', String(sl));
-                if (re > 0) params.set('reentry', String(re));
                 const fees = parseFloat(planFeesInput.value) || 0;
                 const tax = parseFloat(planTaxInput.value) || 0;
                 if (fees > 0) params.set('fees_pct', String(fees));
@@ -3680,21 +3629,20 @@ HTML_PAGE = """<!DOCTYPE html>
         }
         
         function renderPlanBarChart(data) {
-            const years = data.years;
+            let years = data.years;
             const symbols = data.symbols || [];
             if (!years || years.length === 0) {
                 planChart.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">No data</div>';
                 return;
             }
+            // Slice years based on "Show N years" dropdown
+            const showN = parseInt(planYearsShow.value) || 0;
+            if (showN > 0 && years.length > showN) {
+                years = years.slice(-showN);
+            }
 
-            // Build symbol-to-color map (deterministic by name)
-            const symbolColorMap = {};
-            const uniqueSymbols = data.symbols || [];
-            uniqueSymbols.forEach(sym => {
-                if (!symbolColorMap[sym]) {
-                    symbolColorMap[sym] = symbolToColor(sym);
-                }
-            });
+            // Build symbol-to-color map from plan colors
+            const symbolColorMap = buildPlanColorMap();
 
             const container = planChart.getBoundingClientRect();
             const containerWidth = container.width - 32;
@@ -3826,28 +3774,9 @@ HTML_PAGE = """<!DOCTYPE html>
 
             planChart.innerHTML = svg;
 
-            // Build legend — only Combined and B&H (per-stock info is in sidebar)
-            let legendHTML = '';
-            const weights = state.planWeights;
-            // Show allocation weights compactly if available
-            if (weights) {
-                symbols.forEach(sym => {
-                    const color = symbolColorMap[sym] || '#888';
-                    const w = weights[sym] != null ? (weights[sym] * 100).toFixed(0) + '%' : '';
-                    if (w) legendHTML += '<div class="plan-legend-item" style="pointer-events:none;padding:2px 5px"><span class="plan-legend-dot" style="background:' + color + ';width:8px;height:8px"></span><span style="font-size:11px">' + displaySymbol(sym) + ' ' + w + '</span></div>';
-                });
-            }
-            // Combined
-            const avgCombined = years.reduce((s, d) => s + d.combined_return, 0) / n;
-            const combinedColor = avgCombined >= 0 ? '#44ff88' : '#ff4466';
-            legendHTML += '<div class="plan-legend-item" style="pointer-events:none"><span class="plan-legend-line" style="background:#ffffff"></span><span>Combined</span><span style="color:' + combinedColor + ';font-weight:600">avg ' + avgCombined.toFixed(1) + '%</span></div>';
-            // B&H
-            const avgBH = years.reduce((s, d) => s + d.bh_return, 0) / n;
-            const bhColor = avgBH >= 0 ? '#44ff88' : '#ff4466';
-            legendHTML += '<div class="plan-legend-item" style="pointer-events:none"><span class="plan-legend-line" style="background:#6699ff;border-top:2px dashed #6699ff;height:0"></span><span>B&H</span><span style="color:' + bhColor + ';font-weight:600">avg ' + avgBH.toFixed(1) + '%</span></div>';
-            planLegend.innerHTML = legendHTML;
-
             // Metrics
+            const avgCombined = years.reduce((s, d) => s + d.combined_return, 0) / n;
+            const avgBH = years.reduce((s, d) => s + d.bh_return, 0) / n;
             const winYears = years.filter(d => d.combined_return > d.bh_return).length;
             // Compute average time in market %
             const dimYears = years.filter(d => d.days_in_market != null && d.total_trading_days > 0);
@@ -3910,7 +3839,7 @@ HTML_PAGE = """<!DOCTYPE html>
                 const res = await fetch('/api/plans/save', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({name, strategies: plan})
+                    body: JSON.stringify({name, strategies: plan, allocation: planAllocSelect.value})
                 });
                 const data = await res.json();
                 if (data.error) {
@@ -3975,7 +3904,13 @@ HTML_PAGE = """<!DOCTYPE html>
                     setStatus(data.error, true);
                     return;
                 }
+                // Ensure colors are assigned (backward compat with old saved plans)
+                ensurePlanColors(data.strategies);
                 savePlan(data.strategies);
+                // Restore allocation if saved
+                if (data.allocation && planAllocSelect) {
+                    planAllocSelect.value = data.allocation;
+                }
                 state.planWeights = null;
                 renderPlanStrategies();
                 closeLoadDialog();
@@ -4050,17 +3985,21 @@ HTML_PAGE = """<!DOCTYPE html>
                 loadPlanBacktest();
             }
         });
-        function onSLREChange() {
+        function onFeesChange() {
             if (state.planBarMode) {
                 loadPlanBarChart();
             } else {
                 loadPlanBacktest();
             }
         }
-        planSLInput.addEventListener('change', onSLREChange);
-        planREInput.addEventListener('change', onSLREChange);
-        planFeesInput.addEventListener('change', onSLREChange);
-        planTaxInput.addEventListener('change', onSLREChange);
+        planFeesInput.addEventListener('change', onFeesChange);
+        planTaxInput.addEventListener('change', onFeesChange);
+        planYearsShow.addEventListener('change', () => {
+            if (state.planBarMode && state.planBarData) {
+                renderPlanBarChart(state.planBarData);
+            }
+        });
+        document.getElementById('plan-shuffle-colors').addEventListener('click', shuffleColors);
         planOverlay.addEventListener('click', (e) => {
             if (e.target === planOverlay) closePlanOverlay();
         });
@@ -4523,7 +4462,7 @@ class MeguruHandler(BaseHTTPRequestHandler):
                 if not strategies:
                     self.send_json({"error": "No strategies to save"}, 400)
                     return
-                result = save_plan(name, strategies)
+                result = save_plan(name, strategies, data.get("allocation", "equal"))
                 self.send_json(result)
             except ValueError as e:
                 self.send_json({"error": str(e)}, 400)
