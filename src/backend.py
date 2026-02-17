@@ -3198,7 +3198,7 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
             # Price (GOOGLEFINANCE) - calculate first as other formulas reference it
             if len(tickers) == 1:
                 ticker = tickers[0]
-                price_formula = f'=IFERROR(INDEX(GOOGLEFINANCE("NSE:{ticker}","price",{date_ref}),2,2),"")'
+                price_formula = f'=IFERROR(INDEX(GOOGLEFINANCE("NSE:{ticker}","price",{date_ref}),2,2),0)'
             else:
                 # Average multiple tickers
                 price_parts = [f'IFERROR(INDEX(GOOGLEFINANCE("NSE:{t}","price",{date_ref}),2,2),0)' for t in tickers]
@@ -3232,14 +3232,14 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
                 trade_formula = ""
             cells[trade_col_idx] = trade_formula
             
-            # Held (cumulative)
+            # Held (cumulative) - Trade is either empty or a number, so use 0 for empty
             if row_num == first_data_row:
                 trade_ref = f"{col_letter(trade_col_idx)}{row_num}"
-                held_formula = f'=IF({date_ref}="",0,IFERROR({trade_ref},0))'
+                held_formula = f'=IF({trade_ref}="",0,{trade_ref})'
             else:
                 prev_held = f"{col_letter(held_col_idx)}{row_num - 1}"
                 trade_ref = f"{col_letter(trade_col_idx)}{row_num}"
-                held_formula = f'=IF({date_ref}="",{prev_held},{prev_held}+IFERROR({trade_ref},0))'
+                held_formula = f'={prev_held}+IF({trade_ref}="",0,{trade_ref})'
             cells[held_col_idx] = held_formula
         
         # Costs = sum of |trade| * price * costs%
@@ -3299,9 +3299,9 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
             trade_col_idx, held_col_idx, price_col_idx = stock_cols[name]
             held_ref = f"{col_letter(held_col_idx)}{row_num}"
             price_ref = f"{col_letter(price_col_idx)}{row_num}"
-            value_parts.append(f"IFERROR({held_ref}*{price_ref},0)")
+            value_parts.append(f"{held_ref}*{price_ref}")
         
-        value_formula = f'=IF({date_ref}="","",' + "+".join(value_parts) + ")"
+        value_formula = f'={"+".join(value_parts)}'
         cells[value_col] = value_formula
         
         writer.writerow(cells)
@@ -3578,12 +3578,14 @@ def get_window_bar_data(
             if np.any((idx_values >= entry_np) & (idx_values <= exit_np)):
                 n_trades += 1
 
-        # Apply fees: each round-trip costs fees_pct% of capital
+        # Apply fees: each round-trip has 2 transactions (buy + sell),
+        # each costing fees_pct% of the trade value
         if fees_pct > 0 and n_trades > 0:
+            # Total fee as percentage of capital: 2 * fees_pct * n_trades
+            # Deduct from return: (1 + return) - fee_amount
+            total_fee_pct = 2 * fees_pct * n_trades
             strategy_return = (
-                (1.0 + strategy_return / 100.0)
-                * (1.0 - fees_pct / 100.0) ** n_trades
-                - 1.0
+                (1.0 + strategy_return / 100.0) - total_fee_pct / 100.0 - 1.0
             ) * 100.0
 
         # Apply tax on net positive annual return
@@ -3662,20 +3664,22 @@ def get_basket_bar_data(
             else:
                 stock_returns[sym] = 0.0
 
-        # Apply fees: each strategy is one round-trip trade per year.
+        # Apply fees: each round-trip has 2 transactions (buy + sell),
+        # each costing fees_pct% of the trade value.
         # Count strategies that were actually active (had non-zero return).
         n_trades = sum(1 for v in stock_returns.values() if v != 0.0) or 0
         if fees_pct > 0 and n_trades > 0:
-            fee_factor = (1.0 - fees_pct / 100.0) ** n_trades
+            # Total fee as percentage of capital: 2 * fees_pct * n_trades
+            total_fee_pct = 2 * fees_pct * n_trades
             combined_return = (
-                (1.0 + combined_return / 100.0) * fee_factor - 1.0
+                (1.0 + combined_return / 100.0) - total_fee_pct / 100.0 - 1.0
             ) * 100.0
-            # Also adjust per-stock returns
+            # Also adjust per-stock returns (each stock has 1 round-trip)
             for sym in stock_returns:
                 if stock_returns[sym] != 0.0:
                     sr = stock_returns[sym]
                     stock_returns[sym] = round(
-                        ((1.0 + sr / 100.0) * (1.0 - fees_pct / 100.0) - 1.0) * 100.0,
+                        ((1.0 + sr / 100.0) - 2 * fees_pct / 100.0 - 1.0) * 100.0,
                         2,
                     )
 
