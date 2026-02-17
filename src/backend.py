@@ -3002,18 +3002,11 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
     Generate a trading simulation CSV for Google Sheets with GOOGLEFINANCE formulas.
     
     Format:
-    - Row 1: Year input cell (B1), Capital input cell (E1)
-    - Row 3: Headers - Date, Cash, [Stock_Shares, Stock_Holdings, Stock_Price]..., Value, Action
+    - Row 1: Parameters - Year (B1), Capital (D1), Costs% (F1), STCG% (H1)
+    - Row 2: Stock names row - blank cols for fixed headers, then stock name over its 3 cols
+    - Row 3: Headers - Date, Action, Value, Cash, Costs, then Trade/Held/Price per stock
     - Row 4+: Data rows with formulas
-    
-    Each event row shows:
-    - Date: Formula referencing year input
-    - Cash: Running cash balance
-    - Stock_Shares: +N (buy) or -N (sell) change in shares
-    - Stock_Holdings: Cumulative shares held
-    - Stock_Price: GOOGLEFINANCE formula with future-date guard
-    - Value: Total portfolio value (cash + stock holdings * prices)
-    - Action: Description of the trade
+    - Final rows: Summary with profit and after-tax value
     
     Args:
         strategies: List of strategy dicts with symbol, window_size, threshold
@@ -3023,6 +3016,7 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
         CSV content string for import into Google Sheets
     """
     import io
+    import csv
     
     # Collect all windows across strategies
     all_windows: list[tuple[int, int, str]] = []
@@ -3098,29 +3092,6 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
             i += 1
         grouped.append((doy, day_events))
     
-    # Generate CSV
-    import csv
-    output = io.StringIO()
-    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
-    
-    # Row 1: Parameters (Year in B1, Capital in E1)
-    writer.writerow(["Year", "2026", "", "Capital", "100000"])
-    
-    # Row 2: Blank
-    writer.writerow([])
-    
-    # Row 3: Headers
-    # Date, Cash, [Stock_Shares, Stock_Holdings, Stock_Price]..., Value, Action
-    headers = ["Date", "Cash"]
-    for name in stock_names:
-        safe_name = name.replace("+", "_")
-        headers.append(f"{safe_name}_Shares")
-        headers.append(f"{safe_name}_Holdings")
-        headers.append(f"{safe_name}_Price")
-    headers.append("Value")
-    headers.append("Action")
-    writer.writerow(headers)
-    
     # Column letter helper
     def col_letter(idx: int) -> str:
         """Convert 0-based index to column letter (A, B, ..., Z, AA, AB, ...)"""
@@ -3132,19 +3103,56 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
             idx //= 26
         return result
     
-    # Column indices: A=Date, B=Cash, then triplets (Shares, Holdings, Price) per stock, then Value, Action
+    # Column layout:
+    # A=Date, B=Action, C=Value, D=Cash, E=Costs, then triplets (Trade, Held, Price) per stock
     date_col = 0
-    cash_col = 1
-    stock_cols: dict[str, tuple[int, int, int]] = {}  # stock_name -> (shares_col, holdings_col, price_col)
-    col_idx = 2
+    action_col = 1
+    value_col = 2
+    cash_col = 3
+    costs_col = 4
+    stock_cols: dict[str, tuple[int, int, int]] = {}  # stock_name -> (trade_col, held_col, price_col)
+    col_idx = 5
     for name in stock_names:
         stock_cols[name] = (col_idx, col_idx + 1, col_idx + 2)
         col_idx += 3
-    value_col = col_idx
+    total_cols = col_idx
+    
+    # Parameter cell references
+    year_cell = "$B$1"
+    capital_cell = "$D$1"
+    costs_pct_cell = "$F$1"
+    stcg_pct_cell = "$H$1"
+    
+    # Generate CSV
+    output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_ALL)
+    
+    # Row 1: Parameters
+    # Year in B1, Capital in D1, Costs% in F1, STCG% in H1
+    row1 = ["Year", "2026", "Capital", "100000", "Costs%", "0.5", "STCG%", "20"]
+    writer.writerow(row1)
+    
+    # Row 2: Stock names row
+    # Blank for Date, Action, Value, Cash, Costs, then stock name (spanning 3 cols conceptually)
+    row2: list[str] = ["", "", "", "", ""]
+    for name in stock_names:
+        row2.append(name)
+        row2.append("")
+        row2.append("")
+    writer.writerow(row2)
+    
+    # Row 3: Headers
+    headers = ["Date", "Action", "Value", "Cash", "Costs"]
+    for _ in stock_names:
+        headers.append("Trade")
+        headers.append("Held")
+        headers.append("Price")
+    writer.writerow(headers)
     
     # Track state
     active: set[str] = set()
     row_num = 4  # First data row (1-indexed for Sheets)
+    first_data_row = row_num
     
     for doy, day_events in grouped:
         entering = [name for name, typ in day_events if typ == "enter"]
@@ -3162,97 +3170,32 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
         month, day = date_from_day_of_year(doy)
         
         # Build row cells
-        cells: list[str] = []
+        cells: list[str] = [""] * total_cols
         
         # Date formula with future guard
-        date_formula = f'=IF(DATE($B$1,{month},{day})<=TODAY(),DATE($B$1,{month},{day}),"")'
-        cells.append(date_formula)
+        date_formula = f'=IF(DATE({year_cell},{month},{day})<=TODAY(),DATE({year_cell},{month},{day}),"")'
+        cells[date_col] = date_formula
         
         date_ref = f"{col_letter(date_col)}{row_num}"
         
-        # Apply state changes
+        # Action
+        cells[action_col] = action_desc
+        
+        # Apply state changes (needed before calculating allocations)
         for name in exiting:
             active.discard(name)
         for name in entering:
             active.add(name)
         
-        # Cash formula
-        if row_num == 4:
-            # First row: Cash = Capital - cost of shares bought
-            buy_costs = []
-            for name in entering:
-                shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
-                shares_ref = f"{col_letter(shares_col_idx)}{row_num}"
-                price_ref = f"{col_letter(price_col_idx)}{row_num}"
-                buy_costs.append(f"{shares_ref}*{price_ref}")
-            
-            if buy_costs:
-                cost_expr = "+".join(buy_costs)
-                cash_formula = f'=IF({date_ref}="",$E$1,$E$1-({cost_expr}))'
-            else:
-                cash_formula = f'=IF({date_ref}="",$E$1,$E$1)'
-        else:
-            prev_row = row_num - 1
-            prev_cash = f"{col_letter(cash_col)}{prev_row}"
-            
-            # Cash changes: +proceeds from sells, -cost of buys
-            changes = []
-            for name in exiting:
-                shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
-                # Selling: we sell the holdings from previous row
-                prev_holdings = f"{col_letter(holdings_col_idx)}{prev_row}"
-                curr_price = f"{col_letter(price_col_idx)}{row_num}"
-                changes.append(f"+{prev_holdings}*{curr_price}")
-            
-            for name in entering:
-                shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
-                curr_shares = f"{col_letter(shares_col_idx)}{row_num}"
-                curr_price = f"{col_letter(price_col_idx)}{row_num}"
-                changes.append(f"-{curr_shares}*{curr_price}")
-            
-            if changes:
-                change_expr = "".join(changes)
-                cash_formula = f'=IF({date_ref}="",{prev_cash},{prev_cash}{change_expr})'
-            else:
-                cash_formula = f'=IF({date_ref}="",{prev_cash},{prev_cash})'
+        # Calculate trade values for costs calculation
+        trade_value_parts: list[str] = []
         
-        cells.append(cash_formula)
-        
-        # Stock columns (Shares, Holdings, Price for each)
+        # Stock columns (Trade, Held, Price for each)
         for name in stock_names:
-            shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
+            trade_col_idx, held_col_idx, price_col_idx = stock_cols[name]
             tickers = stock_tickers[name]
             
-            # Shares change
-            if name in entering:
-                # Buy: allocate equal portion of previous value (or capital if first row)
-                n_active = len(active)
-                alloc_frac = round(1.0 / n_active, 4) if n_active > 0 else 0
-                if row_num == 4:
-                    portfolio_ref = "$E$1"
-                else:
-                    portfolio_ref = f"{col_letter(value_col)}{row_num - 1}"
-                price_ref = f"{col_letter(price_col_idx)}{row_num}"
-                shares_formula = f'=IF({date_ref}="","",FLOOR({alloc_frac}*{portfolio_ref}/{price_ref},1))'
-            elif name in exiting:
-                # Sell all holdings
-                prev_holdings = f"{col_letter(holdings_col_idx)}{row_num - 1}"
-                shares_formula = f'=IF({date_ref}="","",-{prev_holdings})'
-            else:
-                shares_formula = ""
-            cells.append(shares_formula)
-            
-            # Holdings (cumulative)
-            if row_num == 4:
-                curr_shares = f"{col_letter(shares_col_idx)}{row_num}"
-                holdings_formula = f'=IF({date_ref}="",0,IFERROR({curr_shares},0))'
-            else:
-                prev_holdings = f"{col_letter(holdings_col_idx)}{row_num - 1}"
-                curr_shares = f"{col_letter(shares_col_idx)}{row_num}"
-                holdings_formula = f'=IF({date_ref}="",{prev_holdings},{prev_holdings}+IFERROR({curr_shares},0))'
-            cells.append(holdings_formula)
-            
-            # Price (GOOGLEFINANCE)
+            # Price (GOOGLEFINANCE) - calculate first as other formulas reference it
             if len(tickers) == 1:
                 ticker = tickers[0]
                 price_formula = f'=IF({date_ref}="","",IFERROR(INDEX(GOOGLEFINANCE("NSE:{ticker}","price",{date_ref}),2,2),"N/A"))'
@@ -3261,24 +3204,148 @@ def export_trading_simulation_csv(strategies: list[dict], align_windows: bool = 
                 price_parts = [f'IFERROR(INDEX(GOOGLEFINANCE("NSE:{t}","price",{date_ref}),2,2),0)' for t in tickers]
                 avg_expr = f'({"+".join(price_parts)})/{len(tickers)}'
                 price_formula = f'=IF({date_ref}="","",{avg_expr})'
-            cells.append(price_formula)
+            cells[price_col_idx] = price_formula
+            
+            price_ref = f"{col_letter(price_col_idx)}{row_num}"
+            
+            # Trade (shares change)
+            if name in entering:
+                # Buy: allocate equal portion of previous value (or capital if first row)
+                n_active = len(active)
+                alloc_frac = round(1.0 / n_active, 4) if n_active > 0 else 0
+                if row_num == first_data_row:
+                    portfolio_ref = capital_cell
+                else:
+                    portfolio_ref = f"{col_letter(value_col)}{row_num - 1}"
+                trade_formula = f'=IF({date_ref}="","",FLOOR({alloc_frac}*{portfolio_ref}/{price_ref},1))'
+                # Add to trade value for costs
+                trade_ref = f"{col_letter(trade_col_idx)}{row_num}"
+                trade_value_parts.append(f"ABS({trade_ref})*{price_ref}")
+            elif name in exiting:
+                # Sell all holdings
+                prev_held = f"{col_letter(held_col_idx)}{row_num - 1}"
+                trade_formula = f'=IF({date_ref}="","",-{prev_held})'
+                # Add to trade value for costs
+                trade_ref = f"{col_letter(trade_col_idx)}{row_num}"
+                trade_value_parts.append(f"ABS({trade_ref})*{price_ref}")
+            else:
+                trade_formula = ""
+            cells[trade_col_idx] = trade_formula
+            
+            # Held (cumulative)
+            if row_num == first_data_row:
+                trade_ref = f"{col_letter(trade_col_idx)}{row_num}"
+                held_formula = f'=IF({date_ref}="",0,IFERROR({trade_ref},0))'
+            else:
+                prev_held = f"{col_letter(held_col_idx)}{row_num - 1}"
+                trade_ref = f"{col_letter(trade_col_idx)}{row_num}"
+                held_formula = f'=IF({date_ref}="",{prev_held},{prev_held}+IFERROR({trade_ref},0))'
+            cells[held_col_idx] = held_formula
         
-        # Value = Cash + sum(Holdings * Price) for all stocks
+        # Costs = sum of |trade| * price * costs%
+        if trade_value_parts:
+            costs_formula = f'=IF({date_ref}="","",({"+".join(trade_value_parts)})*{costs_pct_cell}/100)'
+        else:
+            costs_formula = f'=IF({date_ref}="","",0)'
+        cells[costs_col] = costs_formula
+        
+        costs_ref = f"{col_letter(costs_col)}{row_num}"
+        
+        # Cash formula (now accounts for costs)
+        if row_num == first_data_row:
+            # First row: Cash = Capital - cost of shares bought - trading costs
+            buy_costs = []
+            for name in entering:
+                trade_col_idx, held_col_idx, price_col_idx = stock_cols[name]
+                trade_ref = f"{col_letter(trade_col_idx)}{row_num}"
+                price_ref = f"{col_letter(price_col_idx)}{row_num}"
+                buy_costs.append(f"{trade_ref}*{price_ref}")
+            
+            if buy_costs:
+                cost_expr = "+".join(buy_costs)
+                cash_formula = f'=IF({date_ref}="",{capital_cell},{capital_cell}-({cost_expr})-{costs_ref})'
+            else:
+                cash_formula = f'=IF({date_ref}="",{capital_cell},{capital_cell}-{costs_ref})'
+        else:
+            prev_row = row_num - 1
+            prev_cash = f"{col_letter(cash_col)}{prev_row}"
+            
+            # Cash changes: +proceeds from sells, -cost of buys, -trading costs
+            changes = []
+            for name in exiting:
+                trade_col_idx, held_col_idx, price_col_idx = stock_cols[name]
+                # Selling: we sell the holdings from previous row
+                prev_held = f"{col_letter(held_col_idx)}{prev_row}"
+                curr_price = f"{col_letter(price_col_idx)}{row_num}"
+                changes.append(f"+{prev_held}*{curr_price}")
+            
+            for name in entering:
+                trade_col_idx, held_col_idx, price_col_idx = stock_cols[name]
+                curr_trade = f"{col_letter(trade_col_idx)}{row_num}"
+                curr_price = f"{col_letter(price_col_idx)}{row_num}"
+                changes.append(f"-{curr_trade}*{curr_price}")
+            
+            if changes:
+                change_expr = "".join(changes)
+                cash_formula = f'=IF({date_ref}="",{prev_cash},{prev_cash}{change_expr}-{costs_ref})'
+            else:
+                cash_formula = f'=IF({date_ref}="",{prev_cash},{prev_cash}-{costs_ref})'
+        
+        cells[cash_col] = cash_formula
+        
+        # Value = Cash + sum(Held * Price) for all stocks
         value_parts = [f"{col_letter(cash_col)}{row_num}"]
         for name in stock_names:
-            shares_col_idx, holdings_col_idx, price_col_idx = stock_cols[name]
-            holdings_ref = f"{col_letter(holdings_col_idx)}{row_num}"
+            trade_col_idx, held_col_idx, price_col_idx = stock_cols[name]
+            held_ref = f"{col_letter(held_col_idx)}{row_num}"
             price_ref = f"{col_letter(price_col_idx)}{row_num}"
-            value_parts.append(f"IFERROR({holdings_ref}*{price_ref},0)")
+            value_parts.append(f"IFERROR({held_ref}*{price_ref},0)")
         
         value_formula = f'=IF({date_ref}="","",' + "+".join(value_parts) + ")"
-        cells.append(value_formula)
-        
-        # Action
-        cells.append(action_desc)
+        cells[value_col] = value_formula
         
         writer.writerow(cells)
         row_num += 1
+    
+    last_data_row = row_num - 1
+    
+    # Blank row before summary
+    writer.writerow([])
+    row_num += 1
+    
+    # Summary rows
+    final_value_ref = f"{col_letter(value_col)}{last_data_row}"
+    
+    # Total Costs row
+    total_costs_formula = f'=SUM({col_letter(costs_col)}{first_data_row}:{col_letter(costs_col)}{last_data_row})'
+    summary_row1 = ["", "Total Costs", total_costs_formula] + [""] * (total_cols - 3)
+    writer.writerow(summary_row1)
+    row_num += 1
+    
+    # Profit row (before tax)
+    profit_formula = f'={final_value_ref}-{capital_cell}'
+    summary_row2 = ["", "Profit", profit_formula] + [""] * (total_cols - 3)
+    writer.writerow(summary_row2)
+    row_num += 1
+    profit_cell = f"C{row_num - 1}"
+    
+    # STCG Tax row
+    tax_formula = f'=IF({profit_cell}>0,{profit_cell}*{stcg_pct_cell}/100,0)'
+    summary_row3 = ["", "STCG Tax", tax_formula] + [""] * (total_cols - 3)
+    writer.writerow(summary_row3)
+    row_num += 1
+    tax_cell = f"C{row_num - 1}"
+    
+    # Net Profit (after tax) row
+    net_profit_formula = f'={profit_cell}-{tax_cell}'
+    summary_row4 = ["", "Net Profit", net_profit_formula] + [""] * (total_cols - 3)
+    writer.writerow(summary_row4)
+    row_num += 1
+    
+    # Final Value (after tax) row
+    final_after_tax_formula = f'={capital_cell}+C{row_num - 1}'
+    summary_row5 = ["", "Final Value", final_after_tax_formula] + [""] * (total_cols - 3)
+    writer.writerow(summary_row5)
     
     return output.getvalue()
 
