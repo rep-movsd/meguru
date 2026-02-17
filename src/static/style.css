@@ -4,6 +4,31 @@
             padding: 0;
         }
         
+        /* Custom scrollbars - thin with rounded thumb */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
+        /* Firefox scrollbar styling */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: #444 transparent;
+        }
+        
         html, body {
             height: 100%;
             overflow: hidden;
@@ -272,7 +297,20 @@
             flex: 1;
             min-height: 0;
             position: relative;
-            overflow-x: auto;
+        }
+        
+        .window-chart-buffer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow-x: scroll;
+            overflow-y: hidden;
+        }
+        
+        .window-chart-buffer.back {
+            visibility: hidden;
         }
         
         .window-chart-container svg {
@@ -284,7 +322,7 @@
             gap: 20px;
             padding: 4px 16px;
             border-top: 1px solid #333;
-            justify-content: center;
+            justify-content: space-evenly;
             font-size: 12px;
             flex-wrap: wrap;
             flex-shrink: 0;
@@ -293,6 +331,7 @@
         .window-chart-metrics .metric {
             display: flex;
             gap: 5px;
+            min-width: 100px;
         }
         
         .window-chart-metrics .metric .label {
@@ -818,26 +857,26 @@
             color: #888;
         }
         
-        /* Plan button in header */
-        .btn-plan {
+        /* Basket button in header */
+        .btn-basket {
             background: #9b59b6;
             border-color: #8e44ad;
         }
         
-        .btn-plan:hover {
+        .btn-basket:hover {
             background: #8e44ad;
         }
         
-        .btn-plan.has-items {
-            animation: pulse-plan 2s infinite;
+        .btn-basket.has-items {
+            animation: pulse-basket 2s infinite;
         }
         
-        @keyframes pulse-plan {
+        @keyframes pulse-basket {
             0%, 100% { box-shadow: 0 0 0 0 rgba(155, 89, 182, 0.4); }
             50% { box-shadow: 0 0 0 4px rgba(155, 89, 182, 0); }
         }
         
-        .plan-badge {
+        .basket-badge {
             background: #e74c3c;
             color: white;
             font-size: 10px;
@@ -846,8 +885,8 @@
             margin-left: 4px;
         }
         
-        /* Plan overlay */
-        .plan-overlay {
+        /* Basket overlay */
+        .basket-overlay {
             position: fixed;
             top: 0;
             left: 0;
@@ -860,11 +899,11 @@
             z-index: 10002;
         }
         
-        .plan-overlay.show {
+        .basket-overlay.show {
             display: flex;
         }
         
-        .plan-panel {
+        .basket-panel {
             background: #16213e;
             border-radius: 8px;
             width: 95vw;
@@ -874,7 +913,7 @@
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
         }
         
-        .plan-header {
+        .basket-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -882,25 +921,25 @@
             border-bottom: 1px solid #333;
         }
         
-        .plan-header h3 {
+        .basket-header h3 {
             margin: 0;
             color: #9b59b6;
             font-size: 1.1em;
         }
         
-        .plan-header-actions {
+        .basket-header-actions {
             display: flex;
             gap: 8px;
             align-items: center;
         }
         
-        .plan-content {
+        .basket-content {
             flex: 1;
             display: flex;
             min-height: 0;
         }
         
-        .plan-strategies {
+        .basket-strategies {
             width: 220px;
             min-width: 220px;
             flex-shrink: 0;
@@ -909,7 +948,7 @@
             flex-direction: column;
         }
         
-        .plan-strategies-header {
+        .basket-strategies-header {
             padding: 6px 10px;
             border-bottom: 1px solid #333;
             font-size: 0.8em;
@@ -919,12 +958,12 @@
             align-items: center;
         }
         
-        .plan-strategies-list {
+        .basket-strategies-list {
             flex: 1;
             overflow-y: auto;
         }
         
-        .plan-strategy-item {
+        .basket-strategy-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -932,15 +971,15 @@
             border-bottom: 1px solid #222;
         }
         
-        .plan-strategy-item:hover {
+        .basket-strategy-item:hover {
             background: #1f4068;
         }
         
-        .plan-strategy-info {
+        .basket-strategy-info {
             flex: 1;
         }
         
-        .plan-strategy-symbol {
+        .basket-strategy-symbol {
             font-weight: bold;
             color: #00d4ff;
             font-size: 12px;
@@ -948,19 +987,19 @@
             align-items: center;
         }
         
-        .plan-strategy-remove {
+        .basket-strategy-remove {
             color: #ff4466;
             cursor: pointer;
             padding: 2px 6px;
             font-size: 12px;
         }
         
-        .plan-strategy-remove:hover {
+        .basket-strategy-remove:hover {
             background: rgba(255, 68, 102, 0.2);
             border-radius: 4px;
         }
         
-        .plan-strategy-hide {
+        .basket-strategy-hide {
             color: #aaa;
             cursor: pointer;
             padding: 2px 5px;
@@ -971,39 +1010,39 @@
             white-space: nowrap;
         }
         
-        .plan-strategy-hide:hover {
+        .basket-strategy-hide:hover {
             background: rgba(136, 136, 136, 0.3);
         }
         
-        .plan-strategy-hide.is-hidden {
+        .basket-strategy-hide.is-hidden {
             color: #666;
             border-color: #444;
         }
         
-        .plan-strategy-item.strategy-hidden {
+        .basket-strategy-item.strategy-hidden {
             opacity: 0.4;
         }
         
-        .plan-strategy-actions {
+        .basket-strategy-actions {
             display: flex;
             gap: 4px;
             align-items: center;
             flex-shrink: 0;
         }
         
-        .plan-empty {
+        .basket-empty {
             padding: 20px;
             text-align: center;
             color: #999;
         }
         
-        .plan-chart-area {
+        .basket-chart-area {
             flex: 1;
             display: flex;
             flex-direction: column;
         }
         
-        .plan-chart-controls {
+        .basket-chart-controls {
             padding: 10px 16px;
             border-bottom: 1px solid #333;
             display: flex;
@@ -1011,34 +1050,53 @@
             align-items: center;
         }
         
-        .plan-chart-controls label {
+        .basket-chart-controls label {
             color: #888;
             font-size: 0.9em;
         }
         
-        .plan-chart {
+        .basket-chart {
             flex: 1;
-            padding: 4px 16px 0 16px;
             min-height: 0;
-            overflow-x: auto;
+            position: relative;
+            /* No padding here - buffers handle overflow */
+        }
+        
+        .basket-chart-buffer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 4px 16px 0 16px;
+            box-sizing: border-box;
+            overflow-x: scroll;  /* Always reserve scrollbar space */
             overflow-y: hidden;
         }
         
-        .plan-chart svg {
+        .basket-chart-buffer.back {
+            visibility: hidden;
+        }
+        
+        .basket-chart svg {
             display: block;
         }
         
-        .plan-metrics {
+        .basket-metrics {
             padding: 8px 16px;
             border-top: 1px solid #333;
             display: flex;
             gap: 30px;
-            justify-content: center;
+            justify-content: space-evenly;
             font-size: 13px;
             flex-wrap: wrap;
         }
         
-        .plan-footer {
+        .basket-metrics .backtest-metric {
+            min-width: 120px;
+        }
+        
+        .basket-footer {
             padding: 12px 16px;
             border-top: 1px solid #333;
             display: flex;
@@ -1047,8 +1105,8 @@
             align-items: center;
         }
         
-        /* Save/Load plan dialog */
-        .plan-dialog-overlay {
+        /* Save/Load basket dialog */
+        .basket-dialog-overlay {
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.6);
@@ -1057,8 +1115,8 @@
             align-items: center;
             justify-content: center;
         }
-        .plan-dialog-overlay.show { display: flex; }
-        .plan-dialog {
+        .basket-dialog-overlay.show { display: flex; }
+        .basket-dialog {
             background: #1e1e1e;
             border: 1px solid #444;
             border-radius: 8px;
@@ -1069,12 +1127,12 @@
             display: flex;
             flex-direction: column;
         }
-        .plan-dialog h4 {
+        .basket-dialog h4 {
             margin: 0 0 12px 0;
             color: #e0e0e0;
             font-size: 15px;
         }
-        .plan-dialog input[type="text"] {
+        .basket-dialog input[type="text"] {
             width: 100%;
             padding: 8px 10px;
             border: 1px solid #444;
@@ -1085,19 +1143,19 @@
             margin-bottom: 12px;
             box-sizing: border-box;
         }
-        .plan-dialog-actions {
+        .basket-dialog-actions {
             display: flex;
             justify-content: flex-end;
             gap: 8px;
         }
-        .plan-list {
+        .basket-list {
             list-style: none;
             padding: 0;
             margin: 0 0 12px 0;
             overflow-y: auto;
             max-height: 45vh;
         }
-        .plan-list-item {
+        .basket-list-item {
             display: flex;
             align-items: center;
             padding: 8px 10px;
@@ -1107,26 +1165,26 @@
             cursor: pointer;
             transition: background 0.15s;
         }
-        .plan-list-item:hover { background: #2a2a2a; }
-        .plan-list-item-info { flex: 1; }
-        .plan-list-item-name { color: #e0e0e0; font-size: 13px; font-weight: 600; }
-        .plan-list-item-meta { color: #888; font-size: 11px; margin-top: 2px; }
-        .plan-list-item-delete {
+        .basket-list-item:hover { background: #2a2a2a; }
+        .basket-list-item-info { flex: 1; }
+        .basket-list-item-name { color: #e0e0e0; font-size: 13px; font-weight: 600; }
+        .basket-list-item-meta { color: #888; font-size: 11px; margin-top: 2px; }
+        .basket-list-item-delete {
             color: #888;
             cursor: pointer;
             padding: 4px 8px;
             font-size: 14px;
             border-radius: 4px;
         }
-        .plan-list-item-delete:hover { color: #e74c3c; background: #333; }
-        .plan-list-empty { color: #666; font-size: 13px; text-align: center; padding: 20px; }
+        .basket-list-item-delete:hover { color: #e74c3c; background: #333; }
+        .basket-list-empty { color: #666; font-size: 13px; text-align: center; padding: 20px; }
         
-        /* Add to plan button */
-        .btn-add-plan {
+        /* Add to basket button */
+        .btn-add-basket {
             background: #9b59b6;
             border-color: #8e44ad;
         }
         
-        .btn-add-plan:hover {
+        .btn-add-basket:hover {
             background: #8e44ad;
         }

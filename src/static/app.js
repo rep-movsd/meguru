@@ -4,14 +4,14 @@
             windowSize: 30,
             threshold: 50,
             overlapData: null,
-            planVisible: {},  // symbol -> boolean, for show/hide checkboxes
-            lastPlanData: null,  // cached plan backtest data for checkbox toggling
-            hiddenStrategies: new Set(),  // indices of hidden strategies in plan
+            basketVisible: {},  // symbol -> boolean, for show/hide checkboxes
+            lastBasketData: null,  // cached basket backtest data for checkbox toggling
+            hiddenStrategies: new Set(),  // indices of hidden strategies in basket
             windowBarMode: false,  // toggle for bar chart view in main window
-            planBarMode: false,    // toggle for bar chart view in plan
+            basketBarMode: false,    // toggle for bar chart view in basket
             windowBarData: null,   // cached bar chart data
-            planBarData: null,     // cached plan bar chart data
-            planWeights: null,     // cached {symbol: weight} for return-weighted mode
+            basketBarData: null,     // cached basket bar chart data
+            basketWeights: null,     // cached {symbol: weight} for return-weighted mode
         };
         
         // Elements
@@ -35,6 +35,27 @@
         const windowChart = document.getElementById('window-chart');
         const windowChartMetrics = document.getElementById('window-chart-metrics');
         const spinner = document.getElementById('spinner');
+        
+        // Double-buffer references for flicker-free window chart rendering
+        const windowBuffer0 = document.getElementById('window-buffer-0');
+        const windowBuffer1 = document.getElementById('window-buffer-1');
+        let windowActiveBuffer = 0;
+        
+        function getWindowBackBuffer() {
+            return windowActiveBuffer === 0 ? windowBuffer1 : windowBuffer0;
+        }
+        
+        function getWindowFrontBuffer() {
+            return windowActiveBuffer === 0 ? windowBuffer0 : windowBuffer1;
+        }
+        
+        function swapWindowBuffers() {
+            const front = getWindowFrontBuffer();
+            const back = getWindowBackBuffer();
+            front.classList.add('back');
+            back.classList.remove('back');
+            windowActiveBuffer = 1 - windowActiveBuffer;
+        }
         
         // Autocomplete
         let autocompleteIndex = -1;
@@ -202,12 +223,12 @@
             showBacktest();
         });
         
-        document.getElementById('add-to-plan-btn').addEventListener('click', () => {
-            addToPlan();
+        document.getElementById('add-to-basket-btn').addEventListener('click', () => {
+            addToBasket();
         });
         
-        document.getElementById('chart-add-plan-btn').addEventListener('click', () => {
-            addToPlan();
+        document.getElementById('chart-add-basket-btn').addEventListener('click', () => {
+            addToBasket();
         });
         
         // Find optimal trades buttons - disabled for window mode
@@ -239,17 +260,17 @@
                     threshold: state.threshold,
                 });
                 
-                // Fetch windows, and overlap with plan in parallel
-                const plan = loadPlan();
+                // Fetch windows, and overlap with basket in parallel
+                const basket = loadBasket();
                 const fetches = [fetch(`/api/windows?${params}`)];
-                if (plan.length > 0) {
+                if (basket.length > 0) {
                     const overlapParams = new URLSearchParams({
                         symbol: state.symbol,
                         window_size: state.windowSize,
                         threshold: state.threshold,
-                        strategies: JSON.stringify(plan),
+                        strategies: JSON.stringify(basket),
                     });
-                    fetches.push(fetch(`/api/plan/overlap?${overlapParams}`));
+                    fetches.push(fetch(`/api/basket/overlap?${overlapParams}`));
                 }
                 
                 const responses = await Promise.all(fetches);
@@ -381,7 +402,7 @@
                             Plan overlap: ${od.overlap_days}/${od.stock_days} days (${overlapPct}%)
                             &nbsp;&bull;&nbsp;
                             <span style="color:#00cc66;">+${od.new_days} new days</span>
-                            to plan's ${od.plan_days}d coverage
+                            to basket's ${od.basket_days}d coverage
                         </td>
                     `;
                     tbody.appendChild(overlapTr);
@@ -434,8 +455,7 @@
             const year = chartYearSelect.value;
             if (!year || !state.symbol) return;
             
-            windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">Loading...</div>';
-            windowChartMetrics.innerHTML = '';
+            // No "Loading..." text - previous chart stays visible (double-buffer)
             
             try {
                 const params = new URLSearchParams({
@@ -457,13 +477,13 @@
                 const data = await res.json();
                 
                 if (data.error) {
-                    windowChart.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">${data.error}</div>`;
+                    getWindowFrontBuffer().innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">${data.error}</div>`;
                     return;
                 }
                 
                 renderWindowChart(data, state.overlapData);
             } catch (err) {
-                windowChart.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">Error: ${err.message}</div>`;
+                getWindowFrontBuffer().innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">Error: ${err.message}</div>`;
             }
         }
         
@@ -553,21 +573,21 @@
             let tradeMarkers = '';
             let investmentBands = '';
             
-            // Plan overlap bands (purple, behind stock's green bands)
-            let planBands = '';
-            if (overlapData && overlapData.plan_windows) {
+            // Basket overlap bands (purple, behind stock's green bands)
+            let basketBands = '';
+            if (overlapData && overlapData.basket_windows) {
                 const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
                 function doyToDateStr(doy) {
                     const d = new Date(2023, 0, doy);
                     return monthNames[d.getMonth()] + '-' + d.getDate();
                 }
-                overlapData.plan_windows.forEach(([startDay, endDay]) => {
+                overlapData.basket_windows.forEach(([startDay, endDay]) => {
                     const startIdx = findNearestDateIdx(doyToDateStr(startDay));
                     const endIdx = findNearestDateIdx(doyToDateStr(endDay));
                     if (startIdx >= 0 && endIdx >= 0 && endIdx > startIdx) {
                         const x1 = xScale(startIdx);
                         const x2 = xScale(endIdx);
-                        planBands += `<rect x="${x1}" y="${padding.top}" width="${x2 - x1}" height="${chartHeight}" fill="#aa66ff" opacity="0.10"/>`;
+                        basketBands += `<rect x="${x1}" y="${padding.top}" width="${x2 - x1}" height="${chartHeight}" fill="#aa66ff" opacity="0.10"/>`;
                     }
                 });
             }
@@ -613,8 +633,8 @@
             
             const svg = `
                 <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
-                    <!-- Plan bands (purple, behind everything) -->
-                    ${planBands}
+                    <!-- Basket bands (purple, behind everything) -->
+                    ${basketBands}
                     <!-- Investment bands (behind lines) -->
                     ${investmentBands}
                     ${xTicks.map(t => `
@@ -649,7 +669,10 @@
                 </svg>
             `;
             
-            windowChart.innerHTML = svg;
+            // Render to back buffer, then swap for flicker-free update
+            const backBuffer = getWindowBackBuffer();
+            backBuffer.innerHTML = svg;
+            swapWindowBuffers();
             
             // Metrics
             const finalSeasonal = seasonalPnL[seasonalPnL.length - 1];
@@ -733,8 +756,7 @@
         
         async function loadWindowBarChart() {
             if (!state.symbol) return;
-            windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">Loading...</div>';
-            windowChartMetrics.innerHTML = '';
+            // No "Loading..." text - previous chart stays visible (double-buffer)
             try {
                 const params = new URLSearchParams({
                     symbol: state.symbol,
@@ -752,13 +774,13 @@
                 const res = await fetch('/api/windows/bar?' + params);
                 const data = await res.json();
                 if (data.error) {
-                    windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">' + data.error + '</div>';
+                    getWindowFrontBuffer().innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">' + data.error + '</div>';
                     return;
                 }
                 state.windowBarData = data;
                 renderWindowBarChart(data);
             } catch (err) {
-                windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">Error: ' + err.message + '</div>';
+                getWindowFrontBuffer().innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ff4466;">Error: ' + err.message + '</div>';
             }
         }
         
@@ -772,7 +794,7 @@
         function renderWindowBarChart(data) {
             const years = data.years;
             if (!years || years.length === 0) {
-                windowChart.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">No data</div>';
+                getWindowFrontBuffer().innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">No data</div>';
                 return;
             }
 
@@ -797,7 +819,7 @@
 
             // Fixed Y range so bars never shift when toggling params
             const yMin = -20;
-            const yMax = 120;
+            const yMax = 200;
 
             const groupWidth = chartWidth / n;
             const barWidth = Math.min(groupWidth * 0.38, 50);
@@ -856,7 +878,10 @@
                 bars + labels +
                 '</svg>';
 
-            windowChart.innerHTML = svg;
+            // Render to back buffer, then swap for flicker-free update
+            const backBuffer = getWindowBackBuffer();
+            backBuffer.innerHTML = svg;
+            swapWindowBuffers();
 
             // Metrics: averages
             const avgStrategy = years.reduce((s, d) => s + d.strategy_return, 0) / n;
@@ -868,10 +893,10 @@
                 '<div class="metric"><span class="label">Avg B&H:</span><span class="' + (avgBH >= 0 ? 'positive' : 'negative') + '">' + avgBH.toFixed(1) + '%</span></div>' +
                 '<div class="metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>' +
                 '<div class="metric"><span class="label">Sharpe:</span><span style="color:' + sharpeColor(data.sharpe_ratio) + '">' + (data.sharpe_ratio != null ? data.sharpe_ratio.toFixed(2) : 'N/A') + ' (' + (data.sharpe_label || 'N/A') + ')</span></div>' +
-                '<div class="metric" id="plan-impact"><span class="label">Plan Impact:</span><span style="color:#888">...</span></div>';
+                '<div class="metric" id="basket-impact"><span class="label">Basket Impact:</span><span style="color:#888">...</span></div>';
             
-            // Async fetch plan impact
-            updatePlanImpact();
+            // Async fetch basket impact
+            updateBasketImpact();
         }
         
         function renderTradesTable(data) {
@@ -1428,192 +1453,216 @@
         }
         
         // =====================
-        // Plan Builder functionality
+        // Basket Builder functionality
         // =====================
-        const planOverlay = document.getElementById('plan-overlay');
-        const planStrategiesList = document.getElementById('plan-strategies-list');
-        const planStrategyCount = document.getElementById('plan-strategy-count');
-        const planYearSelect = document.getElementById('plan-year-select');
-        const planCapitalSelect = document.getElementById('plan-capital-select');
-        const planAllocSelect = document.getElementById('plan-alloc-select');
-        const planYearsShow = document.getElementById('plan-years-show');
-        const planFeesInput = document.getElementById('plan-fees-input');
-        const planTaxInput = document.getElementById('plan-tax-input');
-        const planChart = document.getElementById('plan-chart');
-        const planMetrics = document.getElementById('plan-metrics');
-        const planBadge = document.getElementById('plan-badge');
-        const showPlanBtn = document.getElementById('show-plan-btn');
+        const basketOverlay = document.getElementById('basket-overlay');
+        const basketStrategiesList = document.getElementById('basket-strategies-list');
+        const basketStrategyCount = document.getElementById('basket-strategy-count');
+        const basketYearSelect = document.getElementById('basket-year-select');
+        const basketCapitalSelect = document.getElementById('basket-capital-select');
+        const basketAllocSelect = document.getElementById('basket-alloc-select');
+        const basketYearsShow = document.getElementById('basket-years-show');
+        const basketFeesInput = document.getElementById('basket-fees-input');
+        const basketTaxInput = document.getElementById('basket-tax-input');
+        const basketChart = document.getElementById('basket-chart');
+        const basketMetrics = document.getElementById('basket-metrics');
+        const basketBadge = document.getElementById('basket-badge');
+        const showBasketBtn = document.getElementById('show-basket-btn');
+        
+        // Double-buffer references for flicker-free basket chart rendering
+        const basketBuffer0 = document.getElementById('basket-buffer-0');
+        const basketBuffer1 = document.getElementById('basket-buffer-1');
+        let basketActiveBuffer = 0;  // 0 = buffer-0 is front (visible), 1 = buffer-1 is front
+        
+        // Get the currently hidden (back) buffer for rendering
+        function getBasketBackBuffer() {
+            return basketActiveBuffer === 0 ? basketBuffer1 : basketBuffer0;
+        }
+        
+        // Get the currently visible (front) buffer
+        function getBasketFrontBuffer() {
+            return basketActiveBuffer === 0 ? basketBuffer0 : basketBuffer1;
+        }
+        
+        // Swap buffers: make back buffer visible, hide current front buffer
+        function swapBasketBuffers() {
+            const front = getBasketFrontBuffer();
+            const back = getBasketBackBuffer();
+            front.classList.add('back');
+            back.classList.remove('back');
+            basketActiveBuffer = 1 - basketActiveBuffer;
+        }
         
         // 16-color golden angle palette: maximally distinct hues at HSL(h, 75%, 60%)
-        const PLAN_COLORS = [
+        const BASKET_COLORS = [
             '#e5994c', '#4ce5c5', '#e54cd8', '#ace54c',
             '#4c7fe5', '#e54c52', '#4ce572', '#9f4ce5',
             '#e5cc4c', '#4cd2e5', '#e54ca5', '#78e54c',
             '#4c4ce5', '#e5794c', '#4ce5a6', '#d24ce5'
         ];
         
-        // Get the next available color from the palette not already used in the plan
-        function getNextPlanColor(plan) {
-            const usedColors = new Set(plan.map(s => s.color).filter(Boolean));
-            for (let i = 0; i < PLAN_COLORS.length; i++) {
-                if (!usedColors.has(PLAN_COLORS[i])) return PLAN_COLORS[i];
+        // Get the next available color from the palette not already used in the basket
+        function getNextBasketColor(basket) {
+            const usedColors = new Set(basket.map(s => s.color).filter(Boolean));
+            for (let i = 0; i < BASKET_COLORS.length; i++) {
+                if (!usedColors.has(BASKET_COLORS[i])) return BASKET_COLORS[i];
             }
             // All 16 used — wrap around
-            return PLAN_COLORS[plan.length % PLAN_COLORS.length];
+            return BASKET_COLORS[basket.length % BASKET_COLORS.length];
         }
         
-        // Ensure every strategy in the plan has a color assigned
-        function ensurePlanColors(plan) {
+        // Ensure every strategy in the basket has a color assigned
+        function ensureBasketColors(basket) {
             let changed = false;
-            plan.forEach(s => {
+            basket.forEach(s => {
                 if (!s.color) {
-                    s.color = getNextPlanColor(plan);
+                    s.color = getNextBasketColor(basket);
                     changed = true;
                 }
             });
             return changed;
         }
         
-        // Build a symbol-to-color map from the current plan
-        function buildPlanColorMap() {
-            const plan = loadPlan();
+        // Build a symbol-to-color map from the current basket
+        function buildBasketColorMap() {
+            const basket = loadBasket();
             const map = {};
-            plan.forEach(s => {
+            basket.forEach(s => {
                 if (s.color && !map[s.symbol]) map[s.symbol] = s.color;
             });
             return map;
         }
         
         function shuffleColors() {
-            const plan = loadPlan();
-            if (plan.length === 0) return;
-            const offset = Math.floor(Math.random() * PLAN_COLORS.length);
-            plan.forEach((s, i) => {
-                s.color = PLAN_COLORS[(offset + i) % PLAN_COLORS.length];
+            const basket = loadBasket();
+            if (basket.length === 0) return;
+            const offset = Math.floor(Math.random() * BASKET_COLORS.length);
+            basket.forEach((s, i) => {
+                s.color = BASKET_COLORS[(offset + i) % BASKET_COLORS.length];
             });
-            savePlan(plan);
-            renderPlanStrategies();
-            if (state.planBarMode && state.planBarData) {
-                renderPlanBarChart(state.planBarData);
-            } else if (state.lastPlanData) {
-                const capital = parseInt(planCapitalSelect.value) || 100000;
-                renderPlanChart(state.lastPlanData, capital);
+            saveBasket(basket);
+            renderBasketStrategies();
+            if (state.basketBarMode && state.basketBarData) {
+                renderBasketBarChart(state.basketBarData);
+            } else if (state.lastBasketData) {
+                const capital = parseInt(basketCapitalSelect.value) || 100000;
+                renderBasketChart(state.lastBasketData, capital);
             }
         }
         
-        // Load plan from localStorage
-        function loadPlan() {
-            const saved = localStorage.getItem('meguru_plan');
-            const plan = saved ? JSON.parse(saved) : [];
+        // Load basket from localStorage
+        function loadBasket() {
+            const saved = localStorage.getItem('meguru_basket');
+            const basket = saved ? JSON.parse(saved) : [];
             // Ensure all strategies have colors (backward compat)
-            if (ensurePlanColors(plan)) {
-                localStorage.setItem('meguru_plan', JSON.stringify(plan));
+            if (ensureBasketColors(basket)) {
+                localStorage.setItem('meguru_basket', JSON.stringify(basket));
             }
-            return plan;
+            return basket;
         }
         
-        // Save plan to localStorage
-        function savePlan(plan) {
-            localStorage.setItem('meguru_plan', JSON.stringify(plan));
-            updatePlanBadge();
+        // Save basket to localStorage
+        function saveBasket(basket) {
+            localStorage.setItem('meguru_basket', JSON.stringify(basket));
+            updateBasketBadge();
         }
         
         // Update the badge count in header
-        function updatePlanBadge() {
-            const plan = loadPlan();
-            if (plan.length > 0) {
-                planBadge.textContent = plan.length;
-                planBadge.style.display = 'inline';
-                showPlanBtn.classList.add('has-items');
+        function updateBasketBadge() {
+            const basket = loadBasket();
+            if (basket.length > 0) {
+                basketBadge.textContent = basket.length;
+                basketBadge.style.display = 'inline';
+                showBasketBtn.classList.add('has-items');
             } else {
-                planBadge.style.display = 'none';
-                showPlanBtn.classList.remove('has-items');
+                basketBadge.style.display = 'none';
+                showBasketBtn.classList.remove('has-items');
             }
         }
         
-        // Add current strategy to plan
-        function addToPlan() {
+        // Add current strategy to basket
+        function addToBasket() {
             if (!state.symbol) {
                 setStatus('No symbol loaded', true);
                 return;
             }
             
-            const plan = loadPlan();
+            const basket = loadBasket();
             
             // Check for duplicate
-            const isDuplicate = plan.some(s => 
+            const isDuplicate = basket.some(s => 
                 s.symbol === state.symbol && 
                 s.window_size === state.windowSize && 
                 s.threshold === state.threshold
             );
             
             if (isDuplicate) {
-                setStatus('Strategy already in plan', true);
+                setStatus('Strategy already in basket', true);
                 return;
             }
             
-            plan.push({
+            basket.push({
                 symbol: state.symbol,
                 window_size: state.windowSize,
                 threshold: state.threshold,
-                color: getNextPlanColor(plan),
+                color: getNextBasketColor(basket),
             });
             
-            savePlan(plan);
-            state.planWeights = null; // invalidate cached weights
-            setStatus(`Added ${displaySymbol(state.symbol)} to plan (${plan.length} strateg${plan.length === 1 ? 'y' : 'ies'})`);
+            saveBasket(basket);
+            state.basketWeights = null; // invalidate cached weights
+            setStatus(`Added ${displaySymbol(state.symbol)} to basket (${basket.length} strateg${basket.length === 1 ? 'y' : 'ies'})`);
         }
         
-        // Show plan impact in single-stock bar chart view
-        async function updatePlanImpact() {
-            const impactDiv = document.getElementById('plan-impact');
+        // Show basket impact in single-stock bar chart view
+        async function updateBasketImpact() {
+            const impactDiv = document.getElementById('basket-impact');
             if (!impactDiv) return;
             
-            const plan = loadPlan();
-            if (plan.length === 0) {
-                impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#666">No plan yet</span>';
+            const basket = loadBasket();
+            if (basket.length === 0) {
+                impactDiv.innerHTML = '<span class="label">Basket Impact:</span><span style="color:#666">No basket yet</span>';
                 return;
             }
             
-            // Check if current stock (with same params) is already in plan
-            const isInPlan = plan.some(s => 
+            // Check if current stock (with same params) is already in basket
+            const isInBasket = basket.some(s => 
                 s.symbol === state.symbol && 
                 s.window_size === state.windowSize && 
                 s.threshold === state.threshold
             );
             
-            if (isInPlan) {
-                impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#888">Already in plan</span>';
+            if (isInBasket) {
+                impactDiv.innerHTML = '<span class="label">Basket Impact:</span><span style="color:#888">Already in basket</span>';
                 return;
             }
             
-            impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#888">Computing...</span>';
+            impactDiv.innerHTML = '<span class="label">Basket Impact:</span><span style="color:#888">Computing...</span>';
             
             try {
-                // Fetch baseline plan metrics
+                // Fetch baseline basket metrics
                 const baseParams = new URLSearchParams({
-                    strategies: JSON.stringify(plan),
+                    strategies: JSON.stringify(basket),
                 });
-                const baseRes = await fetch('/api/plan/bar?' + baseParams);
+                const baseRes = await fetch('/api/basket/bar?' + baseParams);
                 const baseData = await baseRes.json();
                 if (baseData.error) {
-                    impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#666">-</span>';
+                    impactDiv.innerHTML = '<span class="label">Basket Impact:</span><span style="color:#666">-</span>';
                     return;
                 }
                 
-                // Create hypothetical plan with current stock added
-                const hypotheticalPlan = [...plan, {
+                // Create hypothetical basket with current stock added
+                const hypotheticalBasket = [...basket, {
                     symbol: state.symbol,
                     window_size: state.windowSize,
                     threshold: state.threshold,
                 }];
                 const hypParams = new URLSearchParams({
-                    strategies: JSON.stringify(hypotheticalPlan),
+                    strategies: JSON.stringify(hypotheticalBasket),
                 });
-                const hypRes = await fetch('/api/plan/bar?' + hypParams);
+                const hypRes = await fetch('/api/basket/bar?' + hypParams);
                 const hypData = await hypRes.json();
                 if (hypData.error) {
-                    impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#666">-</span>';
+                    impactDiv.innerHTML = '<span class="label">Basket Impact:</span><span style="color:#666">-</span>';
                     return;
                 }
                 
@@ -1634,106 +1683,106 @@
                 const sharpeSign = sharpeDelta != null && sharpeDelta >= 0 ? '+' : '';
                 const sharpeColor = sharpeDelta != null ? (sharpeDelta >= 0 ? '#44ff88' : '#ff4466') : '#888';
                 
-                let html = '<span class="label">Plan Impact:</span>';
+                let html = '<span class="label">Basket Impact:</span>';
                 html += '<span style="color:' + returnColor + '">' + returnSign + returnDelta.toFixed(1) + '% return</span>';
                 if (sharpeDelta != null) {
                     html += '<span style="margin-left:8px;color:' + sharpeColor + '">' + sharpeSign + sharpeDelta.toFixed(2) + ' Sharpe</span>';
                 }
                 impactDiv.innerHTML = html;
             } catch (err) {
-                impactDiv.innerHTML = '<span class="label">Plan Impact:</span><span style="color:#666">-</span>';
+                impactDiv.innerHTML = '<span class="label">Basket Impact:</span><span style="color:#666">-</span>';
             }
         }
         
-        // Remove strategy from plan
-        function removeFromPlan(index) {
-            const plan = loadPlan();
-            plan.splice(index, 1);
-            savePlan(plan);
-            state.planWeights = null; // invalidate cached weights
-            renderPlanStrategies();
-            const visible = getVisiblePlan();
+        // Remove strategy from basket
+        function removeFromBasket(index) {
+            const basket = loadBasket();
+            basket.splice(index, 1);
+            saveBasket(basket);
+            state.basketWeights = null; // invalidate cached weights
+            renderBasketStrategies();
+            const visible = getVisibleBasket();
             if (visible.length > 0) {
-                if (state.planBarMode) {
-                    loadPlanBarChart();
+                if (state.basketBarMode) {
+                    loadBasketBarChart();
                 } else {
-                    loadPlanBacktest();
+                    loadBasketBacktest();
                 }
-            } else if (plan.length > 0) {
-                planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">All strategies hidden</div>';
-                planMetrics.innerHTML = '';
+            } else if (basket.length > 0) {
+                getBasketFrontBuffer().innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">All strategies hidden</div>';
+                basketMetrics.innerHTML = '';
             } else {
-                planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>';
-                planMetrics.innerHTML = '';
+                getBasketFrontBuffer().innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>';
+                basketMetrics.innerHTML = '';
             }
         }
         
-        // Open plan overlay
-        function openPlanOverlay() {
-            renderPlanStrategies();
-            populatePlanYears();
-            planOverlay.classList.add('show');
-            if (getVisiblePlan().length > 0) {
-                if (state.planBarMode) {
-                    loadPlanBarChart();
+        // Open basket overlay
+        function openBasketOverlay() {
+            renderBasketStrategies();
+            populateBasketYears();
+            basketOverlay.classList.add('show');
+            if (getVisibleBasket().length > 0) {
+                if (state.basketBarMode) {
+                    loadBasketBarChart();
                 } else {
-                    loadPlanBacktest();
+                    loadBasketBacktest();
                 }
             }
         }
         
-        // Close plan overlay
-        function closePlanOverlay() {
-            planOverlay.classList.remove('show');
+        // Close basket overlay
+        function closeBasketOverlay() {
+            basketOverlay.classList.remove('show');
         }
         
-        // Resize observer: redraw plan chart on container resize (e.g. zoom)
-        let planResizeTimer = null;
-        const planResizeObserver = new ResizeObserver(() => {
-            if (!planOverlay.classList.contains('show')) return;
-            clearTimeout(planResizeTimer);
-            planResizeTimer = setTimeout(() => {
-                if (getVisiblePlan().length > 0) {
-                    if (state.planBarMode) {
-                        if (state.planBarData) renderPlanBarChart(state.planBarData);
+        // Resize observer: redraw basket chart on container resize (e.g. zoom)
+        let basketResizeTimer = null;
+        const basketResizeObserver = new ResizeObserver(() => {
+            if (!basketOverlay.classList.contains('show')) return;
+            clearTimeout(basketResizeTimer);
+            basketResizeTimer = setTimeout(() => {
+                if (getVisibleBasket().length > 0) {
+                    if (state.basketBarMode) {
+                        if (state.basketBarData) renderBasketBarChart(state.basketBarData);
                     } else {
-                        if (state.lastPlanData) renderPlanChart(state.lastPlanData, parseInt(planCapitalSelect.value));
+                        if (state.lastBasketData) renderBasketChart(state.lastBasketData, parseInt(basketCapitalSelect.value));
                     }
                 }
             }, 150);
         });
-        planResizeObserver.observe(planChart);
+        basketResizeObserver.observe(basketChart);
         
-        // Get plan filtered to only visible (non-hidden) strategies
-        function getVisiblePlan() {
-            const plan = loadPlan();
-            return plan.filter((_, idx) => !state.hiddenStrategies.has(idx));
+        // Get basket filtered to only visible (non-hidden) strategies
+        function getVisibleBasket() {
+            const basket = loadBasket();
+            return basket.filter((_, idx) => !state.hiddenStrategies.has(idx));
         }
         
         // Render strategy list
-        function renderPlanStrategies() {
-            const plan = loadPlan();
-            const visibleCount = plan.length - state.hiddenStrategies.size;
-            planStrategyCount.textContent = `${visibleCount}/${plan.length} strateg${plan.length === 1 ? 'y' : 'ies'}`;
+        function renderBasketStrategies() {
+            const basket = loadBasket();
+            const visibleCount = basket.length - state.hiddenStrategies.size;
+            basketStrategyCount.textContent = `${visibleCount}/${basket.length} strateg${basket.length === 1 ? 'y' : 'ies'}`;
             
-            if (plan.length === 0) {
-                planStrategiesList.innerHTML = '<div class="plan-empty">No strategies added yet. Analyze a stock and click "Add to Plan".</div>';
+            if (basket.length === 0) {
+                basketStrategiesList.innerHTML = '<div class="basket-empty">No strategies added yet. Analyze a stock and click "Add to Basket".</div>';
                 return;
             }
             
             // Clean up hidden indices that are out of range
             state.hiddenStrategies.forEach(idx => {
-                if (idx >= plan.length) state.hiddenStrategies.delete(idx);
+                if (idx >= basket.length) state.hiddenStrategies.delete(idx);
             });
             
-            planStrategiesList.innerHTML = plan.map((s, idx) => {
+            basketStrategiesList.innerHTML = basket.map((s, idx) => {
                 const isHidden = state.hiddenStrategies.has(idx);
                 const color = s.color || '#888';
                 // Compute avg return from bar data if available
                 let avgReturnHTML = '';
-                if (state.planBarData && state.planBarData.years) {
+                if (state.basketBarData && state.basketBarData.years) {
                     const sym = s.symbol;
-                    const yrs = state.planBarData.years;
+                    const yrs = state.basketBarData.years;
                     const returns = yrs.map(d => d.stock_returns && d.stock_returns[sym] != null ? d.stock_returns[sym] : null).filter(v => v != null);
                     if (returns.length > 0) {
                         const avg = returns.reduce((a, b) => a + b, 0) / returns.length;
@@ -1741,19 +1790,19 @@
                         avgReturnHTML = '<span style="color:' + valColor + ';font-weight:600;font-size:11px;margin-left:6px">' + avg.toFixed(1) + '%</span>';
                     }
                 }
-                return '<div class="plan-strategy-item' + (isHidden ? ' strategy-hidden' : '') + '" data-index="' + idx + '">' +
-                    '<div class="plan-strategy-info" title="' + s.window_size + 'd window | ' + s.threshold + '% threshold">' +
-                        '<div class="plan-strategy-symbol"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:5px;vertical-align:middle"></span>' + displaySymbol(s.symbol) + avgReturnHTML + '</div>' +
+                return '<div class="basket-strategy-item' + (isHidden ? ' strategy-hidden' : '') + '" data-index="' + idx + '">' +
+                    '<div class="basket-strategy-info" title="' + s.window_size + 'd window | ' + s.threshold + '% threshold">' +
+                        '<div class="basket-strategy-symbol"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + color + ';margin-right:5px;vertical-align:middle"></span>' + displaySymbol(s.symbol) + avgReturnHTML + '</div>' +
                     '</div>' +
-                    '<div class="plan-strategy-actions">' +
-                        '<div class="plan-strategy-hide' + (isHidden ? ' is-hidden' : '') + '" data-index="' + idx + '" title="' + (isHidden ? 'Show in chart' : 'Hide from chart') + '">' + (isHidden ? 'show' : 'hide') + '</div>' +
-                        '<div class="plan-strategy-remove" data-index="' + idx + '">\u2715</div>' +
+                    '<div class="basket-strategy-actions">' +
+                        '<div class="basket-strategy-hide' + (isHidden ? ' is-hidden' : '') + '" data-index="' + idx + '" title="' + (isHidden ? 'Show in chart' : 'Hide from chart') + '">' + (isHidden ? 'show' : 'hide') + '</div>' +
+                        '<div class="basket-strategy-remove" data-index="' + idx + '">\u2715</div>' +
                     '</div>' +
                 '</div>';
             }).join('');
             
             // Add remove handlers
-            planStrategiesList.querySelectorAll('.plan-strategy-remove').forEach(el => {
+            basketStrategiesList.querySelectorAll('.basket-strategy-remove').forEach(el => {
                 el.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const idx = parseInt(el.dataset.index);
@@ -1765,12 +1814,12 @@
                         // h === idx: removed, skip
                     });
                     state.hiddenStrategies = newHidden;
-                    removeFromPlan(idx);
+                    removeFromBasket(idx);
                 });
             });
             
             // Add hide/show handlers
-            planStrategiesList.querySelectorAll('.plan-strategy-hide').forEach(el => {
+            basketStrategiesList.querySelectorAll('.basket-strategy-hide').forEach(el => {
                 el.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const idx = parseInt(el.dataset.index);
@@ -1779,25 +1828,25 @@
                     } else {
                         state.hiddenStrategies.add(idx);
                     }
-                    state.planWeights = null; // invalidate cached weights
-                    renderPlanStrategies();
-                    const visiblePlan = getVisiblePlan();
-                    if (visiblePlan.length > 0) {
-                        if (state.planBarMode) {
-                            loadPlanBarChart();
+                    state.basketWeights = null; // invalidate cached weights
+                    renderBasketStrategies();
+                    const visibleBasket = getVisibleBasket();
+                    if (visibleBasket.length > 0) {
+                        if (state.basketBarMode) {
+                            loadBasketBarChart();
                         } else {
-                            loadPlanBacktest();
+                            loadBasketBacktest();
                         }
                     } else {
-                        planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">All strategies hidden</div>';
-                        planMetrics.innerHTML = '';
+                        getBasketFrontBuffer().innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">All strategies hidden</div>';
+                        basketMetrics.innerHTML = '';
                     }
                 });
             });
         }
         
         // Populate year dropdown with available years
-        function populatePlanYears() {
+        function populateBasketYears() {
             // Use years from last loaded data, or generate recent years
             const years = window.backtestYears || [];
             if (years.length === 0) {
@@ -1807,7 +1856,7 @@
                 }
             }
             
-            planYearSelect.innerHTML = '<option value="avg">Average</option>' + years.slice().reverse().map(y => 
+            basketYearSelect.innerHTML = '<option value="avg">Average</option>' + years.slice().reverse().map(y => 
                 `<option value="${y}">${y}</option>`
             ).join('');
         }
@@ -1816,13 +1865,13 @@
         // Fetches equal-weight bar data, computes per-symbol avg return,
         // clamps negatives to a minimum floor, normalizes to sum=1.
         async function computeReturnWeights() {
-            const plan = getVisiblePlan();
-            if (plan.length === 0) return null;
+            const basket = getVisibleBasket();
+            if (basket.length === 0) return null;
             try {
                 const params = new URLSearchParams({
-                    strategies: JSON.stringify(plan),
+                    strategies: JSON.stringify(basket),
                 });
-                const res = await fetch('/api/plan/bar?' + params);
+                const res = await fetch('/api/basket/bar?' + params);
                 const data = await res.json();
                 if (data.error || !data.years || data.years.length === 0) return null;
                 
@@ -1857,14 +1906,14 @@
         }
         
         // Compute market-cap-weighted allocation.
-        // Fetches market caps for all symbols in the plan, normalizes to sum=1.
+        // Fetches market caps for all symbols in the basket, normalizes to sum=1.
         async function computeMarketCapWeights() {
-            const plan = getVisiblePlan();
-            if (plan.length === 0) return null;
+            const basket = getVisibleBasket();
+            if (basket.length === 0) return null;
             try {
                 // Collect unique symbols (with .NS suffix for backend)
                 const symSet = new Set();
-                plan.forEach(s => symSet.add(s.symbol));
+                basket.forEach(s => symSet.add(s.symbol));
                 const symbols = Array.from(symSet);
 
                 const res = await fetch('/api/marketcap?symbols=' + encodeURIComponent(symbols.join(',')));
@@ -1896,68 +1945,68 @@
         }
 
         // Get current weights (null for equal, {sym: weight} for return-weighted or mkt-cap)
-        async function getPlanWeights() {
-            if (planAllocSelect.value === 'equal') {
-                state.planWeights = null;
+        async function getBasketWeights() {
+            if (basketAllocSelect.value === 'equal') {
+                state.basketWeights = null;
                 return null;
             }
             // Compute if not cached
-            if (!state.planWeights) {
-                if (planAllocSelect.value === 'marketcap') {
-                    state.planWeights = await computeMarketCapWeights();
+            if (!state.basketWeights) {
+                if (basketAllocSelect.value === 'marketcap') {
+                    state.basketWeights = await computeMarketCapWeights();
                 } else {
-                    state.planWeights = await computeReturnWeights();
+                    state.basketWeights = await computeReturnWeights();
                 }
             }
-            return state.planWeights;
+            return state.basketWeights;
         }
         
         // Load combined backtest for all strategies
-        async function loadPlanBacktest() {
-            const plan = getVisiblePlan();
-            if (plan.length === 0) return;
+        async function loadBasketBacktest() {
+            const basket = getVisibleBasket();
+            if (basket.length === 0) return;
             
-            const yearVal = planYearSelect.value;
-            const capital = parseInt(planCapitalSelect.value);
+            const yearVal = basketYearSelect.value;
+            const capital = parseInt(basketCapitalSelect.value);
             
             if (!yearVal) return;
             
-            planChart.innerHTML = '<div style="padding: 20px; color: #888; text-align: center;">Loading...</div>';
+            // No "Loading..." text - previous chart stays visible (double-buffer)
             
             try {
-                const weights = await getPlanWeights();
+                const weights = await getBasketWeights();
                 const params = new URLSearchParams({
-                    strategies: JSON.stringify(plan),
+                    strategies: JSON.stringify(basket),
                     year: yearVal
                 });
                 if (weights) params.set('weights', JSON.stringify(weights));
-                const fees = parseFloat(planFeesInput.value) || 0;
-                const tax = parseFloat(planTaxInput.value) || 0;
+                const fees = parseFloat(basketFeesInput.value) || 0;
+                const tax = parseFloat(basketTaxInput.value) || 0;
                 if (fees > 0) params.set('fees_pct', String(fees));
                 if (tax > 0) params.set('tax_pct', String(tax));
                 
-                const res = await fetch(`/api/plan/backtest?${params}`);
+                const res = await fetch(`/api/basket/backtest?${params}`);
                 const data = await res.json();
                 
                 if (data.error) {
-                    planChart.innerHTML = `<div style="color: #ff4466; padding: 20px;">${data.error}</div>`;
+                    getBasketFrontBuffer().innerHTML = `<div style="color: #ff4466; padding: 20px;">${data.error}</div>`;
                     return;
                 }
                 
-                state.lastPlanData = data;
-                renderPlanChart(data, capital);
+                state.lastBasketData = data;
+                renderBasketChart(data, capital);
             } catch (err) {
-                planChart.innerHTML = `<div style="color: #ff4466; padding: 20px;">Error: ${err.message}</div>`;
+                getBasketFrontBuffer().innerHTML = `<div style="color: #ff4466; padding: 20px;">Error: ${err.message}</div>`;
             }
         }
         
         // Render combined backtest chart
-        function renderPlanChart(data, capital) {
+        function renderBasketChart(data, capital) {
             const { combined_curve, bh_curve, strategy_curves, trades_count, total_days, dates, trades } = data;
             const symbols = data.symbols || Object.keys(strategy_curves);
             
-            // Build symbol-to-color map from plan colors
-            const symbolColorMap = buildPlanColorMap();
+            // Build symbol-to-color map from basket colors
+            const symbolColorMap = buildBasketColorMap();
             
             // Build per-strategy PnL arrays (needed for legend values)
             const combinedPnL = combined_curve.map(p => (p / 100) * capital);
@@ -1979,7 +2028,7 @@
             };
             
             // Chart dimensions
-            const container = planChart.getBoundingClientRect();
+            const container = basketChart.getBoundingClientRect();
             const width = container.width - 32;
             const height = container.height - 20;
             const padding = { top: 30, right: 20, bottom: 40, left: 70 };
@@ -1991,7 +2040,7 @@
             // Always include combined
             allValues.push(...combinedPnL);
             for (const sym of symbols) {
-                if (state.planVisible[sym] !== false && strategyPnLs[sym]) {
+                if (state.basketVisible[sym] !== false && strategyPnLs[sym]) {
                     allValues.push(...strategyPnLs[sym]);
                 }
             }
@@ -2035,16 +2084,16 @@
                 return dates.length - 1;
             }
             
-            // Build investment bands per strategy (colored by symbol)
-            let investmentBands = '';
-            let tradeMarkers = '';
+            // Build capital invested line (shows when money is in the market)
             const monthOrder = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             
+            // Track which days have active trades (considering visibility)
+            const investedDays = new Array(dates.length).fill(false);
             if (trades && trades.length > 0) {
                 trades.forEach(trade => {
                     const sym = trade.symbol || '';
                     // Skip hidden strategies
-                    if (state.planVisible[sym] === false) return;
+                    if (state.basketVisible[sym] === false) return;
                     
                     const entryIdx = findNearestDateIdx(trade.entry_date);
                     let exitIdx = findNearestDateIdx(trade.exit_date);
@@ -2058,30 +2107,25 @@
                     }
                     
                     if (entryIdx >= 0 && exitIdx >= 0 && exitIdx > entryIdx) {
-                        const x1 = xScale(entryIdx);
-                        const x2 = xScale(exitIdx);
-                        const bandWidth = x2 - x1;
-                        
-                        // Use strategy color for band
-                        const bandColor = symbolColorMap[sym] || '#9b59b6';
-                        
-                        // Calculate per-strategy return if curve available
-                        const curve = strategyPnLs[sym] || combinedPnL;
-                        const entryValue = curve[entryIdx];
-                        const exitValue = curve[exitIdx];
-                        const tradeReturn = exitValue - entryValue;
-                        const tradeReturnPct = (tradeReturn / capital) * 100;
-                        const isProfit = tradeReturn >= 0;
-                        
-                        const pctY = isProfit ? (padding.top + chartHeight - 22) : (padding.top + 30);
-                        
-                        investmentBands += `<rect x="${x1}" y="${padding.top}" width="${bandWidth}" height="${chartHeight}" fill="${bandColor}" opacity="0.10"/>`;
-                        
-                        const pctText = (tradeReturnPct >= 0 ? '+' : '') + tradeReturnPct.toFixed(1) + '%';
-                        const midX = (x1 + x2) / 2;
-                        tradeMarkers += `<text x="${midX}" y="${pctY}" fill="${bandColor}" font-size="9" font-weight="bold" text-anchor="middle" opacity="0.9">${pctText}</text>`;
+                        for (let i = entryIdx; i <= exitIdx; i++) {
+                            investedDays[i] = true;
+                        }
                     }
                 });
+            }
+            
+            // Build capital invested curve (0 when not invested, capital when invested)
+            const capitalInvested = investedDays.map(invested => invested ? capital : 0);
+            
+            // Build step-line path for capital invested (stepped, not smooth)
+            function buildStepPath(values) {
+                if (values.length === 0) return '';
+                let path = `M ${xScale(0).toFixed(1)} ${yScale(values[0]).toFixed(1)}`;
+                for (let i = 1; i < values.length; i++) {
+                    // Horizontal line to next x, then vertical to new y (step pattern)
+                    path += ` H ${xScale(i).toFixed(1)} V ${yScale(values[i]).toFixed(1)}`;
+                }
+                return path;
             }
             
             // Generate Y axis ticks
@@ -2130,7 +2174,7 @@
             // Build per-strategy SVG lines
             let strategyLines = '';
             for (const sym of symbols) {
-                if (state.planVisible[sym] === false) continue;
+                if (state.basketVisible[sym] === false) continue;
                 if (!strategyPnLs[sym]) continue;
                 
                 const color = symbolColorMap[sym] || '#888';
@@ -2140,9 +2184,6 @@
             
             const svg = `
                 <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
-                    <!-- Investment bands (behind everything) -->
-                    ${investmentBands}
-                    
                     <!-- Vertical grid lines (monthly) -->
                     ${xTicks.map(t => `
                         <line x1="${xScale(t.i)}" y1="${padding.top}" x2="${xScale(t.i)}" y2="${padding.top + chartHeight}" 
@@ -2169,6 +2210,9 @@
                         </text>
                     `).join('')}
                     
+                    <!-- Capital invested line (gray, stepped) -->
+                    <path d="${buildStepPath(capitalInvested)}" fill="none" stroke="#666" stroke-width="1" opacity="0.6"/>
+                    
                     <!-- Buy & Hold line (blue, dashed) -->
                     <path d="${buildPath(bhPnL)}" fill="none" stroke="#6699ff" stroke-width="1.25" opacity="0.6" stroke-dasharray="4,3"/>
                     
@@ -2178,12 +2222,12 @@
                     <!-- Combined strategy line (white) -->
                     <path d="${buildPath(combinedPnL)}" fill="none" stroke="#ffffff" stroke-width="2.5"/>
                     
-                    <!-- Trade markers -->
-                    ${tradeMarkers}
-                    
                 </svg>
             `;
-            planChart.innerHTML = svg;
+            // Render to back buffer, then swap for flicker-free update
+            const backBuffer = getBasketBackBuffer();
+            backBuffer.innerHTML = svg;
+            swapBasketBuffers();
             
             // Update metrics
             const finalCombined = combinedPnL[combinedPnL.length - 1];
@@ -2193,7 +2237,7 @@
             const pnlLabel = isAvg ? `Avg Combined P&L (${data.avg_years}y):` : 'Combined P&L:';
             const bhLabel = isAvg ? 'Avg EW B&H:' : 'EW B&H:';
             
-            planMetrics.innerHTML = `
+            basketMetrics.innerHTML = `
                 <div class="backtest-metric">
                     <span class="label">${pnlLabel}</span>
                     <span class="${finalCombined >= 0 ? 'positive' : 'negative'}">${formatCurrency(finalCombined)}</span>
@@ -2217,80 +2261,80 @@
             `;
         }
         
-        // Plan bar/line toggle
-        const planLineBtn = document.getElementById('plan-line-btn');
-        const planBarBtn = document.getElementById('plan-bar-btn');
+        // Basket bar/line toggle
+        const basketLineBtn = document.getElementById('basket-line-btn');
+        const basketBarBtn = document.getElementById('basket-bar-btn');
         
-        function setPlanViewMode(barMode) {
-            state.planBarMode = barMode;
-            planLineBtn.classList.toggle('active', !barMode);
-            planBarBtn.classList.toggle('active', barMode);
-            planYearSelect.style.display = barMode ? 'none' : '';
-            planCapitalSelect.style.display = barMode ? 'none' : '';
+        function setBasketViewMode(barMode) {
+            state.basketBarMode = barMode;
+            basketLineBtn.classList.toggle('active', !barMode);
+            basketBarBtn.classList.toggle('active', barMode);
+            basketYearSelect.style.display = barMode ? 'none' : '';
+            basketCapitalSelect.style.display = barMode ? 'none' : '';
             // Also hide the labels
-            planCapitalSelect.previousElementSibling.style.display = barMode ? 'none' : '';
-            planYearSelect.previousElementSibling.style.display = barMode ? 'none' : '';
+            basketCapitalSelect.previousElementSibling.style.display = barMode ? 'none' : '';
+            basketYearSelect.previousElementSibling.style.display = barMode ? 'none' : '';
         }
         
-        planBarBtn.addEventListener('click', async () => {
-            if (state.planBarMode) return;
-            setPlanViewMode(true);
-            await loadPlanBarChart();
+        basketBarBtn.addEventListener('click', async () => {
+            if (state.basketBarMode) return;
+            setBasketViewMode(true);
+            await loadBasketBarChart();
         });
         
-        planLineBtn.addEventListener('click', () => {
-            if (!state.planBarMode) return;
-            setPlanViewMode(false);
-            loadPlanBacktest();
+        basketLineBtn.addEventListener('click', () => {
+            if (!state.basketBarMode) return;
+            setBasketViewMode(false);
+            loadBasketBacktest();
         });
         
-        async function loadPlanBarChart() {
-            const plan = getVisiblePlan();
-            if (plan.length === 0) return;
-            planChart.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">Loading...</div>';
-            planMetrics.innerHTML = '';
+        async function loadBasketBarChart() {
+            const basket = getVisibleBasket();
+            if (basket.length === 0) return;
+            // No "Loading..." text - previous chart and metrics stay visible (double-buffer)
             try {
-                const weights = await getPlanWeights();
+                const weights = await getBasketWeights();
                 const params = new URLSearchParams({
-                    strategies: JSON.stringify(plan),
+                    strategies: JSON.stringify(basket),
                 });
                 if (weights) params.set('weights', JSON.stringify(weights));
-                const fees = parseFloat(planFeesInput.value) || 0;
-                const tax = parseFloat(planTaxInput.value) || 0;
+                const fees = parseFloat(basketFeesInput.value) || 0;
+                const tax = parseFloat(basketTaxInput.value) || 0;
                 if (fees > 0) params.set('fees_pct', String(fees));
                 if (tax > 0) params.set('tax_pct', String(tax));
-                const res = await fetch('/api/plan/bar?' + params);
+                const res = await fetch('/api/basket/bar?' + params);
                 const data = await res.json();
                 if (data.error) {
-                    planChart.innerHTML = '<div style="color:#ff4466;padding:20px;">' + data.error + '</div>';
+                    getBasketFrontBuffer().innerHTML = '<div style="color:#ff4466;padding:20px;">' + data.error + '</div>';
                     return;
                 }
-                state.planBarData = data;
-                renderPlanBarChart(data);
+                state.basketBarData = data;
+                renderBasketBarChart(data);
             } catch (err) {
-                planChart.innerHTML = '<div style="color:#ff4466;padding:20px;">Error: ' + err.message + '</div>';
+                getBasketFrontBuffer().innerHTML = '<div style="color:#ff4466;padding:20px;">Error: ' + err.message + '</div>';
             }
         }
         
-        function renderPlanBarChart(data) {
+        function renderBasketBarChart(data) {
             let years = data.years;
             const symbols = data.symbols || [];
             if (!years || years.length === 0) {
-                planChart.innerHTML = '<div style="padding:20px;color:#888;text-align:center;">No data</div>';
+                getBasketFrontBuffer().innerHTML = '<div style="padding:20px;color:#888;text-align:center;">No data</div>';
                 return;
             }
             // Slice years based on "Show N years" dropdown
-            const showN = parseInt(planYearsShow.value) || 0;
+            const showN = parseInt(basketYearsShow.value) || 0;
             if (showN > 0 && years.length > showN) {
                 years = years.slice(-showN);
             }
 
-            // Build symbol-to-color map from plan colors
-            const symbolColorMap = buildPlanColorMap();
+            // Build symbol-to-color map from basket colors
+            const symbolColorMap = buildBasketColorMap();
 
-            const container = planChart.getBoundingClientRect();
+            const container = basketChart.getBoundingClientRect();
             const containerWidth = container.width - 32;
-            const rawHeight = container.height - 8;
+            // Always reserve space for horizontal scrollbar to prevent layout oscillation
+            const rawHeight = container.height - 20;
 
             // 3-zone SVG: topZone (year labels at top + value labels) | chartZone (bars) | bottomZone (small buffer)
             const topZone = 34;      // px for year labels at top + value labels above tallest bar
@@ -2301,15 +2345,14 @@
             const minPerGroup = 80;
             const minWidth = leftPad + rightPad + n * minPerGroup;
             const width = Math.max(containerWidth, minWidth);
-            // If horizontal scrollbar will appear, reserve space for it
-            const svgHeight = width > containerWidth ? rawHeight - 20 : rawHeight;
+            const svgHeight = rawHeight;
             if (containerWidth < 50 || svgHeight < 80) return;
             const chartHeight = svgHeight - topZone - bottomZone;
             const chartWidth = width - leftPad - rightPad;
 
             // Fixed Y range so bars never shift when toggling params
             const yMin = -20;
-            const yMax = 120;
+            const yMax = 200;
 
             const groupWidth = chartWidth / n;
             const barWidth = Math.min(groupWidth * 0.38, 50);
@@ -2416,7 +2459,10 @@
                 bars + labels +
                 '</svg>';
 
-            planChart.innerHTML = svg;
+            // Render to back buffer, then swap for flicker-free update
+            const backBuffer = getBasketBackBuffer();
+            backBuffer.innerHTML = svg;
+            swapBasketBuffers();
 
             // Metrics
             const avgCombined = years.reduce((s, d) => s + d.combined_return, 0) / n;
@@ -2425,8 +2471,8 @@
             // Compute average time in market %
             const dimYears = years.filter(d => d.days_in_market != null && d.total_trading_days > 0);
             const avgTimeInMarket = dimYears.length > 0 ? dimYears.reduce((s, d) => s + (d.days_in_market / d.total_trading_days) * 100, 0) / dimYears.length : null;
-            planMetrics.innerHTML =
-                '<div class="backtest-metric"><span class="label">Avg Plan:</span><span class="' + (avgCombined >= 0 ? 'positive' : 'negative') + '">' + avgCombined.toFixed(1) + '%</span></div>' +
+            basketMetrics.innerHTML =
+                '<div class="backtest-metric"><span class="label">Avg Basket:</span><span class="' + (avgCombined >= 0 ? 'positive' : 'negative') + '">' + avgCombined.toFixed(1) + '%</span></div>' +
                 '<div class="backtest-metric"><span class="label">Avg B&H:</span><span class="' + (avgBH >= 0 ? 'positive' : 'negative') + '">' + avgBH.toFixed(1) + '%</span></div>' +
                 '<div class="backtest-metric"><span class="label">Beats B&H:</span><span>' + winYears + '/' + n + ' yrs</span></div>' +
                 '<div class="backtest-metric"><span class="label">Sharpe:</span><span style="color:' + sharpeColor(data.sharpe_ratio) + '">' + (data.sharpe_ratio != null ? data.sharpe_ratio.toFixed(2) : 'N/A') + ' (' + (data.sharpe_label || 'N/A') + ')</span></div>' +
@@ -2434,222 +2480,164 @@
         }
         
         // Export unified trading calendar
-        async function exportPlanCalendar() {
-            const plan = loadPlan();
-            if (plan.length === 0) {
+        async function exportTradingCalendar() {
+            const basket = loadBasket();
+            if (basket.length === 0) {
                 return;
             }
             
-            const align = document.getElementById('plan-align-check').checked;
+            const align = document.getElementById('basket-align-check').checked;
             const params = new URLSearchParams({
-                strategies: JSON.stringify(plan),
+                strategies: JSON.stringify(basket),
                 align: align ? '1' : '0'
             });
             
-            window.location.href = `/api/plan/export?${params}`;
+            window.location.href = `/api/basket/export?${params}`;
         }
         
         // =====================
-        // Plan Save / Load
+        // Basket Save / Load (File-based)
         // =====================
-        const saveDialog = document.getElementById('save-plan-dialog');
-        const loadDialog = document.getElementById('load-plan-dialog');
-        const saveNameInput = document.getElementById('save-plan-name');
-        const planListContainer = document.getElementById('plan-list-container');
+        const basketFileInput = document.getElementById('basket-file-input');
+        const basketTitleName = document.getElementById('basket-title-name');
+        let currentBasketName = '';  // Track loaded basket name
         
-        function openSaveDialog() {
-            const plan = loadPlan();
-            if (plan.length === 0) {
+        function updateBasketTitle(name) {
+            currentBasketName = name || '';
+            if (name) {
+                basketTitleName.textContent = ': ' + name;
+            } else {
+                basketTitleName.textContent = '';
+            }
+        }
+        
+        function saveBasketToFile() {
+            const basket = loadBasket();
+            if (basket.length === 0) {
                 setStatus('No strategies to save', true);
                 return;
             }
-            saveNameInput.value = '';
-            saveDialog.classList.add('show');
-            setTimeout(() => saveNameInput.focus(), 50);
+            
+            const data = {
+                name: currentBasketName || 'Untitled Basket',
+                strategies: basket,
+                allocation: basketAllocSelect.value,
+                saved_at: new Date().toISOString()
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            // Use current basket name or default
+            const filename = (currentBasketName || 'trading-basket').replace(/[^a-z0-9]/gi, '-').toLowerCase() + '.json';
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            setStatus(`Basket saved as ${filename}`);
         }
         
-        function closeSaveDialog() {
-            saveDialog.classList.remove('show');
+        function loadBasketFromFile() {
+            basketFileInput.click();
         }
         
-        async function confirmSavePlan() {
-            const name = saveNameInput.value.trim();
-            if (!name) {
-                saveNameInput.focus();
-                return;
-            }
-            const plan = loadPlan();
-            try {
-                const res = await fetch('/api/plans/save', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({name, strategies: plan, allocation: planAllocSelect.value})
-                });
-                const data = await res.json();
-                if (data.error) {
-                    setStatus(data.error, true);
-                } else {
-                    setStatus(`Plan "${name}" saved`);
-                    closeSaveDialog();
+        basketFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const data = JSON.parse(evt.target.result);
+                    if (!data.strategies || !Array.isArray(data.strategies)) {
+                        setStatus('Invalid basket file format', true);
+                        return;
+                    }
+                    
+                    // Ensure colors are assigned
+                    ensureBasketColors(data.strategies);
+                    saveBasket(data.strategies);
+                    
+                    // Update basket name from file
+                    const basketName = data.name || file.name.replace(/\.json$/i, '');
+                    updateBasketTitle(basketName);
+                    
+                    // Restore allocation if saved
+                    if (data.allocation && basketAllocSelect) {
+                        basketAllocSelect.value = data.allocation;
+                    }
+                    
+                    state.basketWeights = null;
+                    renderBasketStrategies();
+                    setStatus(`Loaded basket "${basketName}"`);
+                    
+                    if (data.strategies.length > 0) {
+                        if (state.basketBarMode) {
+                            loadBasketBarChart();
+                        } else {
+                            loadBasketBacktest();
+                        }
+                    } else {
+                        getBasketFrontBuffer().innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>';
+                        basketMetrics.innerHTML = '';
+                    }
+                } catch (err) {
+                    setStatus('Failed to parse basket file: ' + err.message, true);
                 }
-            } catch (e) {
-                setStatus('Failed to save plan', true);
-            }
-        }
-        
-        async function openLoadDialog() {
-            loadDialog.classList.add('show');
-            planListContainer.innerHTML = '<div class="plan-list-empty">Loading...</div>';
-            try {
-                const res = await fetch('/api/plans');
-                const plans = await res.json();
-                if (plans.length === 0) {
-                    planListContainer.innerHTML = '<div class="plan-list-empty">No saved plans</div>';
-                    return;
-                }
-                planListContainer.innerHTML = plans.map(p => `
-                    <li class="plan-list-item" data-name="${p.name}">
-                        <div class="plan-list-item-info">
-                            <div class="plan-list-item-name">${p.name}</div>
-                            <div class="plan-list-item-meta">${p.strategies} strateg${p.strategies === 1 ? 'y' : 'ies'} &middot; ${p.saved_at || ''}</div>
-                        </div>
-                        <div class="plan-list-item-delete" data-name="${p.name}" title="Delete">&times;</div>
-                    </li>
-                `).join('');
-                
-                // Click to load
-                planListContainer.querySelectorAll('.plan-list-item-info').forEach(el => {
-                    el.addEventListener('click', () => {
-                        const name = el.closest('.plan-list-item').dataset.name;
-                        doLoadPlan(name);
-                    });
-                });
-                // Click to delete
-                planListContainer.querySelectorAll('.plan-list-item-delete').forEach(el => {
-                    el.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        doDeletePlan(el.dataset.name);
-                    });
-                });
-            } catch (e) {
-                planListContainer.innerHTML = '<div class="plan-list-empty">Failed to load plans</div>';
-            }
-        }
-        
-        function closeLoadDialog() {
-            loadDialog.classList.remove('show');
-        }
-        
-        async function doLoadPlan(name) {
-            try {
-                const res = await fetch(`/api/plans/load?name=${encodeURIComponent(name)}`);
-                const data = await res.json();
-                if (data.error) {
-                    setStatus(data.error, true);
-                    return;
-                }
-                // Ensure colors are assigned (backward compat with old saved plans)
-                ensurePlanColors(data.strategies);
-                savePlan(data.strategies);
-                // Restore allocation if saved
-                if (data.allocation && planAllocSelect) {
-                    planAllocSelect.value = data.allocation;
-                }
-                state.planWeights = null;
-                renderPlanStrategies();
-                closeLoadDialog();
-                setStatus(`Loaded plan "${name}"`);
-                if (data.strategies.length > 0) {
-                    loadPlanBacktest();
-                } else {
-                    planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>';
-                    planMetrics.innerHTML = '';
-                }
-            } catch (e) {
-                setStatus('Failed to load plan', true);
-            }
-        }
-        
-        async function doDeletePlan(name) {
-            try {
-                const res = await fetch('/api/plans/delete', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({name})
-                });
-                const data = await res.json();
-                if (data.error) {
-                    setStatus(data.error, true);
-                } else {
-                    // Refresh the list
-                    openLoadDialog();
-                }
-            } catch (e) {
-                setStatus('Failed to delete plan', true);
-            }
-        }
-        
-        // Save dialog events
-        document.getElementById('save-plan-cancel').addEventListener('click', closeSaveDialog);
-        document.getElementById('save-plan-confirm').addEventListener('click', confirmSavePlan);
-        saveNameInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') confirmSavePlan();
-            if (e.key === 'Escape') closeSaveDialog();
-        });
-        saveDialog.addEventListener('click', (e) => {
-            if (e.target === saveDialog) closeSaveDialog();
+            };
+            reader.readAsText(file);
+            
+            // Reset input so same file can be loaded again
+            basketFileInput.value = '';
         });
         
-        // Load dialog events
-        document.getElementById('load-plan-cancel').addEventListener('click', closeLoadDialog);
-        loadDialog.addEventListener('click', (e) => {
-            if (e.target === loadDialog) closeLoadDialog();
+        // Event listeners for basket
+        document.getElementById('basket-save-btn').addEventListener('click', saveBasketToFile);
+        document.getElementById('basket-load-btn').addEventListener('click', loadBasketFromFile);
+        showBasketBtn.addEventListener('click', openBasketOverlay);
+        document.getElementById('basket-close-btn').addEventListener('click', closeBasketOverlay);
+        document.getElementById('basket-clear-btn').addEventListener('click', () => {
+            saveBasket([]);
+            updateBasketTitle('');
+            renderBasketStrategies();
+            getBasketFrontBuffer().innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>';
+            basketMetrics.innerHTML = '';
         });
-        
-        // Event listeners for plan
-        document.getElementById('plan-save-btn').addEventListener('click', openSaveDialog);
-        document.getElementById('plan-load-btn').addEventListener('click', openLoadDialog);
-        showPlanBtn.addEventListener('click', openPlanOverlay);
-        document.getElementById('plan-close-btn').addEventListener('click', closePlanOverlay);
-        document.getElementById('plan-clear-btn').addEventListener('click', () => {
-            savePlan([]);
-            renderPlanStrategies();
-            planChart.innerHTML = '<div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>';
-            planMetrics.innerHTML = '';
-        });
-        document.getElementById('plan-export-btn').addEventListener('click', exportPlanCalendar);
-        planYearSelect.addEventListener('change', loadPlanBacktest);
-        planCapitalSelect.addEventListener('change', loadPlanBacktest);
-        planAllocSelect.addEventListener('change', () => {
+        document.getElementById('basket-export-btn').addEventListener('click', exportTradingCalendar);
+        basketYearSelect.addEventListener('change', loadBasketBacktest);
+        basketCapitalSelect.addEventListener('change', loadBasketBacktest);
+        basketAllocSelect.addEventListener('change', () => {
             // Allocation mode changed — invalidate cached weights and reload
-            state.planWeights = null;
-            if (state.planBarMode) {
-                loadPlanBarChart();
+            state.basketWeights = null;
+            if (state.basketBarMode) {
+                loadBasketBarChart();
             } else {
-                loadPlanBacktest();
+                loadBasketBacktest();
             }
         });
         function onFeesChange() {
-            if (state.planBarMode) {
-                loadPlanBarChart();
+            if (state.basketBarMode) {
+                loadBasketBarChart();
             } else {
-                loadPlanBacktest();
+                loadBasketBacktest();
             }
         }
-        planFeesInput.addEventListener('change', onFeesChange);
-        planTaxInput.addEventListener('change', onFeesChange);
-        planYearsShow.addEventListener('change', () => {
-            if (state.planBarMode && state.planBarData) {
-                renderPlanBarChart(state.planBarData);
+        basketFeesInput.addEventListener('change', onFeesChange);
+        basketTaxInput.addEventListener('change', onFeesChange);
+        basketYearsShow.addEventListener('change', () => {
+            if (state.basketBarMode && state.basketBarData) {
+                renderBasketBarChart(state.basketBarData);
             }
         });
-        document.getElementById('plan-shuffle-colors').addEventListener('click', shuffleColors);
-        planOverlay.addEventListener('click', (e) => {
-            if (e.target === planOverlay) closePlanOverlay();
+        document.getElementById('basket-shuffle-colors').addEventListener('click', shuffleColors);
+        basketOverlay.addEventListener('click', (e) => {
+            if (e.target === basketOverlay) closeBasketOverlay();
         });
         
-        // Initialize plan badge on load
-        updatePlanBadge();
+        // Initialize basket badge on load
+        updateBasketBadge();
         
         // Initial load - only if symbol is set
         if (state.symbol) {

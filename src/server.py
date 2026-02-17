@@ -19,20 +19,20 @@ from backend import (
     export_strategy_csv,
     get_backtest_data,
     find_optimal_trades,
-    get_plan_backtest_data,
-    get_plan_backtest_average,
-    export_plan_calendar_csv,
+    get_basket_backtest_data,
+    get_basket_backtest_average,
+    export_trading_calendar_csv,
     detect_sliding_windows,
     load_symbol_data,
     get_window_backtest_data,
     get_window_backtest_average,
-    get_plan_overlap,
+    get_basket_overlap,
     get_window_bar_data,
-    get_plan_bar_data,
-    save_plan,
-    load_plan,
-    list_plans,
-    delete_plan,
+    get_basket_bar_data,
+    save_basket,
+    load_basket,
+    list_baskets,
+    delete_basket,
     OFFSET_LIMITS,
     get_market_caps,
 )
@@ -250,7 +250,7 @@ class MeguruHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
         
-        elif path == "/api/plan/backtest":
+        elif path == "/api/basket/backtest":
             params = self.parse_params()
             try:
                 strategies_json = params.get("strategies", "[]")
@@ -268,16 +268,16 @@ class MeguruHandler(BaseHTTPRequestHandler):
                     return
                 
                 if year_str == "avg":
-                    result = get_plan_backtest_average(strategies, symbol_weights, stop_loss, reentry)
+                    result = get_basket_backtest_average(strategies, symbol_weights, stop_loss, reentry)
                 else:
-                    result = get_plan_backtest_data(strategies, int(year_str), symbol_weights, stop_loss, reentry)
+                    result = get_basket_backtest_data(strategies, int(year_str), symbol_weights, stop_loss, reentry)
                 self.send_json(result)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
         
-        elif path == "/api/plan/export":
+        elif path == "/api/basket/export":
             params = self.parse_params()
             try:
                 strategies_json = params.get("strategies", "[]")
@@ -288,15 +288,15 @@ class MeguruHandler(BaseHTTPRequestHandler):
                     return
                 
                 align = params.get("align", "0") == "1"
-                content = export_plan_calendar_csv(strategies, align_windows=align)
-                filename = "trading-plan.csv"
+                content = export_trading_calendar_csv(strategies, align_windows=align)
+                filename = "trading-calendar.csv"
                 self.send_csv(content, filename)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
         
-        elif path == "/api/plan/overlap":
+        elif path == "/api/basket/overlap":
             params = self.parse_params()
             try:
                 symbol = params.get("symbol", "")
@@ -310,10 +310,10 @@ class MeguruHandler(BaseHTTPRequestHandler):
                     return
                 
                 if not strategies:
-                    self.send_json({"error": "No strategies in plan"}, 400)
+                    self.send_json({"error": "No strategies in basket"}, 400)
                     return
                 
-                result = get_plan_overlap(symbol, window_size, threshold, strategies)
+                result = get_basket_overlap(symbol, window_size, threshold, strategies)
                 self.send_json(result)
             except json.JSONDecodeError:
                 self.send_json({"error": "Invalid strategies JSON"}, 400)
@@ -426,7 +426,7 @@ class MeguruHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
         
-        elif path == "/api/plan/bar":
+        elif path == "/api/basket/bar":
             params = self.parse_params()
             try:
                 strategies_json = params.get("strategies", "[]")
@@ -442,7 +442,7 @@ class MeguruHandler(BaseHTTPRequestHandler):
                     self.send_json({"error": "No strategies provided"}, 400)
                     return
                 
-                result = get_plan_bar_data(strategies, symbol_weights, stop_loss, reentry,
+                result = get_basket_bar_data(strategies, symbol_weights, stop_loss, reentry,
                                            fees_pct=fees_pct, tax_pct=tax_pct)
                 self.send_json(result)
             except json.JSONDecodeError:
@@ -463,20 +463,20 @@ class MeguruHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
 
-        elif path == "/api/plans":
+        elif path == "/api/baskets":
             try:
-                self.send_json(list_plans())
+                self.send_json(list_baskets())
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
         
-        elif path == "/api/plans/load":
+        elif path == "/api/baskets/load":
             params = self.parse_params()
             try:
                 name = params.get("name", "")
                 if not name:
-                    self.send_json({"error": "No plan name provided"}, 400)
+                    self.send_json({"error": "No basket name provided"}, 400)
                     return
-                data = load_plan(name)
+                data = load_basket(name)
                 self.send_json(data)
             except FileNotFoundError as e:
                 self.send_json({"error": str(e)}, 404)
@@ -496,32 +496,32 @@ class MeguruHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length) if content_length else b""
         
-        if path == "/api/plans/save":
+        if path == "/api/baskets/save":
             try:
                 data = json.loads(body) if body else {}
                 name = data.get("name", "")
                 strategies = data.get("strategies", [])
                 if not name:
-                    self.send_json({"error": "No plan name provided"}, 400)
+                    self.send_json({"error": "No basket name provided"}, 400)
                     return
                 if not strategies:
                     self.send_json({"error": "No strategies to save"}, 400)
                     return
-                result = save_plan(name, strategies, data.get("allocation", "equal"))
+                result = save_basket(name, strategies, data.get("allocation", "equal"))
                 self.send_json(result)
             except ValueError as e:
                 self.send_json({"error": str(e)}, 400)
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
         
-        elif path == "/api/plans/delete":
+        elif path == "/api/baskets/delete":
             try:
                 data = json.loads(body) if body else {}
                 name = data.get("name", "")
                 if not name:
-                    self.send_json({"error": "No plan name provided"}, 400)
+                    self.send_json({"error": "No basket name provided"}, 400)
                     return
-                result = delete_plan(name)
+                result = delete_basket(name)
                 self.send_json(result)
             except FileNotFoundError as e:
                 self.send_json({"error": str(e)}, 404)

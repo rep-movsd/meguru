@@ -678,74 +678,74 @@ class TestGetPeriodDateLabel:
 # ============================================================================
 
 
-class TestPlanCRUD:
-    """Tests for save_plan, load_plan, list_plans, delete_plan."""
+class TestBasketCRUD:
+    """Tests for save_basket, load_basket, list_baskets, delete_basket."""
 
     @pytest.fixture(autouse=True)
-    def _tmp_plans_dir(self, tmp_path, monkeypatch):
-        """Redirect PLANS_DIR to a temp directory for each test."""
+    def _tmp_baskets_dir(self, tmp_path, monkeypatch):
+        """Redirect BASKETS_DIR to a temp directory for each test."""
         import backend
-        monkeypatch.setattr(backend, "PLANS_DIR", tmp_path / "plans")
+        monkeypatch.setattr(backend, "BASKETS_DIR", tmp_path / "baskets")
 
     def test_save_and_load(self):
-        from backend import save_plan, load_plan
+        from backend import save_basket, load_basket
         strategies = [{"symbol": "VBL.NS", "window_size": 60, "threshold": 60}]
-        result = save_plan("my plan", strategies)
+        result = save_basket("my basket", strategies)
         assert result["ok"] is True
-        data = load_plan("my plan")
-        assert data["name"] == "my plan"
+        data = load_basket("my basket")
+        assert data["name"] == "my basket"
         assert data["strategies"] == strategies
         assert "saved_at" in data
 
-    def test_list_plans(self):
-        from backend import save_plan, list_plans
-        save_plan("alpha", [{"symbol": "A.NS", "window_size": 30, "threshold": 50}])
-        save_plan("beta", [
+    def test_list_baskets(self):
+        from backend import save_basket, list_baskets
+        save_basket("alpha", [{"symbol": "A.NS", "window_size": 30, "threshold": 50}])
+        save_basket("beta", [
             {"symbol": "B.NS", "window_size": 7, "threshold": 75},
             {"symbol": "C.NS", "window_size": 60, "threshold": 60},
         ])
-        plans = list_plans()
-        assert len(plans) == 2
-        names = {p["name"] for p in plans}
+        baskets = list_baskets()
+        assert len(baskets) == 2
+        names = {p["name"] for p in baskets}
         assert names == {"alpha", "beta"}
-        beta = next(p for p in plans if p["name"] == "beta")
+        beta = next(p for p in baskets if p["name"] == "beta")
         assert beta["strategies"] == 2
 
-    def test_delete_plan(self):
-        from backend import save_plan, delete_plan, list_plans
-        save_plan("to-delete", [{"symbol": "X.NS", "window_size": 30, "threshold": 50}])
-        assert len(list_plans()) == 1
-        result = delete_plan("to-delete")
+    def test_delete_basket(self):
+        from backend import save_basket, delete_basket, list_baskets
+        save_basket("to-delete", [{"symbol": "X.NS", "window_size": 30, "threshold": 50}])
+        assert len(list_baskets()) == 1
+        result = delete_basket("to-delete")
         assert result["ok"] is True
-        assert len(list_plans()) == 0
+        assert len(list_baskets()) == 0
 
     def test_load_nonexistent_raises(self):
-        from backend import load_plan
+        from backend import load_basket
         with pytest.raises(FileNotFoundError):
-            load_plan("no-such-plan")
+            load_basket("no-such-basket")
 
     def test_delete_nonexistent_raises(self):
-        from backend import delete_plan
+        from backend import delete_basket
         with pytest.raises(FileNotFoundError):
-            delete_plan("no-such-plan")
+            delete_basket("no-such-basket")
 
     def test_invalid_name_raises(self):
-        from backend import save_plan
+        from backend import save_basket
         with pytest.raises(ValueError):
-            save_plan("bad/name", [])
+            save_basket("bad/name", [])
         with pytest.raises(ValueError):
-            save_plan("", [])
+            save_basket("", [])
 
     def test_overwrite_existing(self):
-        from backend import save_plan, load_plan
-        save_plan("ow", [{"symbol": "A.NS", "window_size": 30, "threshold": 50}])
-        save_plan("ow", [{"symbol": "B.NS", "window_size": 60, "threshold": 70}])
-        data = load_plan("ow")
+        from backend import save_basket, load_basket
+        save_basket("ow", [{"symbol": "A.NS", "window_size": 30, "threshold": 50}])
+        save_basket("ow", [{"symbol": "B.NS", "window_size": 60, "threshold": 70}])
+        data = load_basket("ow")
         assert data["strategies"][0]["symbol"] == "B.NS"
 
     def test_empty_dir_returns_empty_list(self):
-        from backend import list_plans
-        assert list_plans() == []
+        from backend import list_baskets
+        assert list_baskets() == []
 
 
 # ============================================================================
@@ -939,25 +939,25 @@ class TestGetWindowBarData:
 
 
 # ============================================================================
-# Tests: get_plan_bar_data
+# Tests: get_basket_bar_data
 # ============================================================================
 
 
-class TestGetPlanBarData:
-    """Tests for get_plan_bar_data function."""
+class TestGetBasketBarData:
+    """Tests for get_basket_bar_data function."""
 
     def test_empty_strategies_returns_error(self):
-        from backend import get_plan_bar_data
-        result = get_plan_bar_data([])
+        from backend import get_basket_bar_data
+        result = get_basket_bar_data([])
         assert "error" in result
         assert result["years"] == []
         assert result["symbols"] == []
 
     @patch("backend._load_strategy_windows")
     def test_no_windows_returns_error(self, mock_load):
-        from backend import get_plan_bar_data
+        from backend import get_basket_bar_data
         mock_load.return_value = None
-        result = get_plan_bar_data([{"symbol": "TEST.NS", "window_size": 30, "threshold": 50}])
+        result = get_basket_bar_data([{"symbol": "TEST.NS", "window_size": 30, "threshold": 50}])
         assert "error" in result
         assert result["years"] == []
 
@@ -965,18 +965,18 @@ class TestGetPlanBarData:
     @patch("backend.get_years_from_data")
     @patch("backend._load_strategy_windows")
     def test_no_complete_years_returns_error(self, mock_load_strat, mock_years, mock_build):
-        from backend import get_plan_bar_data
+        from backend import get_basket_bar_data
         ref_data = pd.DataFrame({"Close": [100]}, index=pd.to_datetime(["2024-01-01"]))
         mock_load_strat.return_value = ([], [], ref_data, [], ["TEST"])
         mock_years.return_value = []
-        result = get_plan_bar_data([{"symbol": "TEST.NS", "window_size": 30, "threshold": 50}])
+        result = get_basket_bar_data([{"symbol": "TEST.NS", "window_size": 30, "threshold": 50}])
         assert "error" in result
 
     @patch("backend._build_equity_curve")
     @patch("backend.get_years_from_data")
     @patch("backend._load_strategy_windows")
     def test_valid_result_structure(self, mock_load_strat, mock_years, mock_build):
-        from backend import get_plan_bar_data
+        from backend import get_basket_bar_data
         ref_data = pd.DataFrame(
             {"Close": np.linspace(100, 110, 250)},
             index=pd.bdate_range("2022-01-01", periods=250),
@@ -999,7 +999,7 @@ class TestGetPlanBarData:
             "trades": [],
             "symbols": ["VBL"],
         }
-        result = get_plan_bar_data([{"symbol": "VBL.NS", "window_size": 30, "threshold": 50}])
+        result = get_basket_bar_data([{"symbol": "VBL.NS", "window_size": 30, "threshold": 50}])
         assert "years" in result
         assert "symbols" in result
         assert result["symbols"] == ["VBL"]
@@ -1016,7 +1016,7 @@ class TestGetPlanBarData:
     @patch("backend._load_strategy_windows")
     def test_combined_return_from_curve_last_value(self, mock_load_strat, mock_years, mock_build):
         """combined_return should be last element of combined_curve."""
-        from backend import get_plan_bar_data
+        from backend import get_basket_bar_data
         ref_data = pd.DataFrame(
             {"Close": np.linspace(100, 110, 250)},
             index=pd.bdate_range("2022-01-01", periods=250),
@@ -1033,7 +1033,7 @@ class TestGetPlanBarData:
             "trades": [],
             "symbols": ["SYM"],
         }
-        result = get_plan_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
+        result = get_basket_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
         entry = result["years"][0]
         assert entry["combined_return"] == 5.57  # rounded to 2dp
         assert entry["bh_return"] == 3.12  # rounded to 2dp
@@ -1043,7 +1043,7 @@ class TestGetPlanBarData:
     @patch("backend._load_strategy_windows")
     def test_skips_year_when_curve_is_none(self, mock_load_strat, mock_years, mock_build):
         """Years where _build_equity_curve returns None should be skipped."""
-        from backend import get_plan_bar_data
+        from backend import get_basket_bar_data
         ref_data = pd.DataFrame(
             {"Close": np.linspace(100, 110, 250)},
             index=pd.bdate_range("2022-01-01", periods=250),
@@ -1061,7 +1061,7 @@ class TestGetPlanBarData:
             "trades": [],
             "symbols": ["SYM"],
         }]
-        result = get_plan_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
+        result = get_basket_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
         assert len(result["years"]) == 1
         assert result["years"][0]["year"] == 2022
 
@@ -1069,8 +1069,8 @@ class TestGetPlanBarData:
     @patch("backend.get_years_from_data")
     @patch("backend._load_strategy_windows")
     def test_multiple_symbols(self, mock_load_strat, mock_years, mock_build):
-        """Plan with multiple stocks should include per-stock returns."""
-        from backend import get_plan_bar_data
+        """Basket with multiple stocks should include per-stock returns."""
+        from backend import get_basket_bar_data
         ref_data = pd.DataFrame(
             {"Close": np.linspace(100, 110, 250)},
             index=pd.bdate_range("2022-01-01", periods=250),
@@ -1096,7 +1096,7 @@ class TestGetPlanBarData:
             "trades": [],
             "symbols": ["VBL", "TCS"],
         }
-        result = get_plan_bar_data([
+        result = get_basket_bar_data([
             {"symbol": "VBL.NS", "window_size": 30, "threshold": 50},
             {"symbol": "TCS.NS", "window_size": 30, "threshold": 50},
         ])
@@ -1112,7 +1112,7 @@ class TestGetPlanBarData:
     @patch("backend._load_strategy_windows")
     def test_missing_symbol_in_strategy_curves_defaults_zero(self, mock_load_strat, mock_years, mock_build):
         """If a symbol has no entry in strategy_curves, its return should be 0."""
-        from backend import get_plan_bar_data
+        from backend import get_basket_bar_data
         ref_data = pd.DataFrame(
             {"Close": np.linspace(100, 110, 250)},
             index=pd.bdate_range("2022-01-01", periods=250),
@@ -1129,7 +1129,7 @@ class TestGetPlanBarData:
             "trades": [],
             "symbols": ["VBL"],
         }
-        result = get_plan_bar_data([
+        result = get_basket_bar_data([
             {"symbol": "VBL.NS", "window_size": 30, "threshold": 50},
             {"symbol": "TCS.NS", "window_size": 30, "threshold": 50},
         ])
@@ -1142,7 +1142,7 @@ class TestGetPlanBarData:
     @patch("backend._load_strategy_windows")
     def test_empty_curves_default_zero(self, mock_load_strat, mock_years, mock_build):
         """Empty combined_curve and bh_curve should default to 0.0."""
-        from backend import get_plan_bar_data
+        from backend import get_basket_bar_data
         ref_data = pd.DataFrame(
             {"Close": np.linspace(100, 110, 250)},
             index=pd.bdate_range("2022-01-01", periods=250),
@@ -1159,7 +1159,7 @@ class TestGetPlanBarData:
             "trades": [],
             "symbols": ["SYM"],
         }
-        result = get_plan_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
+        result = get_basket_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
         entry = result["years"][0]
         assert entry["combined_return"] == 0.0
         assert entry["bh_return"] == 0.0
@@ -1169,7 +1169,7 @@ class TestGetPlanBarData:
     @patch("backend._load_strategy_windows")
     def test_multiple_years(self, mock_load_strat, mock_years, mock_build):
         """Should produce one entry per year with data."""
-        from backend import get_plan_bar_data
+        from backend import get_basket_bar_data
         ref_data = pd.DataFrame(
             {"Close": np.linspace(100, 110, 500)},
             index=pd.bdate_range("2021-01-01", periods=500),
@@ -1196,7 +1196,7 @@ class TestGetPlanBarData:
                 "trades_count": 1, "total_days": 30, "dates": [], "trades": [], "symbols": ["SYM"],
             },
         ]
-        result = get_plan_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
+        result = get_basket_bar_data([{"symbol": "SYM.NS", "window_size": 30, "threshold": 50}])
         assert len(result["years"]) == 3
         years = [e["year"] for e in result["years"]]
         assert years == [2021, 2022, 2023]

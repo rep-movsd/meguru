@@ -42,7 +42,7 @@
         <div class="controls-section right">
             <button id="find-max-profit-btn" class="btn-secondary" style="display:none;">Find max profit trades</button>
             <button id="find-max-yield-btn" class="btn-secondary" style="display:none;">Find max yield trades</button>
-            <button id="show-plan-btn" class="btn-plan">Plan<span id="plan-badge" class="plan-badge" style="display:none;">0</span></button>
+            <button id="show-basket-btn" class="btn-basket">Basket<span id="basket-badge" class="basket-badge" style="display:none;">0</span></button>
         </div>
     </div>
     
@@ -67,7 +67,7 @@
                     <button id="export-trades-btn" class="btn-small btn-secondary">Export Data</button>
                     <button id="export-strategy-btn" class="btn-small btn-secondary">Export Strategy</button>
                     <button id="show-backtest-btn" class="btn-small btn-primary">Backtest</button>
-                    <button id="add-to-plan-btn" class="btn-small btn-add-plan">+ Add to Plan</button>
+                    <button id="add-to-basket-btn" class="btn-small btn-add-basket">+ Add to Basket</button>
                 </div>
                 <div id="chart-controls" style="display: none;">
                     <div class="chart-legend">
@@ -86,7 +86,7 @@
                         <input type="number" id="chart-tax-input" min="0" max="50" step="1" value="20" style="width:48px" title="Tax % on net annual profits (STCG).">
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #00ff88;"></div>Strategy</div>
                         <div class="chart-legend-item"><div class="chart-legend-color" style="background: #6699ff;"></div>Buy & Hold</div>
-                        <button id="chart-add-plan-btn" class="btn-small btn-add-plan">+ Add to Plan</button>
+                        <button id="chart-add-basket-btn" class="btn-small btn-add-basket">+ Add to Basket</button>
                     </div>
                 </div>
             </div>
@@ -98,7 +98,10 @@
                     </table>
                 </div>
                 <div class="summary" id="summary"></div>
-                <div class="window-chart-container" id="window-chart" style="display: none;"></div>
+                <div class="window-chart-container" id="window-chart" style="display: none;">
+                    <div class="window-chart-buffer" id="window-buffer-0"></div>
+                    <div class="window-chart-buffer back" id="window-buffer-1"></div>
+                </div>
                 <div class="window-chart-metrics" id="window-chart-metrics" style="display: none;"></div>
             </div>
         </div>
@@ -170,48 +173,48 @@
         </div>
     </div>
     
-    <div class="plan-overlay" id="plan-overlay">
-        <div class="plan-panel">
-            <div class="plan-header">
-                <h3>Trading Plan</h3>
-                <div class="plan-header-actions">
-                    <button id="plan-clear-btn" class="btn-small btn-secondary">Clear All</button>
-                    <button id="plan-close-btn" class="btn-small">✕</button>
+    <div class="basket-overlay" id="basket-overlay">
+        <div class="basket-panel">
+            <div class="basket-header">
+                <h3>Trading Basket<span id="basket-title-name"></span></h3>
+                <div class="basket-header-actions">
+                    <button id="basket-clear-btn" class="btn-small btn-secondary">Clear All</button>
+                    <button id="basket-close-btn" class="btn-small">✕</button>
                 </div>
             </div>
-            <div class="plan-content">
-                <div class="plan-strategies">
-                    <div class="plan-strategies-header">
+            <div class="basket-content">
+                <div class="basket-strategies">
+                    <div class="basket-strategies-header">
                         <span>Strategies</span>
-                        <button id="plan-shuffle-colors" title="Shuffle strategy colors" style="background:none;border:1px solid #555;color:#aaa;cursor:pointer;padding:1px 6px;border-radius:3px;font-size:11px;">Shuffle</button>
-                        <span id="plan-strategy-count">0 strategies</span>
+                        <button id="basket-shuffle-colors" title="Shuffle strategy colors" style="background:none;border:1px solid #555;color:#aaa;cursor:pointer;padding:1px 6px;border-radius:3px;font-size:11px;">Shuffle</button>
+                        <span id="basket-strategy-count">0 strategies</span>
                     </div>
-                    <div class="plan-strategies-list" id="plan-strategies-list">
-                        <div class="plan-empty">No strategies added yet. Analyze a stock and click "Add to Plan".</div>
+                    <div class="basket-strategies-list" id="basket-strategies-list">
+                        <div class="basket-empty">No strategies added yet. Analyze a stock and click "Add to Basket".</div>
                     </div>
                 </div>
-                <div class="plan-chart-area">
-                    <div class="plan-chart-controls">
+                <div class="basket-chart-area">
+                    <div class="basket-chart-controls">
                         <div class="chart-view-toggle">
-                            <button id="plan-line-btn" class="chart-view-btn active">Line</button>
-                            <button id="plan-bar-btn" class="chart-view-btn">Bar</button>
+                            <button id="basket-line-btn" class="chart-view-btn active">Line</button>
+                            <button id="basket-bar-btn" class="chart-view-btn">Bar</button>
                         </div>
                         <label>Year:</label>
-                        <select id="plan-year-select"></select>
+                        <select id="basket-year-select"></select>
                         <label>Capital:</label>
-                        <select id="plan-capital-select">
+                        <select id="basket-capital-select">
                             <option value="100000" selected>₹1,00,000</option>
                             <option value="500000">₹5,00,000</option>
                             <option value="1000000">₹10,00,000</option>
                         </select>
                         <label>Alloc:</label>
-                        <select id="plan-alloc-select">
+                        <select id="basket-alloc-select">
                             <option value="equal" selected>Equal</option>
                             <option value="return">Return-wtd</option>
                             <option value="marketcap">Mkt-cap</option>
                         </select>
                         <label>Show:</label>
-                        <select id="plan-years-show" title="Number of years to display on bar chart">
+                        <select id="basket-years-show" title="Number of years to display on bar chart">
                             <option value="0">All</option>
                             <option value="3">Last 3</option>
                             <option value="5" selected>Last 5</option>
@@ -219,49 +222,32 @@
                             <option value="10">Last 10</option>
                         </select>
                         <label>Fees%:</label>
-                        <input type="number" id="plan-fees-input" min="0" max="5" step="0.1" value="0.3" style="width:56px" title="Fees % of value per round-trip trade (brokerage + STT + charges).">
+                        <input type="number" id="basket-fees-input" min="0" max="5" step="0.1" value="0.3" style="width:56px" title="Fees % of value per round-trip trade (brokerage + STT + charges).">
                         <label>Tax%:</label>
-                        <input type="number" id="plan-tax-input" min="0" max="50" step="1" value="20" style="width:48px" title="Tax % on net annual profits (STCG).">
+                        <input type="number" id="basket-tax-input" min="0" max="50" step="1" value="20" style="width:48px" title="Tax % on net annual profits (STCG).">
                     </div>
-                    <div class="plan-chart" id="plan-chart">
-                        <div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>
+                    <div class="basket-chart" id="basket-chart">
+                        <div class="basket-chart-buffer" id="basket-buffer-0">
+                            <div style="padding: 20px; color: #666; text-align: center;">Add strategies to see combined backtest</div>
+                        </div>
+                        <div class="basket-chart-buffer back" id="basket-buffer-1"></div>
                     </div>
-                    <div class="plan-metrics" id="plan-metrics"></div>
+                    <div class="basket-metrics" id="basket-metrics"></div>
                 </div>
             </div>
-            <div class="plan-footer">
+            <div class="basket-footer">
                 <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#999;margin-right:auto;cursor:pointer">
-                    <input type="checkbox" id="plan-align-check"> Align windows (±2 days)
+                    <input type="checkbox" id="basket-align-check"> Align windows (±2 days)
                 </label>
-                <button id="plan-load-btn" class="btn-secondary">Load Plan</button>
-                <button id="plan-save-btn" class="btn-secondary">Save Plan</button>
-                <button id="plan-export-btn" class="btn-secondary">Export Trading Plan</button>
+                <button id="basket-load-btn" class="btn-secondary">Load Basket</button>
+                <button id="basket-save-btn" class="btn-secondary">Save Basket</button>
+                <button id="basket-export-btn" class="btn-secondary">Export Trading Calendar</button>
             </div>
         </div>
     </div>
     
-    <!-- Save plan dialog -->
-    <div class="plan-dialog-overlay" id="save-plan-dialog">
-        <div class="plan-dialog">
-            <h4>Save Plan</h4>
-            <input type="text" id="save-plan-name" placeholder="Plan name..." maxlength="64" autocomplete="off">
-            <div class="plan-dialog-actions">
-                <button class="btn-secondary btn-small" id="save-plan-cancel">Cancel</button>
-                <button class="btn-small" id="save-plan-confirm">Save</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Load plan dialog -->
-    <div class="plan-dialog-overlay" id="load-plan-dialog">
-        <div class="plan-dialog">
-            <h4>Load Plan</h4>
-            <ul class="plan-list" id="plan-list-container"></ul>
-            <div class="plan-dialog-actions">
-                <button class="btn-secondary btn-small" id="load-plan-cancel">Close</button>
-            </div>
-        </div>
-    </div>
+    <!-- Hidden file input for loading baskets -->
+    <input type="file" id="basket-file-input" accept=".json" style="display: none;">
     
     <script src="/static/app.js"></script>
 </body>

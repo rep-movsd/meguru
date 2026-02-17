@@ -20,7 +20,7 @@ import yfinance as yf
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 STOCKS_FILE = DATA_DIR / "stocks" / "nse_stocks.csv"
-PLANS_DIR = DATA_DIR / "plans"
+BASKETS_DIR = DATA_DIR / "baskets"
 PERIOD_COUNTS = {"weekly": 52, "monthly": 12}
 OFFSET_LIMITS = {"weekly": 6, "monthly": 30}
 NUM_YEARS = 20
@@ -2340,23 +2340,23 @@ def _load_strategy_windows(
     return all_templates, all_day_ranges, ref_data, all_window_dfs, unique_symbols
 
 
-def get_plan_overlap(
+def get_basket_overlap(
     symbol: str,
     window_size: int,
     threshold: int,
     strategies: list[dict],
 ) -> dict:
     """
-    Compute DOY overlap between a stock's windows and the existing plan's windows.
+    Compute DOY overlap between a stock's windows and the existing basket's windows.
 
     Args:
         symbol: Current stock symbol (e.g. "RELIANCE.NS")
         window_size: Window size for current stock
         threshold: Win rate threshold (0-100) for current stock
-        strategies: Existing plan strategies (list of dicts with symbol, window_size, threshold)
+        strategies: Existing basket strategies (list of dicts with symbol, window_size, threshold)
 
     Returns:
-        dict with plan_windows, stock_days, plan_days, overlap_days, new_days
+        dict with basket_windows, stock_days, basket_days, overlap_days, new_days
     """
     # Detect windows for current stock
     symbols = parse_symbols(symbol)
@@ -2380,31 +2380,31 @@ def get_plan_overlap(
     for w in stock_windows:
         stock_days.update(range(w.start_day, w.end_day + 1))
 
-    # Load plan windows
+    # Load basket windows
     loaded = _load_strategy_windows(strategies)
     if loaded is None:
         return {
-            "plan_windows": [],
+            "basket_windows": [],
             "stock_days": len(stock_days),
-            "plan_days": 0,
+            "basket_days": 0,
             "overlap_days": 0,
             "new_days": len(stock_days),
         }
 
-    _templates, plan_day_ranges, _ref_data, _window_dfs, _syms = loaded
+    _templates, basket_day_ranges, _ref_data, _window_dfs, _syms = loaded
 
-    # Build DOY set for plan
-    plan_days: set[int] = set()
-    for start_day, end_day in plan_day_ranges:
-        plan_days.update(range(start_day, end_day + 1))
+    # Build DOY set for basket
+    basket_days: set[int] = set()
+    for start_day, end_day in basket_day_ranges:
+        basket_days.update(range(start_day, end_day + 1))
 
-    overlap = stock_days & plan_days
-    new_days = stock_days - plan_days
+    overlap = stock_days & basket_days
+    new_days = stock_days - basket_days
 
     return {
-        "plan_windows": list(plan_day_ranges),
+        "basket_windows": list(basket_day_ranges),
         "stock_days": len(stock_days),
-        "plan_days": len(plan_days),
+        "basket_days": len(basket_days),
         "overlap_days": len(overlap),
         "new_days": len(new_days),
     }
@@ -2663,7 +2663,7 @@ def _build_equity_curve(
     }
 
 
-def get_plan_backtest_data(
+def get_basket_backtest_data(
     strategies: list[dict],
     year: int,
     symbol_weights: dict[str, float] | None = None,
@@ -2703,14 +2703,14 @@ def get_plan_backtest_data(
     return result
 
 
-def get_plan_backtest_average(
+def get_basket_backtest_average(
     strategies: list[dict],
     symbol_weights: dict[str, float] | None = None,
     stop_loss_pct: float = 0.0,
     reentry_pct: float = 0.0,
 ) -> dict:
     """
-    Generate average plan backtest across all available years.
+    Generate average basket backtest across all available years.
     
     Builds a synthetic average-year return series for each strategy's stock,
     then simulates dynamic allocation: on each day, capital is split among
@@ -2845,7 +2845,7 @@ def get_plan_backtest_average(
     }
 
 
-def export_plan_calendar_csv(strategies: list[dict], align_windows: bool = False) -> str:
+def export_trading_calendar_csv(strategies: list[dict], align_windows: bool = False) -> str:
     """
     Generate a target-allocation trading calendar CSV.
     
@@ -3028,27 +3028,27 @@ def _align_window_dates(windows: list[tuple[int, int, str]]) -> list[tuple[int, 
 
 
 # =============================================================================
-# Plan Save / Load
+# Basket Save / Load
 # =============================================================================
 
-_PLAN_NAME_RE = _re.compile(r'^[A-Za-z0-9_\- ]{1,64}$')
+_BASKET_NAME_RE = _re.compile(r'^[A-Za-z0-9_\- ]{1,64}$')
 
 
-def _sanitize_plan_name(name: str) -> str:
-    """Validate and return a safe plan name (used as filename stem)."""
+def _sanitize_basket_name(name: str) -> str:
+    """Validate and return a safe basket name (used as filename stem)."""
     name = name.strip()
-    if not _PLAN_NAME_RE.match(name):
+    if not _BASKET_NAME_RE.match(name):
         raise ValueError(
-            "Plan name must be 1-64 characters: letters, digits, spaces, hyphens, underscores"
+            "Basket name must be 1-64 characters: letters, digits, spaces, hyphens, underscores"
         )
     return name
 
 
-def save_plan(name: str, strategies: list[dict], allocation: str = "equal") -> dict:
-    """Save a plan (list of strategies) to data/plans/<name>.json."""
-    name = _sanitize_plan_name(name)
-    PLANS_DIR.mkdir(parents=True, exist_ok=True)
-    path = PLANS_DIR / f"{name}.json"
+def save_basket(name: str, strategies: list[dict], allocation: str = "equal") -> dict:
+    """Save a basket (list of strategies) to data/baskets/<name>.json."""
+    name = _sanitize_basket_name(name)
+    BASKETS_DIR.mkdir(parents=True, exist_ok=True)
+    path = BASKETS_DIR / f"{name}.json"
     payload = {
         "name": name,
         "strategies": strategies,
@@ -3059,39 +3059,39 @@ def save_plan(name: str, strategies: list[dict], allocation: str = "equal") -> d
     return {"ok": True, "name": name}
 
 
-def load_plan(name: str) -> dict:
-    """Load a saved plan by name. Returns the full payload dict."""
-    name = _sanitize_plan_name(name)
-    path = PLANS_DIR / f"{name}.json"
+def load_basket(name: str) -> dict:
+    """Load a saved basket by name. Returns the full payload dict."""
+    name = _sanitize_basket_name(name)
+    path = BASKETS_DIR / f"{name}.json"
     if not path.exists():
-        raise FileNotFoundError(f"Plan '{name}' not found")
+        raise FileNotFoundError(f"Basket '{name}' not found")
     return _json.loads(path.read_text(encoding="utf-8"))
 
 
-def list_plans() -> list[dict]:
-    """List all saved plans (name + strategy count + saved_at)."""
-    if not PLANS_DIR.exists():
+def list_baskets() -> list[dict]:
+    """List all saved baskets (name + strategy count + saved_at)."""
+    if not BASKETS_DIR.exists():
         return []
-    plans = []
-    for path in sorted(PLANS_DIR.glob("*.json")):
+    baskets = []
+    for path in sorted(BASKETS_DIR.glob("*.json")):
         try:
             data = _json.loads(path.read_text(encoding="utf-8"))
-            plans.append({
+            baskets.append({
                 "name": data.get("name", path.stem),
                 "strategies": len(data.get("strategies", [])),
                 "saved_at": data.get("saved_at", ""),
             })
         except (ValueError, KeyError):
             continue
-    return plans
+    return baskets
 
 
-def delete_plan(name: str) -> dict:
-    """Delete a saved plan by name."""
-    name = _sanitize_plan_name(name)
-    path = PLANS_DIR / f"{name}.json"
+def delete_basket(name: str) -> dict:
+    """Delete a saved basket by name."""
+    name = _sanitize_basket_name(name)
+    path = BASKETS_DIR / f"{name}.json"
     if not path.exists():
-        raise FileNotFoundError(f"Plan '{name}' not found")
+        raise FileNotFoundError(f"Basket '{name}' not found")
     path.unlink()
     return {"ok": True, "name": name}
 
@@ -3250,7 +3250,7 @@ def get_window_bar_data(
     return {"years": results, "sharpe_ratio": sharpe, "sharpe_label": sharpe_label}
 
 
-def get_plan_bar_data(
+def get_basket_bar_data(
     strategies: list[dict],
     symbol_weights: dict[str, float] | None = None,
     stop_loss_pct: float = 0.0,
@@ -3259,10 +3259,10 @@ def get_plan_bar_data(
     tax_pct: float = 0.0,
 ) -> dict:
     """
-    Compute per-year combined plan return, B&H return, and per-stock
+    Compute per-year combined basket return, B&H return, and per-stock
     contribution for stacked bar chart.
 
-    For each complete year, builds equity curves using the plan backtest
+    For each complete year, builds equity curves using the basket backtest
     engine (with optional return-weighted allocation and stop-loss), then reports:
       - combined strategy return (%)
       - equal-weight B&H return (%)
