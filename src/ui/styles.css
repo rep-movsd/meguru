@@ -1,0 +1,1065 @@
+/* Reset and Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: #1a1a1a;
+    color: #e0e0e0;
+}
+
+#app {
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* ====================================================================
+   App Layout: single-view
+   - Top bar (controls)
+   - Main area (80%): basket list left + graph right
+   - Bottom panel (20%): stats
+   ==================================================================== */
+
+.app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: #1a1a1a;
+}
+
+/* Top Bar - removed, controls distributed to basket header and graph controls */
+
+.new-stock-btn {
+    padding: 3px 10px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+}
+
+.new-stock-btn:hover {
+    background: #45a049;
+}
+
+/* Allocation selector */
+.alloc-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #e0e0e0;
+}
+
+.alloc-select {
+    padding: 3px 4px;
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.alloc-select:hover {
+    border-color: #666;
+}
+
+.alloc-select:focus {
+    outline: none;
+    border-color: #2196F3;
+}
+
+.alloc-select:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.stock-count {
+    font-size: 11px;
+    color: #888;
+    margin-left: 6px;
+}
+
+/* ====================================================================
+   Main Area: basket list (left) + graph (right)
+   ==================================================================== */
+
+.main-area {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Basket List (left sidebar) */
+.basket-list {
+    width: 280px;
+    flex-shrink: 0;
+    border-right: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    background: #1a1a1a;
+    overflow-x: hidden;
+    overflow-y: hidden;
+}
+
+.basket-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.basket-header h2 {
+    font-size: 13px;
+    margin: 0;
+    color: #ddd;
+}
+
+.basket-items {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+}
+
+/* Custom scrollbar */
+.basket-items::-webkit-scrollbar {
+    width: 6px;
+}
+
+.basket-items::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.basket-items::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 3px;
+}
+
+.basket-items::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+.empty-basket {
+    padding: 30px 15px;
+    text-align: center;
+    color: #666;
+}
+
+.empty-basket p {
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.empty-basket .hint {
+    font-size: 11px;
+    color: #555;
+}
+
+/* Basket Item */
+.basket-item {
+    background: #242424;
+    border: 1px solid #333;
+    border-radius: 3px;
+    margin-bottom: 4px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.basket-item:hover {
+    border-color: #555;
+}
+
+.basket-item.selected {
+    border-color: #2196F3;
+    background: #1e2a3a;
+}
+
+.basket-item.hidden {
+    opacity: 0.5;
+}
+
+.basket-item-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+}
+
+.stock-color {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.stock-name {
+    flex: 1;
+    font-size: 12px;
+    color: #ddd;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.item-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.icon-button {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: background 0.15s;
+    color: #888;
+    line-height: 1;
+}
+
+.icon-button:hover {
+    background: #333;
+    color: #ddd;
+}
+
+.icon-button.toggle-vis {
+    font-size: 15px;
+    color: #66bb6a;
+}
+
+.icon-button.toggle-vis:hover {
+    color: #81c784;
+}
+
+.icon-button.delete {
+    color: #e57373;
+}
+
+.icon-button.delete:hover {
+    background: #F44336;
+    color: white;
+}
+
+.icon-button.expand {
+    font-size: 10px;
+    color: #888;
+    transition: transform 0.15s;
+}
+
+.icon-button.expand.open {
+    transform: rotate(90deg);
+}
+
+/* Accordion (param sliders) */
+.basket-item-accordion {
+    padding: 4px 10px 8px 10px;
+    border-top: 1px solid #2a2a2a;
+    overflow: hidden;
+}
+
+.slider-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+    overflow: hidden;
+}
+
+.slider-group label {
+    font-size: 10px;
+    color: #999;
+    width: 60px;
+    flex-shrink: 0;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.slider-group input[type="range"] {
+    flex: 1;
+    min-width: 0;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #444;
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+.slider-group input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #2196F3;
+    cursor: pointer;
+}
+
+.slider-group input[type="range"]::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #2196F3;
+    cursor: pointer;
+    border: none;
+}
+
+.slider-value {
+    font-size: 10px;
+    color: #ccc;
+    width: 34px;
+    flex-shrink: 0;
+    text-align: left;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+/* ====================================================================
+   Graph Area (right side of main area)
+   ==================================================================== */
+
+.graph-area {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.graph-controls {
+    display: flex;
+    gap: 15px;
+    padding: 6px 15px;
+    align-items: center;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #333;
+    background: #1e1e1e;
+    flex-shrink: 0;
+}
+
+.graph-controls-left {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.graph-controls-right {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-left: auto;
+}
+
+.graph-controls select {
+    padding: 4px 8px;
+    border: 1px solid #444;
+    border-radius: 3px;
+    font-size: 12px;
+    background: #2a2a2a;
+    color: #e0e0e0;
+}
+
+.graph-controls select:focus {
+    outline: none;
+    border-color: #2196F3;
+}
+
+/* View Toggle */
+.view-toggle {
+    display: flex;
+    border: 1px solid #444;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.toggle-btn {
+    padding: 3px 10px;
+    font-size: 11px;
+    border: none;
+    background: #2a2a2a;
+    color: #888;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.toggle-btn:not(:last-child) {
+    border-right: 1px solid #444;
+}
+
+.toggle-btn:hover {
+    background: #333;
+    color: #ccc;
+}
+
+.toggle-btn.active {
+    background: #2196F3;
+    color: white;
+}
+
+/* Chart area: allocation bar + canvas */
+.chart-area {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding: 8px 15px 8px 0;
+}
+
+.chart-wrapper {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.chart-wrapper canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* Vertical allocation bar */
+.alloc-bar {
+    width: 44px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #444;
+    flex-shrink: 0;
+}
+
+.alloc-segment {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    transition: height 0.2s ease;
+}
+
+.alloc-bar-label {
+    font-size: 9px;
+    color: #fff;
+    text-shadow: 0 0 3px rgba(0,0,0,0.8);
+    white-space: nowrap;
+    pointer-events: none;
+    line-height: 1.1;
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    text-align: center;
+    z-index: 2;
+}
+
+.alloc-adjust {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 50%;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    z-index: 1;
+    color: rgba(255,255,255,0.8);
+    font-size: 12px;
+    font-weight: bold;
+    justify-content: center;
+}
+
+.alloc-adjust.alloc-plus {
+    top: 0;
+    align-items: flex-start;
+    padding-top: 1px;
+}
+
+.alloc-adjust.alloc-minus {
+    bottom: 0;
+    align-items: flex-end;
+    padding-bottom: 1px;
+}
+
+.alloc-adjust:hover {
+    background: rgba(0,0,0,0.3);
+}
+
+.alloc-segment.editable:hover .alloc-adjust {
+    display: flex;
+}
+
+.alloc-segment.editable:hover {
+    filter: brightness(1.2);
+}
+
+.alloc-segment.editable {
+    cursor: pointer;
+}
+
+/* Chart overlay stats */
+.chart-overlay-stats {
+    position: absolute;
+    top: 30px;
+    left: 55px;
+    display: grid;
+    grid-template-columns: auto auto;
+    column-gap: 6px;
+    row-gap: 2px;
+    padding: 5px 8px;
+    background: rgba(30, 30, 30, 0.85);
+    border-radius: 4px;
+    border: 1px solid #444;
+    z-index: 5;
+    pointer-events: none;
+}
+
+/* ====================================================================
+   Stats Panel (bottom 20%)
+   ==================================================================== */
+
+.stats-panel {
+    height: 20%;
+    min-height: 100px;
+    flex-shrink: 0;
+    border-top: 2px solid #333;
+    background: #1e1e1e;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.stats-panel-header {
+    display: flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+}
+
+.stats-panel-header h3 {
+    font-size: 12px;
+    color: #999;
+    font-weight: 500;
+    margin: 0;
+}
+
+.stats-panel-content {
+    flex: 1;
+    overflow: auto;
+}
+
+/* Per-stock summary (no selection) */
+.per-stock-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    padding: 8px 12px;
+    align-items: flex-start;
+}
+
+.per-stock-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    background: #242424;
+    border-radius: 3px;
+    border: 1px solid #333;
+    min-width: 120px;
+}
+
+.per-stock-card .card-stock {
+    font-size: 11px;
+    font-weight: 600;
+    color: #ddd;
+    margin-bottom: 2px;
+}
+
+.per-stock-card .card-stat {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 10px;
+}
+
+.per-stock-card .card-stat .label {
+    color: #999;
+}
+
+.per-stock-card .card-stat .value {
+    font-family: 'Courier New', Courier, monospace;
+    color: #ddd;
+}
+
+/* Basket aggregate stats bar */
+.basket-stats-bar {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 25px;
+    padding: 8px 15px;
+    flex-shrink: 0;
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.stat-label {
+    font-size: 11px;
+    color: #888;
+}
+
+.stat-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e0e0e0;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+.stat-value.positive {
+    color: #4caf50;
+}
+
+.stat-value.negative {
+    color: #f44336;
+}
+
+/* Trade window table (stock selected) */
+.trade-table-container {
+    height: 100%;
+    overflow: auto;
+    background: #1e1e1e;
+}
+
+.trade-table-container::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.trade-table-container::-webkit-scrollbar-track {
+    background: #1e1e1e;
+}
+
+.trade-table-container::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 4px;
+}
+
+.trade-table-container::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+.trade-table-container::-webkit-scrollbar-corner {
+    background: #1e1e1e;
+}
+
+.trade-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.trade-table thead {
+    position: sticky;
+    top: 0;
+    background: #242424;
+    z-index: 10;
+}
+
+.trade-table th {
+    padding: 6px 6px;
+    text-align: left;
+    font-weight: 600;
+    color: #ddd;
+    border-bottom: 2px solid #333;
+    white-space: nowrap;
+    font-size: 11px;
+}
+
+.trade-table td {
+    padding: 5px 6px;
+    border-bottom: 1px solid #2a2a2a;
+    white-space: nowrap;
+    font-size: 11px;
+}
+
+.trade-table tbody tr:hover {
+    background: #242424;
+}
+
+.trade-table .positive {
+    color: #4CAF50;
+}
+
+.trade-table .negative {
+    color: #F44336;
+}
+
+/* ====================================================================
+   New Stock Modal
+   ==================================================================== */
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    backdrop-filter: blur(2px);
+}
+
+.modal {
+    background: #242424;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 20px 24px;
+    width: 380px;
+    max-width: 90vw;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.modal h2 {
+    font-size: 16px;
+    color: #ddd;
+    margin-bottom: 16px;
+}
+
+.modal-field {
+    margin-bottom: 12px;
+}
+
+.modal-field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    color: #999;
+    margin-bottom: 4px;
+}
+
+.modal-field input,
+.modal-field select {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid #444;
+    border-radius: 3px;
+    font-size: 12px;
+    background: #2a2a2a;
+    color: #e0e0e0;
+}
+
+.modal-field input:focus,
+.modal-field select:focus {
+    outline: none;
+    border-color: #2196F3;
+}
+
+.modal-row {
+    display: flex;
+    gap: 10px;
+}
+
+.modal-row .modal-field {
+    flex: 1;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.modal-btn {
+    padding: 7px 18px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: background 0.2s ease;
+}
+
+.modal-btn.primary {
+    background: #4CAF50;
+    color: white;
+}
+
+.modal-btn.primary:hover {
+    background: #45a049;
+}
+
+.modal-btn.primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.modal-btn.secondary {
+    background: #333;
+    color: #ccc;
+    border: 1px solid #555;
+}
+
+.modal-btn.secondary:hover {
+    background: #444;
+}
+
+/* ====================================================================
+   Fetch Progress Modal
+   ==================================================================== */
+
+.fetch-modal {
+    width: 460px;
+}
+
+.fetch-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 12px;
+}
+
+.fetch-cached {
+    color: #666;
+    font-size: 11px;
+}
+
+.fetch-log {
+    max-height: 260px;
+    overflow-y: auto;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 3px;
+    padding: 8px 10px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+.fetch-log::-webkit-scrollbar {
+    width: 6px;
+}
+
+.fetch-log::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+.fetch-log::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 3px;
+}
+
+.fetch-log-entry {
+    display: flex;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.fetch-icon {
+    width: 14px;
+    flex-shrink: 0;
+    text-align: center;
+}
+
+.fetch-year {
+    width: 36px;
+    flex-shrink: 0;
+    color: #888;
+}
+
+.fetch-msg {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.fetch-ok { color: #4caf50; }
+.fetch-ok .fetch-icon { color: #4caf50; }
+
+.fetch-nodata { color: #888; }
+.fetch-nodata .fetch-icon { color: #ffc107; }
+
+.fetch-error { color: #f44336; }
+.fetch-error .fetch-icon { color: #f44336; }
+
+.fetch-info { color: #999; }
+.fetch-info .fetch-icon { color: #2196f3; }
+
+/* ====================================================================
+   Searchable Dropdown
+   ==================================================================== */
+
+.searchable-dropdown {
+    position: relative;
+}
+
+.searchable-dropdown input {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid #444;
+    border-radius: 3px;
+    font-size: 12px;
+    background: #2a2a2a;
+    color: #e0e0e0;
+}
+
+.searchable-dropdown input:focus {
+    outline: none;
+    border-color: #2196F3;
+}
+
+.dropdown-options {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 250px;
+    overflow-y: auto;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-top: none;
+    border-radius: 0 0 3px 3px;
+    z-index: 10000;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.dropdown-option {
+    padding: 5px 10px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 11px;
+    border-bottom: 1px solid #333;
+}
+
+.dropdown-option:hover,
+.dropdown-option.highlighted {
+    background: #333;
+}
+
+.option-symbol {
+    font-weight: 600;
+    color: #2196F3;
+    flex-shrink: 0;
+}
+
+.option-name {
+    color: #999;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ====================================================================
+   Summary / value classes (shared)
+   ==================================================================== */
+
+.summary-label {
+    font-size: 11px;
+    color: #999;
+    font-weight: 500;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.summary-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e0e0e0;
+    font-family: 'Courier New', Courier, monospace;
+    white-space: nowrap;
+}
+
+.summary-value.positive {
+    color: #4caf50;
+}
+
+.summary-value.negative {
+    color: #f44336;
+}
+
+.positive {
+    color: #4CAF50;
+}
+
+.negative {
+    color: #F44336;
+}
+
+/* ====================================================================
+   Empty State / Loading / Error
+   ==================================================================== */
+
+.empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #666;
+    font-size: 14px;
+}
+
+.loading-spinner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    font-size: 14px;
+    color: #999;
+}
+
+.error-message {
+    padding: 10px 12px;
+    margin: 10px;
+    background: #3a1f1f;
+    color: #ff6b6b;
+    border-radius: 3px;
+    border-left: 4px solid #F44336;
+    font-size: 12px;
+}
+
+/* ====================================================================
+   Responsive
+   ==================================================================== */
+
+@media (max-width: 768px) {
+    .main-area {
+        flex-direction: column;
+    }
+
+    .basket-list {
+        width: 100%;
+        height: 30%;
+        border-right: none;
+        border-bottom: 1px solid #333;
+    }
+
+    .graph-area {
+        height: 70%;
+    }
+}
