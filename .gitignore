@@ -1,8 +1,11 @@
 # Dependencies
-node_modules/
+web/node_modules/
 
 # Build output
-dist/
+web/dist/
+
+# Vite cache
+.vite/
 
 # Environment variables
 .env
@@ -16,12 +19,15 @@ dist/
 *.swo
 *~
 
+# CMake
+cmake-build-*/
+
 # OS
 .DS_Store
 Thumbs.db
 
 # Wrangler
-worker/.wrangler/
+web/worker/.wrangler/
 
 # WASM build artifacts
 *.wasm
