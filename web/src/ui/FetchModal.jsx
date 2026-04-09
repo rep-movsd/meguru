@@ -89,34 +89,34 @@ class FetchModal extends Component {
         const arrMissingYears = [];
         let nCachedDataYears = 0;
 
-        for (let i = 0; i < MAX_YEARS; i++) {
-            const nYear = nCurrentYear - i;
-            const bHasCsv = await hasStockYear(sSymbol, nYear);
-            const bHasNoData = await hasNoData(sSymbol, nYear);
-            if (bHasCsv) {
-                nCachedDataYears++;
-            } else if (!bHasNoData) {
-                arrMissingYears.push(nYear);
-            }
-        }
-
-        if (arrMissingYears.length === 0) {
-            this.addLog({ nYear: null, sStatus: 'ok', sMessage: 'All years already cached in OPFS' });
-            this.setState({ bDone: true, nTotal: 0, nFetched: 0 });
-            this.scheduleComplete(nCachedDataYears);
-            return;
-        }
-
-        const nSkipped = MAX_YEARS - arrMissingYears.length;
-        if (nSkipped > 0) {
-            this.addLog({ nYear: null, sStatus: 'info', sMessage: `${nSkipped} years cached, fetching ${arrMissingYears.length} missing` });
-        }
-
-        this.setState({ nTotal: arrMissingYears.length, nSkipped });
-
-        let nFetched = 0;
-
         try {
+            for (let i = 0; i < MAX_YEARS; i++) {
+                const nYear = nCurrentYear - i;
+                const bHasCsv = await hasStockYear(sSymbol, nYear);
+                const bHasNoData = await hasNoData(sSymbol, nYear);
+                if (bHasCsv) {
+                    nCachedDataYears++;
+                } else if (!bHasNoData) {
+                    arrMissingYears.push(nYear);
+                }
+            }
+
+            if (arrMissingYears.length === 0) {
+                this.addLog({ nYear: null, sStatus: 'ok', sMessage: 'All years already cached in OPFS' });
+                this.setState({ bDone: true, nTotal: 0, nFetched: 0 });
+                this.scheduleComplete(nCachedDataYears);
+                return;
+            }
+
+            const nSkipped = MAX_YEARS - arrMissingYears.length;
+            if (nSkipped > 0) {
+                this.addLog({ nYear: null, sStatus: 'info', sMessage: `${nSkipped} years cached, fetching ${arrMissingYears.length} missing` });
+            }
+
+            this.setState({ nTotal: arrMissingYears.length, nSkipped });
+
+            let nFetched = 0;
+
             const { mapYearCsv, arrNoDataYears, arrSkippedNoDataYears } = await fetchYears(
                 sSymbol,
                 arrMissingYears,
@@ -212,7 +212,7 @@ class FetchModal extends Component {
                         </h2>
                         <div className="fetch-progress">
                             {nSkipped > 0 && <span className="fetch-cached">{nSkipped} cached</span>}
-                            <span>{nFetched} / {nTotal} years</span>
+                            <span>{nFetched} / {nTotal} checked</span>
                         </div>
                     </div>
 

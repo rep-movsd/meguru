@@ -69,10 +69,20 @@ class BasketList extends Component {
                                     {/* Main row: click to select */}
                                     <div
                                         className="basket-item-row"
+                                        tabIndex="0"
+                                        role="button"
+                                        aria-pressed={isSelected}
                                         onClick={(e) => {
                                             // Don't select if clicking action buttons
                                             if (e.target.closest('.item-actions') || e.target.closest('.icon-button')) return;
                                             onSelect(isSelected ? null : stock);
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.target.closest('.item-actions') || e.target.closest('.icon-button')) return;
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault();
+                                                onSelect(isSelected ? null : stock);
+                                            }
                                         }}
                                     >
                                         <button

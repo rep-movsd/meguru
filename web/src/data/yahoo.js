@@ -2,8 +2,32 @@
 // Fetches stock price data via the Cloudflare Worker CORS proxy.
 // Ported from the old Python data_downloader.py.
 
-const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'http://localhost:8787';
+const WORKER_URL = import.meta.env.VITE_WORKER_URL ||
+    (import.meta.env.DEV ? 'http://localhost:8787' : null);
 const MAX_CONSECUTIVE_NODATA = 3;
+
+if (!WORKER_URL) {
+    throw new Error('VITE_WORKER_URL environment variable is required in production');
+}
+
+// Promise-based delay that rejects immediately if the signal fires.
+function abortableDelay(nMs, signal) {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException('Aborted', 'AbortError'));
+            return;
+        }
+        const timer = setTimeout(() => {
+            if (signal) signal.removeEventListener('abort', onAbort);
+            resolve();
+        }, nMs);
+        function onAbort() {
+            clearTimeout(timer);
+            reject(new DOMException('Aborted', 'AbortError'));
+        }
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    });
+}
 
 // Fetch one year of daily price data for a stock.
 // Returns { sCsv, nTradingDays } on success, null if no data exists for this year.
@@ -104,9 +128,9 @@ export async function fetchYears(sSymbol, arrYears, onProgress, signal) {
             // Don't break on error — try remaining years
         }
 
-        // 1s delay between requests to avoid rate limiting
+        // 1s delay between requests to avoid rate limiting (abort-aware)
         if (i < arrYears.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await abortableDelay(1000, signal);
         }
     }
 

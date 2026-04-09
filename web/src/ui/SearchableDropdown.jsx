@@ -169,14 +169,22 @@ class SearchableDropdown extends Component {
                     onFocus={this.handleInputFocus}
                     placeholder={placeholder || 'Search...'}
                     autocomplete="off"
+                    role="combobox"
+                    aria-expanded={isOpen && filteredOptions.length > 0}
+                    aria-autocomplete="list"
+                    aria-controls="dropdown-listbox"
+                    aria-activedescendant={highlightedIndex >= 0 ? `dropdown-option-${highlightedIndex}` : undefined}
                 />
                 {isOpen && filteredOptions.length > 0 && (
-                    <div className="dropdown-options">
+                    <div className="dropdown-options" id="dropdown-listbox" role="listbox">
                         {filteredOptions.map((option, index) => (
                             <div
                                 key={option.symbol}
+                                id={`dropdown-option-${index}`}
                                 ref={(el) => this.optionsRef[index] = el}
                                 className={`dropdown-option ${index === highlightedIndex ? 'highlighted' : ''}`}
+                                role="option"
+                                aria-selected={index === highlightedIndex}
                                 onClick={() => this.handleOptionSelect(option)}
                                 onMouseEnter={() => this.setState({ highlightedIndex: index })}
                             >

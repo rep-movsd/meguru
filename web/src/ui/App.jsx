@@ -54,18 +54,21 @@ class App extends Component {
     // Engine refresh helpers
     // ------------------------------------------------------------------
 
-    refreshBasket = () => {
-        const raw = engine.getBasketResult();
-        if (!raw) {
-            this.setState({ basketResult: null });
-            return;
-        }
+    // Parse a JSON string from the engine, returning the parsed object or null.
+    // Logs a warning on parse failure so errors aren't fully silent.
+    _parseEngineResult = (sRaw) => {
+        if (!sRaw) return null;
         try {
-            const basketResult = JSON.parse(raw);
-            this.setState({ basketResult });
-        } catch {
-            this.setState({ basketResult: null });
+            return JSON.parse(sRaw);
+        } catch (err) {
+            console.warn('Engine JSON parse error:', err.message);
+            return null;
         }
+    }
+
+    refreshBasket = () => {
+        const basketResult = this._parseEngineResult(engine.getBasketResult());
+        this.setState({ basketResult });
     }
 
     refreshStockDetail = (symbol) => {
@@ -73,17 +76,8 @@ class App extends Component {
             this.setState({ stockDetail: null });
             return;
         }
-        const raw = engine.getStockDetail(symbol);
-        if (!raw) {
-            this.setState({ stockDetail: null });
-            return;
-        }
-        try {
-            const stockDetail = JSON.parse(raw);
-            this.setState({ stockDetail });
-        } catch {
-            this.setState({ stockDetail: null });
-        }
+        const stockDetail = this._parseEngineResult(engine.getStockDetail(symbol));
+        this.setState({ stockDetail });
     }
 
     refreshAll = (selectedStock) => {
@@ -214,13 +208,9 @@ class App extends Component {
         // Set selectedStock and stockDetail together to avoid a render
         // where selectedStock changed but stockDetail is still stale/null,
         // which causes BasketGraph to recreate the chart with no data.
-        let stockDetail = null;
-        if (symbol) {
-            const raw = engine.getStockDetail(symbol);
-            if (raw) {
-                try { stockDetail = JSON.parse(raw); } catch {}
-            }
-        }
+        const stockDetail = symbol
+            ? this._parseEngineResult(engine.getStockDetail(symbol))
+            : null;
         this.setState({
             selectedStock: symbol,
             selectedYear: 'Average',

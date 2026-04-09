@@ -446,6 +446,15 @@ class BasketGraph extends Component {
     // Chart data updates
     // -----------------------------------------------------------------------
 
+    // Resolve year data from a result object given the selected year.
+    // Works for both basketResult (has .average, .years) and stockDetail.
+    _resolveYearData = (result) => {
+        if (!result) return null;
+        const { selectedYear } = this.props;
+        if (selectedYear === 'Average') return result.average || null;
+        return result.years?.find(y => y.year === parseInt(selectedYear)) || null;
+    }
+
     updateChart = () => {
         if (!this.chart) return;
 
@@ -459,7 +468,7 @@ class BasketGraph extends Component {
     }
 
     updateLineChart = () => {
-        const { basketResult, selectedYear } = this.props;
+        const { basketResult } = this.props;
         if (!basketResult) {
             this.chart.data.labels = [];
             this.chart.data.datasets = [];
@@ -467,12 +476,7 @@ class BasketGraph extends Component {
             return;
         }
 
-        let yearData;
-        if (selectedYear === 'Average') {
-            yearData = basketResult.average;
-        } else {
-            yearData = basketResult.years.find(y => y.year === parseInt(selectedYear));
-        }
+        const yearData = this._resolveYearData(basketResult);
 
         if (!yearData) {
             this.chart.data.labels = [];
@@ -514,7 +518,7 @@ class BasketGraph extends Component {
     }
 
     updateStockChart = () => {
-        const { stockDetail, selectedYear } = this.props;
+        const { stockDetail } = this.props;
         if (!stockDetail) {
             this.chart.data.labels = [];
             this.chart.data.datasets = [];
@@ -522,12 +526,7 @@ class BasketGraph extends Component {
             return;
         }
 
-        let yearData;
-        if (selectedYear === 'Average') {
-            yearData = stockDetail.average;
-        } else {
-            yearData = stockDetail.years?.find(y => y.year === parseInt(selectedYear));
-        }
+        const yearData = this._resolveYearData(stockDetail);
 
         if (!yearData) {
             this.chart.data.labels = [];
@@ -651,15 +650,10 @@ class BasketGraph extends Component {
     // -----------------------------------------------------------------------
 
     calculateOverlayStats = () => {
-        const { selectedStock, stockDetail, basketResult, selectedYear, viewMode } = this.props;
+        const { selectedStock, stockDetail, basketResult, viewMode } = this.props;
 
         if (selectedStock && stockDetail) {
-            let yearData;
-            if (selectedYear === 'Average') {
-                yearData = stockDetail.average;
-            } else {
-                yearData = stockDetail.years?.find(y => y.year === parseInt(selectedYear));
-            }
+            const yearData = this._resolveYearData(stockDetail);
             if (!yearData || !yearData.prices?.length) return null;
 
             const basePrice = yearData.prices[0];
@@ -681,12 +675,7 @@ class BasketGraph extends Component {
         if (!basketResult) return null;
 
         if (viewMode === 'line') {
-            let yearData;
-            if (selectedYear === 'Average') {
-                yearData = basketResult.average;
-            } else {
-                yearData = basketResult.years?.find(y => y.year === parseInt(selectedYear));
-            }
+            const yearData = this._resolveYearData(basketResult);
             if (!yearData) return null;
 
             const bhReturn = yearData.buyHold?.[365] ?? 0;
@@ -726,7 +715,26 @@ class BasketGraph extends Component {
 
         const weights = basketResult.weights;
         if (!weights || weights.length === 0) return null;
-        const yearWeights = weights[0];
+
+        const { selectedYear, viewMode } = this.props;
+        let yearWeights;
+
+        if (viewMode === 'bar' || selectedYear === 'Average') {
+            // Average weights across all years
+            const n = stocks.length;
+            yearWeights = new Array(n).fill(0);
+            for (const yw of weights) {
+                for (let i = 0; i < n; i++) yearWeights[i] += (yw[i] || 0);
+            }
+            for (let i = 0; i < n; i++) yearWeights[i] /= weights.length;
+        } else {
+            // Find weights for the selected year
+            const yearIdx = basketResult.years?.findIndex(
+                y => y.year === parseInt(selectedYear)
+            );
+            yearWeights = yearIdx >= 0 ? weights[yearIdx] : weights[0];
+        }
+
         return stocks.map((s, i) => ({
             stock: s,
             pct: (yearWeights[i] || 0) * 100,
@@ -837,7 +845,11 @@ class BasketGraph extends Component {
                                     {isCustom && onUpdateAllocPct && (
                                         <div
                                             className="alloc-adjust alloc-plus"
+                                            tabIndex="0"
+                                            role="button"
+                                            aria-label={`Increase ${d.stock} by 5%`}
                                             onClick={() => onUpdateAllocPct(d.stock, 5)}
+                                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onUpdateAllocPct(d.stock, 5); } }}
                                             title={`Increase ${d.stock} by 5%`}
                                         >+</div>
                                     )}
@@ -845,7 +857,11 @@ class BasketGraph extends Component {
                                     {isCustom && onUpdateAllocPct && (
                                         <div
                                             className="alloc-adjust alloc-minus"
+                                            tabIndex="0"
+                                            role="button"
+                                            aria-label={`Decrease ${d.stock} by 5%`}
                                             onClick={() => onUpdateAllocPct(d.stock, -5)}
+                                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onUpdateAllocPct(d.stock, -5); } }}
                                             title={`Decrease ${d.stock} by 5%`}
                                         >{'\u2212'}</div>
                                     )}

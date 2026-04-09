@@ -40,8 +40,9 @@ export async function hasStockYear(sSymbol, nYear) {
         const dir = await _getStocksDir();
         await dir.getFileHandle(_csvFileName(sSymbol, nYear));
         return true;
-    } catch {
-        return false;
+    } catch (err) {
+        if (err.name === 'NotFoundError') return false;
+        throw err;
     }
 }
 
@@ -51,8 +52,9 @@ export async function hasNoData(sSymbol, nYear) {
         const dir = await _getStocksDir();
         await dir.getFileHandle(_nodataFileName(sSymbol, nYear));
         return true;
-    } catch {
-        return false;
+    } catch (err) {
+        if (err.name === 'NotFoundError') return false;
+        throw err;
     }
 }
 
@@ -79,7 +81,8 @@ export async function readStockYear(sSymbol, nYear) {
         const fileHandle = await dir.getFileHandle(_csvFileName(sSymbol, nYear));
         const file = await fileHandle.getFile();
         return await file.text();
-    } catch {
-        return null;
+    } catch (err) {
+        if (err.name === 'NotFoundError') return null;
+        throw err;
     }
 }
