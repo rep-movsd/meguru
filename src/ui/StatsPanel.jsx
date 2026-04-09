@@ -21,9 +21,23 @@ class StatsPanel extends Component {
         const { stats, years } = stockDetail;
         const yearList = years ? years.map(y => y.year).sort((a, b) => b - a) : [];
 
+        const nFixedCols = 6;
+        const nYearCols = yearList.length;
+        const nFixedWidth = 76;
+        const nYearWidth = 68;
+        const nTableWidth = nFixedCols * nFixedWidth + nYearCols * nYearWidth;
+
         return (
             <div className="trade-table-container">
-                <table className="trade-table">
+                <table className="trade-table" style={{ width: nTableWidth + 'px' }}>
+                    <colgroup>
+                        {Array.from({ length: nFixedCols }, (_, i) => (
+                            <col key={`f${i}`} style={{ width: nFixedWidth + 'px' }} />
+                        ))}
+                        {yearList.map(year => (
+                            <col key={year} style={{ width: nYearWidth + 'px' }} />
+                        ))}
+                    </colgroup>
                     <thead>
                         <tr>
                             <th>Day Range</th>
@@ -42,7 +56,7 @@ class StatsPanel extends Component {
 
                             return (
                                 <tr key={idx}>
-                                    <td>{stat.iBeg} - {stat.iEnd}</td>
+                                    <td>{String(stat.iBeg).padStart(3, '\u2007')}-{String(stat.iEnd).padStart(3, '\u2007')}</td>
                                     <td>{stat.pctWin.toFixed(1)}%</td>
                                     <td>{stat.fSkew.toFixed(2)}</td>
                                     <td>{stat.fSharpe.toFixed(2)}</td>
@@ -70,65 +84,97 @@ class StatsPanel extends Component {
 
         const { perStock, stats } = basketResult;
 
+        // Precompute per-stock stats
+        const arrStockStats = perStock.map(sr => {
+            const nYrs = sr.years.length;
+            const avgPlan = nYrs > 0 ? sr.years.reduce((s, y) => s + y.plan, 0) / nYrs : 0;
+            const avgBh = nYrs > 0 ? sr.years.reduce((s, y) => s + y.bh, 0) / nYrs : 0;
+            const diff = avgPlan - avgBh;
+            const nBeatsBh = sr.years.filter(y => y.plan > y.bh).length;
+            const profitRatio = avgBh !== 0 ? avgPlan / avgBh : 0;
+            return { stock: sr.stock, avgPlan, avgBh, diff, nBeatsBh, nYrs, profitRatio, daysInMarket: sr.daysInMarket };
+        });
+
+        // Also compute basket totals from stats
+        const totals = stats ? {
+            avgPlan: stats.avgPlan,
+            avgBh: stats.avgBh,
+            diff: stats.avgPlan - stats.avgBh,
+            nBeatsBh: stats.beatsBh,
+            nYrs: stats.totalYears,
+            profitRatio: stats.avgBh !== 0 ? stats.avgPlan / stats.avgBh : 0,
+        } : null;
+
+        const nLabelWidth = 100;
+        const nColWidth = 88;
+        const nStockCols = arrStockStats.length + (totals ? 1 : 0);
+        const nTableWidth = nLabelWidth + nStockCols * nColWidth;
+
+        const fmtPct = (v) => (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+        const clsPct = (v) => v >= 0 ? 'positive' : 'negative';
+
         return (
-            <div className="stats-panel-content">
-                {/* Aggregate stats bar */}
-                {stats && (
-                    <div className="basket-stats-bar">
-                        <span className="stat-item">
-                            <span className="stat-label">Avg Plan:</span>
-                            <span className={`stat-value ${stats.avgPlan >= 0 ? 'positive' : 'negative'}`}>
-                                {stats.avgPlan.toFixed(1)}%
-                            </span>
-                        </span>
-                        <span className="stat-item">
-                            <span className="stat-label">Avg B&H:</span>
-                            <span className="stat-value">{stats.avgBh.toFixed(1)}%</span>
-                        </span>
-                        <span className="stat-item">
-                            <span className="stat-label">Beats B&H:</span>
-                            <span className="stat-value">{stats.beatsBh}/{stats.totalYears} yrs</span>
-                        </span>
-                        <span className="stat-item">
-                            <span className="stat-label">Sharpe:</span>
-                            <span className={`stat-value ${stats.sharpe >= 1.0 ? 'positive' : ''}`}>
-                                {stats.sharpe.toFixed(2)}
-                            </span>
-                        </span>
-                    </div>
-                )}
-
-                {/* Per-stock summary cards */}
-                <div className="per-stock-summary">
-                    {perStock.map(sr => {
-                        const avgPlan = sr.years.length > 0
-                            ? sr.years.reduce((s, y) => s + y.plan, 0) / sr.years.length
-                            : 0;
-                        const avgBh = sr.years.length > 0
-                            ? sr.years.reduce((s, y) => s + y.bh, 0) / sr.years.length
-                            : 0;
-
-                        return (
-                            <div className="per-stock-card" key={sr.stock}>
-                                <span className="card-stock">{sr.stock}</span>
-                                <div className="card-stat">
-                                    <span className="label">Plan:</span>
-                                    <span className={`value ${avgPlan >= 0 ? 'positive' : 'negative'}`}>
-                                        {avgPlan.toFixed(1)}%
-                                    </span>
-                                </div>
-                                <div className="card-stat">
-                                    <span className="label">B&H:</span>
-                                    <span className="value">{avgBh.toFixed(1)}%</span>
-                                </div>
-                                <div className="card-stat">
-                                    <span className="label">Days:</span>
-                                    <span className="value">{sr.daysInMarket}/365</span>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
+            <div className="trade-table-container">
+                <table className="trade-table" style={{ width: nTableWidth + 'px' }}>
+                    <colgroup>
+                        <col style={{ width: nLabelWidth + 'px' }} />
+                        {totals && <col style={{ width: nColWidth + 'px' }} />}
+                        {arrStockStats.map(s => (
+                            <col key={s.stock} style={{ width: nColWidth + 'px' }} />
+                        ))}
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th style={{ textAlign: 'left' }}></th>
+                            {totals && <th>Basket</th>}
+                            {arrStockStats.map(s => <th key={s.stock}>{s.stock}</th>)}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style={{ textAlign: 'left' }}>Plan Return</td>
+                            {totals && <td className={clsPct(totals.avgPlan)}>{fmtPct(totals.avgPlan)}</td>}
+                            {arrStockStats.map(s => (
+                                <td key={s.stock} className={clsPct(s.avgPlan)}>{fmtPct(s.avgPlan)}</td>
+                            ))}
+                        </tr>
+                        <tr>
+                            <td style={{ textAlign: 'left' }}>B&H Return</td>
+                            {totals && <td>{fmtPct(totals.avgBh)}</td>}
+                            {arrStockStats.map(s => (
+                                <td key={s.stock}>{fmtPct(s.avgBh)}</td>
+                            ))}
+                        </tr>
+                        <tr>
+                            <td style={{ textAlign: 'left' }}>Difference</td>
+                            {totals && <td className={clsPct(totals.diff)}>{fmtPct(totals.diff)}</td>}
+                            {arrStockStats.map(s => (
+                                <td key={s.stock} className={clsPct(s.diff)}>{fmtPct(s.diff)}</td>
+                            ))}
+                        </tr>
+                        <tr>
+                            <td style={{ textAlign: 'left' }}>Beats B&H</td>
+                            {totals && <td>{totals.nBeatsBh}/{totals.nYrs}</td>}
+                            {arrStockStats.map(s => (
+                                <td key={s.stock}>{s.nBeatsBh}/{s.nYrs}</td>
+                            ))}
+                        </tr>
+                        <tr>
+                            <td style={{ textAlign: 'left' }}>Profit Ratio</td>
+                            {totals && <td className={clsPct(totals.profitRatio - 1)}>{totals.profitRatio.toFixed(2)}x</td>}
+                            {arrStockStats.map(s => (
+                                <td key={s.stock} className={clsPct(s.profitRatio - 1)}>{s.profitRatio.toFixed(2)}x</td>
+                            ))}
+                        </tr>
+                        <tr>
+                            <td style={{ textAlign: 'left' }}>In Market</td>
+                            {totals && <td></td>}
+                            {arrStockStats.map(s => (
+                                <td key={s.stock}>{s.daysInMarket}/365</td>
+                            ))}
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         );
     }

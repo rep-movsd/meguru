@@ -30,6 +30,7 @@ class BasketGraph extends Component {
         super(props);
         this.chartRef = createRef();
         this.chart = null;
+        this._createRaf = 0;
     }
 
     componentDidMount() {
@@ -44,18 +45,29 @@ class BasketGraph extends Component {
                            prevProps.selectedYear !== this.props.selectedYear;
 
         if (modeChanged) {
-            // Recreate chart when switching between stock/basket or line/bar
+            // Recreate chart when switching between stock/basket or line/bar.
+            // Defer to next frame so the browser has completed layout and the
+            // canvas has its final dimensions before Chart.js reads them.
             if (this.chart) {
                 this.chart.destroy();
                 this.chart = null;
             }
-            this.createChart();
+            cancelAnimationFrame(this._createRaf);
+            this._createRaf = requestAnimationFrame(() => {
+                this._createRaf = 0;
+                this.createChart();
+            });
         } else if (dataChanged) {
-            this.updateChart();
+            // If a deferred createChart is pending, skip — createChart will
+            // call updateChart itself once the chart is ready.
+            if (!this._createRaf) {
+                this.updateChart();
+            }
         }
     }
 
     componentWillUnmount() {
+        cancelAnimationFrame(this._createRaf);
         if (this.chart) {
             this.chart.destroy();
         }
@@ -126,7 +138,7 @@ class BasketGraph extends Component {
             }
 
             // Labels
-            ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+            ctx.font = '11px "Courier New", Courier, monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
 
@@ -287,7 +299,7 @@ class BasketGraph extends Component {
                 const datasets = chart.data.datasets;
                 if (!datasets.length) return;
                 ctx.save();
-                ctx.font = '11px sans-serif';
+                ctx.font = '11px "Courier New", Courier, monospace';
                 ctx.textAlign = 'center';
                 ctx.fillStyle = '#fff';
                 const numLabels = chart.data.labels.length;
@@ -361,7 +373,7 @@ class BasketGraph extends Component {
                     y: {
                         stacked: true,
                         position: 'left',
-                        min: -50, max: 250,
+                        min: -50, max: 200,
                         afterFit: (axis) => { axis.width = 50; },
                         grid: { color: '#333' },
                         ticks: {
@@ -371,7 +383,7 @@ class BasketGraph extends Component {
                     },
                     yRight: {
                         position: 'right',
-                        min: -50, max: 250,
+                        min: -50, max: 200,
                         afterFit: (axis) => { axis.width = 50; },
                         grid: { drawOnChartArea: false },
                         ticks: {
@@ -406,7 +418,7 @@ class BasketGraph extends Component {
         },
         y: {
             position: 'left',
-            min: -50, max: 150,
+            min: -50, max: 200,
             beginAtZero: false,
             afterFit: (axis) => { axis.width = 50; },
             grid: { color: '#333' },
@@ -418,7 +430,7 @@ class BasketGraph extends Component {
         },
         yRight: {
             position: 'right',
-            min: -50, max: 150,
+            min: -50, max: 200,
             beginAtZero: false,
             afterFit: (axis) => { axis.width = 50; },
             grid: { drawOnChartArea: false },
@@ -526,7 +538,6 @@ class BasketGraph extends Component {
 
         const labels = Array.from({ length: DAYS }, (_, i) => i + 1);
         const datasets = [];
-        let yMin = 0, yMax = 0;
 
         // B&H line (normalized prices)
         if (yearData.prices?.length > 0) {
@@ -542,8 +553,6 @@ class BasketGraph extends Component {
                 pointRadius: 0,
                 pointHoverRadius: 4
             });
-            yMin = Math.min(...normalized);
-            yMax = Math.max(...normalized);
         }
 
         // Plan returns line
@@ -557,24 +566,12 @@ class BasketGraph extends Component {
                 pointRadius: 0,
                 pointHoverRadius: 4
             });
-            yMin = Math.min(yMin, ...yearData.returns);
-            yMax = Math.max(yMax, ...yearData.returns);
         }
-
-        // Dynamic Y axis
-        const padding = Math.max((yMax - yMin) * 0.05, 1);
-        const finalYMin = Math.floor((yMin - padding) / 5) * 5;
-        const finalYMax = Math.ceil((yMax + padding) / 5) * 5;
 
         this.chart.data.labels = labels;
         this.chart.data.datasets = datasets;
         this.chart.data.yearData = yearData;
         this.chart.data.windowMultipliers = yearData.windowMultipliers || [];
-
-        this.chart.options.scales.y.min = finalYMin;
-        this.chart.options.scales.y.max = finalYMax;
-        this.chart.options.scales.yRight.min = finalYMin;
-        this.chart.options.scales.yRight.max = finalYMax;
 
         this.chart.update();
     }
@@ -864,10 +861,7 @@ class BasketGraph extends Component {
                                     : 'Add stocks to see the graph'}
                             </div>
                         )}
-                        <canvas
-                            ref={this.chartRef}
-                            style={{ display: hasData ? 'block' : 'none' }}
-                        />
+                        <canvas ref={this.chartRef} />
 
                         {/* Overlay stats — line views only */}
                         {overlayStats && hasData && (

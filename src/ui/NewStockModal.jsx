@@ -117,21 +117,36 @@ class NewStockModal extends Component {
                             <input
                                 type="number"
                                 value={nYears}
-                                onInput={(e) => this.setState({ nYears: parseInt(e.target.value) || 1 })}
+                                onInput={(e) => {
+                                    const nNewYears = parseInt(e.target.value) || 1;
+                                    const fStep = 100 / nNewYears;
+                                    let fSnapped = Math.round(this.state.fPctWin / fStep) * fStep;
+                                    fSnapped = Math.max(fStep, Math.min(100, fSnapped));
+                                    this.setState({ nYears: nNewYears, fPctWin: +fSnapped.toFixed(2) });
+                                }}
                                 min="1"
-                                max="30"
+                                max="25"
                             />
                         </div>
                         <div className="modal-field">
                             <label>Win % Threshold</label>
-                            <select
-                                value={fPctWin}
-                                onChange={(e) => this.setState({ fPctWin: parseInt(e.target.value) })}
-                            >
-                                {[50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map(v => (
-                                    <option key={v} value={v}>{v}%</option>
-                                ))}
-                            </select>
+                            {(() => {
+                                const fStep = +(100 / nYears).toFixed(2);
+                                const arrOptions = [];
+                                for (let v = fStep; v <= 100; v += fStep) {
+                                    arrOptions.push(+v.toFixed(2));
+                                }
+                                return (
+                                    <select
+                                        value={fPctWin}
+                                        onChange={(e) => this.setState({ fPctWin: parseFloat(e.target.value) })}
+                                    >
+                                        {arrOptions.map(v => (
+                                            <option key={v} value={v}>{v.toFixed(1)}%</option>
+                                        ))}
+                                    </select>
+                                );
+                            })()}
                         </div>
                     </div>
 

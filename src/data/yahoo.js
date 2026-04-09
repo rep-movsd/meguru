@@ -52,20 +52,20 @@ export async function fetchYearData(sSymbol, nYear, signal) {
     return { sCsv: arrLines.join('\n') + '\n', nTradingDays: nCount };
 }
 
-// Fetch all available years for a stock (up to nMaxYears back from current year).
+// Fetch specific years of data for a stock.
+// arrYears: array of year numbers to fetch (most recent first).
 // Calls onProgress({ nYear, sStatus, sMessage }) for each year.
 // sStatus is 'ok', 'nodata', or 'error'.
 // Returns { mapYearCsv: Map<number, string>, arrNoDataYears: number[] }.
-export async function fetchAllYears(sSymbol, nMaxYears = 25, onProgress, signal) {
-    const nCurrentYear = new Date().getFullYear();
+export async function fetchYears(sSymbol, arrYears, onProgress, signal) {
     const mapYearCsv = new Map();
     const arrNoDataYears = [];
     let nConsecutiveNoData = 0;
 
-    for (let i = 0; i < nMaxYears; i++) {
+    for (let i = 0; i < arrYears.length; i++) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-        const nYear = nCurrentYear - i;
+        const nYear = arrYears[i];
 
         try {
             const result = await fetchYearData(sSymbol, nYear, signal);
@@ -77,7 +77,7 @@ export async function fetchAllYears(sSymbol, nMaxYears = 25, onProgress, signal)
 
                 if (nConsecutiveNoData >= MAX_CONSECUTIVE_NODATA) {
                     if (onProgress) onProgress({
-                        nYear: nYear - 1,
+                        nYear: null,
                         sStatus: 'nodata',
                         sMessage: `Stopping \u2014 ${MAX_CONSECUTIVE_NODATA} consecutive years with no data`
                     });
@@ -99,7 +99,7 @@ export async function fetchAllYears(sSymbol, nMaxYears = 25, onProgress, signal)
         }
 
         // 1s delay between requests to avoid rate limiting
-        if (i < nMaxYears - 1) {
+        if (i < arrYears.length - 1) {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
     }

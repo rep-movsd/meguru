@@ -127,11 +127,15 @@ class App extends Component {
     }
 
     // Phase 2: FetchModal completed — add stock to engine and basket
-    handleFetchComplete = (symbol, params) => {
+    handleFetchComplete = (symbol, params, nDataYears) => {
         const { stocks, stockData } = this.state;
 
+        // Clamp nYears to available data
+        const nMaxYears = Math.max(1, nDataYears || 1);
+        const clampedParams = { ...params, nYears: Math.min(params.nYears, nMaxYears) };
+
         // Add to engine
-        engine.addStock(symbol, params);
+        engine.addStock(symbol, clampedParams);
 
         // Update state
         const newStocks = stocks.includes(symbol) ? [...stocks] : [...stocks, symbol];
@@ -139,10 +143,11 @@ class App extends Component {
         let newStockData = {
             ...stockData,
             [symbol]: {
-                params: { ...params },
+                params: { ...clampedParams },
                 visible: true,
                 color: '#888',
-                allocPct: equalPct
+                allocPct: equalPct,
+                nDataYears: nMaxYears
             }
         };
 
@@ -198,15 +203,20 @@ class App extends Component {
 
     handleSelectStock = (symbol) => {
         // symbol is null to deselect, or a stock name to select
+        // Set selectedStock and stockDetail together to avoid a render
+        // where selectedStock changed but stockDetail is still stale/null,
+        // which causes BasketGraph to recreate the chart with no data.
+        let stockDetail = null;
+        if (symbol) {
+            const raw = engine.getStockDetail(symbol);
+            if (raw) {
+                try { stockDetail = JSON.parse(raw); } catch {}
+            }
+        }
         this.setState({
             selectedStock: symbol,
-            selectedYear: 'Average'
-        }, () => {
-            if (symbol) {
-                this.refreshStockDetail(symbol);
-            } else {
-                this.setState({ stockDetail: null });
-            }
+            selectedYear: 'Average',
+            stockDetail
         });
     }
 
@@ -234,18 +244,22 @@ class App extends Component {
     }
 
     handleParamChange = (symbol, params) => {
-        const { stockData, selectedStock } = this.state;
+        const { stockData } = this.state;
         if (!stockData[symbol]) return;
 
-        engine.updateStockParams(symbol, params);
-
+        // Update slider value in state immediately so UI stays responsive
         this.setState({
             stockData: {
                 ...stockData,
                 [symbol]: { ...stockData[symbol], params: { ...params } }
             }
-        }, () => {
-            this.refreshAll(selectedStock);
+        });
+
+        // Coalesce engine recomputation to next animation frame
+        cancelAnimationFrame(this._paramChangeRaf);
+        this._paramChangeRaf = requestAnimationFrame(() => {
+            engine.updateStockParams(symbol, params);
+            this.refreshAll(this.state.selectedStock);
         });
     }
 

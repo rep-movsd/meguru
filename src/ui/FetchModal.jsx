@@ -1,12 +1,12 @@
 import { Component, createRef } from 'preact';
-import { fetchAllYears } from '../data/yahoo';
+import { fetchYears } from '../data/yahoo';
 import { writeStockYear, writeNoData, hasStockYear, hasNoData } from '../data/storage';
 
 // Modal that shows real-time progress while fetching stock data from Yahoo Finance.
 // Props:
 //   sSymbol: string — stock symbol to fetch
 //   params: { nYears, nWinMin, nWinMax, fPctWin } — stock params (passed through to onComplete)
-//   onComplete: (sSymbol, params) => void — called when fetch finishes
+//   onComplete: (sSymbol, params, nDataYears) => void — called when fetch finishes
 //   onCancel: () => void — called when user cancels
 
 const MAX_YEARS = 25;
@@ -21,6 +21,7 @@ class FetchModal extends Component {
             nFetched: 0,
             nSkipped: 0,
             nTotal: MAX_YEARS,
+            nDataYears: 0,
         };
         this.abortController = new AbortController();
         this.logRef = createRef();
@@ -51,17 +52,20 @@ class FetchModal extends Component {
         const { sSymbol } = this.props;
         const signal = this.abortController.signal;
 
-        // First, check which years we already have in OPFS
+        // Check which years we already have in OPFS
         this.addLog({ nYear: null, sStatus: 'info', sMessage: `Checking existing data for ${sSymbol}...` });
 
         const nCurrentYear = new Date().getFullYear();
         const arrMissingYears = [];
+        let nCachedDataYears = 0;
 
         for (let i = 0; i < MAX_YEARS; i++) {
             const nYear = nCurrentYear - i;
             const bHasCsv = await hasStockYear(sSymbol, nYear);
             const bHasNoData = await hasNoData(sSymbol, nYear);
-            if (!bHasCsv && !bHasNoData) {
+            if (bHasCsv) {
+                nCachedDataYears++;
+            } else if (!bHasNoData) {
                 arrMissingYears.push(nYear);
             }
         }
@@ -69,13 +73,13 @@ class FetchModal extends Component {
         if (arrMissingYears.length === 0) {
             this.addLog({ nYear: null, sStatus: 'ok', sMessage: 'All years already cached in OPFS' });
             this.setState({ bDone: true, nTotal: 0, nFetched: 0 });
-            setTimeout(() => this.props.onComplete(sSymbol, this.props.params), 500);
+            setTimeout(() => this.props.onComplete(sSymbol, this.props.params, nCachedDataYears), 500);
             return;
         }
 
         const nSkipped = MAX_YEARS - arrMissingYears.length;
         if (nSkipped > 0) {
-            this.addLog({ nYear: null, sStatus: 'info', sMessage: `${nSkipped} years already cached, fetching ${arrMissingYears.length} missing` });
+            this.addLog({ nYear: null, sStatus: 'info', sMessage: `${nSkipped} years cached, fetching ${arrMissingYears.length} missing` });
         }
 
         this.setState({ nTotal: arrMissingYears.length, nSkipped });
@@ -83,16 +87,15 @@ class FetchModal extends Component {
         let nFetched = 0;
 
         try {
-            const { mapYearCsv, arrNoDataYears } = await fetchAllYears(
+            const { mapYearCsv, arrNoDataYears } = await fetchYears(
                 sSymbol,
-                MAX_YEARS,
-                async (progress) => {
-                    // Skip progress for years we already have
-                    if (!arrMissingYears.includes(progress.nYear) && progress.nYear !== null) return;
-
+                arrMissingYears,
+                (progress) => {
                     this.addLog(progress);
-                    nFetched++;
-                    this.setState({ nFetched });
+                    if (progress.nYear != null) {
+                        nFetched++;
+                        this.setState({ nFetched });
+                    }
                 },
                 signal
             );
@@ -107,21 +110,21 @@ class FetchModal extends Component {
                 await writeNoData(sSymbol, nYear);
             }
 
-            const nDataYears = mapYearCsv.size;
+            const nDataYears = mapYearCsv.size + nCachedDataYears;
             this.addLog({
                 nYear: null,
                 sStatus: 'ok',
-                sMessage: `Done \u2014 ${nDataYears} years of data saved`
+                sMessage: `Done \u2014 ${mapYearCsv.size} years of data saved`
             });
-            this.setState({ bDone: true });
+            this.setState({ bDone: true, nDataYears });
 
             // Auto-proceed after a short delay
-            setTimeout(() => this.props.onComplete(sSymbol, this.props.params), 500);
+            setTimeout(() => this.props.onComplete(sSymbol, this.props.params, nDataYears), 500);
 
         } catch (err) {
             if (err.name === 'AbortError') return;
             this.addLog({ nYear: null, sStatus: 'error', sMessage: `Fatal: ${err.message}` });
-            this.setState({ bDone: true, bError: true });
+            this.setState({ bDone: true, bError: true, nDataYears: nCachedDataYears });
         }
     }
 
@@ -136,53 +139,56 @@ class FetchModal extends Component {
 
     render() {
         const { sSymbol } = this.props;
-        const { arrLog, bDone, bError, nFetched, nTotal, nSkipped } = this.state;
+        const { arrLog, bDone, bError, nFetched, nTotal, nSkipped, nDataYears } = this.state;
 
         return (
             <div className="modal-overlay" onClick={this.handleOverlayClick}>
                 <div className="modal fetch-modal">
-                    <h2>
-                        {bDone
-                            ? (bError ? `Error fetching ${sSymbol}` : `${sSymbol} ready`)
-                            : `Fetching ${sSymbol} data...`}
-                    </h2>
-
-                    <div className="fetch-progress">
-                        {nSkipped > 0 && <span className="fetch-cached">{nSkipped} cached</span>}
-                        <span>{nFetched} / {nTotal} years</span>
+                    <div className="fetch-titlebar">
+                        <h2>
+                            {bDone
+                                ? (bError ? `Error fetching ${sSymbol}` : `${sSymbol} ready`)
+                                : `Fetching ${sSymbol}...`}
+                        </h2>
+                        <div className="fetch-progress">
+                            {nSkipped > 0 && <span className="fetch-cached">{nSkipped} cached</span>}
+                            <span>{nFetched} / {nTotal} years</span>
+                        </div>
                     </div>
 
-                    <div className="fetch-log" ref={this.logRef}>
-                        {arrLog.map((entry, i) => (
-                            <div key={i} className={`fetch-log-entry fetch-${entry.sStatus}`}>
-                                <span className="fetch-icon">
-                                    {entry.sStatus === 'ok' ? '\u2713' :
-                                     entry.sStatus === 'nodata' ? '\u2013' :
-                                     entry.sStatus === 'error' ? '\u2717' : '\u2022'}
-                                </span>
-                                <span className="fetch-year">
-                                    {entry.nYear != null ? `${entry.nYear}` : ''}
-                                </span>
-                                <span className="fetch-msg">{entry.sMessage}</span>
-                            </div>
-                        ))}
-                    </div>
+                    <div className="fetch-body">
+                        <div className="fetch-log" ref={this.logRef}>
+                            {arrLog.map((entry, i) => (
+                                <div key={i} className={`fetch-log-entry fetch-${entry.sStatus}`}>
+                                    <span className="fetch-icon">
+                                        {entry.sStatus === 'ok' ? '\u2713' :
+                                         entry.sStatus === 'nodata' ? '\u2013' :
+                                         entry.sStatus === 'error' ? '\u2717' : '\u2022'}
+                                    </span>
+                                    <span className="fetch-year">
+                                        {entry.nYear != null ? `${entry.nYear}` : ''}
+                                    </span>
+                                    <span className="fetch-msg">{entry.sMessage}</span>
+                                </div>
+                            ))}
+                        </div>
 
-                    <div className="modal-actions">
-                        {bError && (
+                        <div className="modal-actions">
+                            {bError && (
+                                <button
+                                    className="modal-btn primary"
+                                    onClick={() => this.props.onComplete(sSymbol, this.props.params, nDataYears)}
+                                >
+                                    Add Anyway
+                                </button>
+                            )}
                             <button
-                                className="modal-btn primary"
-                                onClick={() => this.props.onComplete(sSymbol, this.props.params)}
+                                className="modal-btn secondary"
+                                onClick={this.handleCancel}
                             >
-                                Add Anyway
+                                {bDone ? 'Close' : 'Cancel'}
                             </button>
-                        )}
-                        <button
-                            className="modal-btn secondary"
-                            onClick={this.handleCancel}
-                        >
-                            {bDone ? 'Close' : 'Cancel'}
-                        </button>
+                        </div>
                     </div>
                 </div>
             </div>

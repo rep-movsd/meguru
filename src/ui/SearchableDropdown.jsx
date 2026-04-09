@@ -52,15 +52,25 @@ class SearchableDropdown extends Component {
             return;
         }
         if (!searchText) {
-            this.setState({ filteredOptions: options.slice(0, 100), highlightedIndex: -1 });
+            // Don't show the full list on empty search — too many items.
+            // User must type at least 1 character to filter.
+            this.setState({ filteredOptions: [], highlightedIndex: -1 });
             return;
         }
 
         const lower = searchText.toLowerCase();
-        const filtered = options.filter(o =>
-            o.symbol.toLowerCase().includes(lower) ||
-            o.name.toLowerCase().includes(lower)
-        ).slice(0, 100);
+        // Prioritise symbol-prefix matches, then include substring matches
+        const prefixMatches = [];
+        const otherMatches = [];
+        for (const o of options) {
+            if (o.symbol.toLowerCase().startsWith(lower)) {
+                prefixMatches.push(o);
+            } else if (o.symbol.toLowerCase().includes(lower) ||
+                       o.name.toLowerCase().includes(lower)) {
+                otherMatches.push(o);
+            }
+        }
+        const filtered = prefixMatches.concat(otherMatches).slice(0, 100);
 
         this.setState({ filteredOptions: filtered, highlightedIndex: -1 });
     }

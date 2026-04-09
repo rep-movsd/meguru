@@ -20,6 +20,16 @@ class BasketList extends Component {
         const { stockData, onParamChange } = this.props;
         if (!stockData[stock] || !onParamChange) return;
         const newParams = { ...stockData[stock].params, [field]: value };
+
+        // When nYears changes, snap fPctWin to the nearest valid step
+        if (field === 'nYears') {
+            const fStep = 100 / value;
+            newParams.fPctWin = Math.round(newParams.fPctWin / fStep) * fStep;
+            // Clamp to [fStep, 100]
+            newParams.fPctWin = Math.max(fStep, Math.min(100, newParams.fPctWin));
+            newParams.fPctWin = +newParams.fPctWin.toFixed(2);
+        }
+
         onParamChange(stock, newParams);
     }
 
@@ -101,7 +111,7 @@ class BasketList extends Component {
                                             <div className="slider-group">
                                                 <label>Years</label>
                                                 <input
-                                                    type="range" min="1" max="25" step="1"
+                                                    type="range" min="1" max={data.nDataYears || 25} step="1"
                                                     value={p.nYears}
                                                     onInput={(e) => this.handleSliderChange(stock, 'nYears', parseInt(e.target.value))}
                                                 />
@@ -127,12 +137,19 @@ class BasketList extends Component {
                                             </div>
                                             <div className="slider-group">
                                                 <label>Win %</label>
-                                                <input
-                                                    type="range" min="50" max="100" step="5"
-                                                    value={p.fPctWin}
-                                                    onInput={(e) => this.handleSliderChange(stock, 'fPctWin', parseInt(e.target.value))}
-                                                />
-                                                <span className="slider-value">{p.fPctWin}%</span>
+                                                {(() => {
+                                                    const fStep = +(100 / p.nYears).toFixed(2);
+                                                    return (
+                                                        <>
+                                                            <input
+                                                                type="range" min={fStep} max="100" step={fStep}
+                                                                value={p.fPctWin}
+                                                                onInput={(e) => this.handleSliderChange(stock, 'fPctWin', parseFloat(e.target.value))}
+                                                            />
+                                                            <span className="slider-value">{p.fPctWin.toFixed(1)}%</span>
+                                                        </>
+                                                    );
+                                                })()}
                                             </div>
                                         </div>
                                     )}
