@@ -690,6 +690,10 @@ body {
     font-size: 11px;
 }
 
+.modal-validation-errors {
+    margin: 0 0 6px 0;
+}
+
 .modal-field label {
     display: block;
     font-size: 11px;

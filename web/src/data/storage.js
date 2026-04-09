@@ -83,18 +83,3 @@ export async function readStockYear(sSymbol, nYear) {
         return null;
     }
 }
-
-// Remove all files (CSV + .nodata) for a stock.
-export async function removeStockData(sSymbol) {
-    const dir = await _getStocksDir();
-    const prefix = `${sSymbol}.NS_`;
-    const arrToRemove = [];
-    for await (const [sName] of dir) {
-        if (sName.startsWith(prefix)) {
-            arrToRemove.push(sName);
-        }
-    }
-    for (const sName of arrToRemove) {
-        await dir.removeEntry(sName);
-    }
-}

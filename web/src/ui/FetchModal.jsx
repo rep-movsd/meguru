@@ -10,6 +10,7 @@ import { writeStockYear, writeNoData, hasStockYear, hasNoData } from '../data/st
 //   onCancel: () => void — called when user cancels
 
 const MAX_YEARS = 25;
+const FOCUSABLE_SELECTOR = 'button, [tabindex]:not([tabindex="-1"])';
 
 class FetchModal extends Component {
     constructor(props) {
@@ -25,12 +26,20 @@ class FetchModal extends Component {
         };
         this.abortController = new AbortController();
         this.logRef = createRef();
+        this._modalRef = createRef();
+        this._prevFocus = null;
         this.completeTimer = 0;
         this.bCancelled = false;
     }
 
     componentDidMount() {
+        this._prevFocus = document.activeElement;
         this.startFetching();
+        // Auto-focus the cancel/close button
+        if (this._modalRef.current) {
+            const elBtn = this._modalRef.current.querySelector(FOCUSABLE_SELECTOR);
+            if (elBtn) elBtn.focus();
+        }
     }
 
     componentWillUnmount() {
@@ -39,6 +48,9 @@ class FetchModal extends Component {
         if (this.completeTimer) {
             clearTimeout(this.completeTimer);
             this.completeTimer = 0;
+        }
+        if (this._prevFocus && typeof this._prevFocus.focus === 'function') {
+            this._prevFocus.focus();
         }
     }
 
@@ -163,15 +175,37 @@ class FetchModal extends Component {
         // Don't close on overlay click during fetch — only via button
     }
 
+    handleKeyDown = (e) => {
+        if (e.key === 'Tab' && this._modalRef.current) {
+            const arrFocusable = [...this._modalRef.current.querySelectorAll(FOCUSABLE_SELECTOR)];
+            if (arrFocusable.length === 0) return;
+            const elFirst = arrFocusable[0];
+            const elLast = arrFocusable[arrFocusable.length - 1];
+            if (e.shiftKey && document.activeElement === elFirst) {
+                e.preventDefault();
+                elLast.focus();
+            } else if (!e.shiftKey && document.activeElement === elLast) {
+                e.preventDefault();
+                elFirst.focus();
+            }
+        }
+    }
+
     render() {
         const { sSymbol } = this.props;
         const { arrLog, bDone, bError, nFetched, nTotal, nSkipped, nDataYears } = this.state;
 
         return (
-            <div className="modal-overlay" onClick={this.handleOverlayClick}>
-                <div className="modal fetch-modal">
+            <div className="modal-overlay" onClick={this.handleOverlayClick} onKeyDown={this.handleKeyDown}>
+                <div
+                    className="modal fetch-modal"
+                    ref={this._modalRef}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="fetch-modal-title"
+                >
                     <div className="fetch-titlebar">
-                        <h2>
+                        <h2 id="fetch-modal-title">
                             {bDone
                                 ? (bError ? `Error fetching ${sSymbol}` : `${sSymbol} ready`)
                                 : `Fetching ${sSymbol}...`}
