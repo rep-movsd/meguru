@@ -747,6 +747,7 @@ class BasketGraph extends Component {
         const yearsList = selectedStock
             ? (stockDetail?.years || [])
             : (basketResult?.years || []);
+        const sortedYearsList = [...yearsList].sort((a, b) => b.year - a.year);
 
         const overlayStats = this.calculateOverlayStats();
         // Show allocation bar in basket mode (both line and bar views)
@@ -784,7 +785,7 @@ class BasketGraph extends Component {
                                 disabled={!hasData}
                             >
                                 <option value="Average">Average</option>
-                                {yearsList.sort((a, b) => b.year - a.year).map(y => (
+                                {sortedYearsList.map(y => (
                                     <option key={y.year} value={y.year}>{y.year}</option>
                                 ))}
                             </select>

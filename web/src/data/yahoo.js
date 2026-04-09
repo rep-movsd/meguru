@@ -56,10 +56,15 @@ export async function fetchYearData(sSymbol, nYear, signal) {
 // arrYears: array of year numbers to fetch (most recent first).
 // Calls onProgress({ nYear, sStatus, sMessage }) for each year.
 // sStatus is 'ok', 'nodata', or 'error'.
-// Returns { mapYearCsv: Map<number, string>, arrNoDataYears: number[] }.
+// Returns {
+//   mapYearCsv: Map<number, string>,
+//   arrNoDataYears: number[],
+//   arrSkippedNoDataYears: number[]
+// }.
 export async function fetchYears(sSymbol, arrYears, onProgress, signal) {
     const mapYearCsv = new Map();
     const arrNoDataYears = [];
+    const arrSkippedNoDataYears = [];
     let nConsecutiveNoData = 0;
 
     for (let i = 0; i < arrYears.length; i++) {
@@ -76,6 +81,7 @@ export async function fetchYears(sSymbol, arrYears, onProgress, signal) {
                 if (onProgress) onProgress({ nYear, sStatus: 'nodata', sMessage: 'No data' });
 
                 if (nConsecutiveNoData >= MAX_CONSECUTIVE_NODATA) {
+                    arrSkippedNoDataYears.push(...arrYears.slice(i + 1));
                     if (onProgress) onProgress({
                         nYear: null,
                         sStatus: 'nodata',
@@ -104,5 +110,5 @@ export async function fetchYears(sSymbol, arrYears, onProgress, signal) {
         }
     }
 
-    return { mapYearCsv, arrNoDataYears };
+    return { mapYearCsv, arrNoDataYears, arrSkippedNoDataYears };
 }

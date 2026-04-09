@@ -684,6 +684,12 @@ body {
     margin-bottom: 12px;
 }
 
+.modal-field .error-message {
+    margin: 6px 0 0 0;
+    padding: 6px 8px;
+    font-size: 11px;
+}
+
 .modal-field label {
     display: block;
     font-size: 11px;

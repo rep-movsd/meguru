@@ -56,8 +56,10 @@ class NewStockModal extends Component {
     }
 
     handleAdd = () => {
-        const { stock, nYears, nWinMin, nWinMax, fPctWin } = this.state;
+        const { stock, nYears, nWinMin, nWinMax, fPctWin, stockList } = this.state;
         if (!stock) return;
+        const bIsValidStock = stockList.some(item => item.symbol === stock);
+        if (!bIsValidStock) return;
         if (this.props.onAdd) {
             this.props.onAdd(stock, { nYears, nWinMin, nWinMax, fPctWin });
         }
@@ -90,10 +92,11 @@ class NewStockModal extends Component {
 
     render() {
         const { onClose, existingStocks } = this.props;
-        const { stock, nYears, nWinMin, nWinMax, fPctWin, stockList } = this.state;
+        const { stock, nYears, nWinMin, nWinMax, fPctWin, stockList, bLoadingList } = this.state;
 
         const isExisting = existingStocks && existingStocks.includes(stock);
-        const canAdd = stock.length > 0;
+        const bIsValidStock = stockList.some(item => item.symbol === stock);
+        const canAdd = !bLoadingList && bIsValidStock;
 
         return (
             <div className="modal-overlay" onClick={this.handleOverlayClick}>
@@ -109,6 +112,9 @@ class NewStockModal extends Component {
                             onSubmit={this.handleAdd}
                             placeholder="Search stock..."
                         />
+                        {!bLoadingList && stock && !bIsValidStock && (
+                            <div className="error-message">Select a valid stock symbol from the list</div>
+                        )}
                     </div>
 
                     <div className="modal-row">

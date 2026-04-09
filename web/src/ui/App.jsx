@@ -22,6 +22,8 @@ const ALLOC_MODES = [
 class App extends Component {
     constructor(props) {
         super(props);
+        this._paramChangeRaf = 0;
+        this._pendingParamChanges = {};
         this.state = {
             // Stock list (insertion order)
             stocks: [],
@@ -40,6 +42,12 @@ class App extends Component {
             basketResult: null,
             stockDetail: null
         };
+    }
+
+    componentWillUnmount() {
+        cancelAnimationFrame(this._paramChangeRaf);
+        this._paramChangeRaf = 0;
+        this._pendingParamChanges = {};
     }
 
     // ------------------------------------------------------------------
@@ -255,10 +263,19 @@ class App extends Component {
             }
         });
 
-        // Coalesce engine recomputation to next animation frame
-        cancelAnimationFrame(this._paramChangeRaf);
+        // Coalesce engine recomputation to next animation frame, while keeping
+        // the latest pending params for every stock touched during this frame.
+        this._pendingParamChanges[symbol] = params;
+        if (this._paramChangeRaf) return;
+
         this._paramChangeRaf = requestAnimationFrame(() => {
-            engine.updateStockParams(symbol, params);
+            this._paramChangeRaf = 0;
+            const pending = this._pendingParamChanges;
+            this._pendingParamChanges = {};
+
+            for (const [pendingSymbol, pendingParams] of Object.entries(pending)) {
+                engine.updateStockParams(pendingSymbol, pendingParams);
+            }
             this.refreshAll(this.state.selectedStock);
         });
     }
@@ -275,8 +292,8 @@ class App extends Component {
     }
 
     // Update custom allocation for a stock by delta (e.g. +5 or -5).
-    // Distributes the opposite proportionally among other visible stocks,
-    // clamping each at a minimum of 5%.
+    // Distributes the opposite proportionally among other visible stocks while
+    // preserving a 5% minimum for every other visible stock.
     handleUpdateAllocPct = (symbol, delta) => {
         this.setState(prev => {
             const { stocks, stockData } = prev;
@@ -289,8 +306,6 @@ class App extends Component {
             // Clamp: min 5%, max so every other stock can keep at least 5%
             const maxPct = 100 - 5 * (visibleStocks.length - 1);
             newPct = Math.max(5, Math.min(maxPct, newPct));
-            const actualDelta = newPct - oldPct;
-            if (Math.abs(actualDelta) < 0.01) return null;
 
             const updated = { ...stockData };
             for (const s of visibleStocks) {
@@ -298,21 +313,33 @@ class App extends Component {
             }
             updated[symbol].allocPct = newPct;
 
-            // Distribute -actualDelta proportionally among other visible stocks
             const others = visibleStocks.filter(s => s !== symbol);
-            const othersTotal = others.reduce((sum, s) => sum + (updated[s].allocPct || 0), 0);
+            const oldOthersTotal = others.reduce((sum, s) => sum + (stockData[s].allocPct || 0), 0);
+            if (oldOthersTotal <= 0) return null;
 
-            if (othersTotal > 0) {
+            if (newPct >= oldPct) {
+                const oldFlexibleTotal = others.reduce(
+                    (sum, s) => sum + Math.max(0, (stockData[s].allocPct || 0) - 5),
+                    0
+                );
+                const newFlexibleTotal = 100 - newPct - 5 * others.length;
+                if (oldFlexibleTotal <= 0 && newFlexibleTotal <= 0) return null;
+
                 for (const s of others) {
-                    const oldOther = updated[s].allocPct || 0;
-                    const share = (oldOther / othersTotal) * (-actualDelta);
-                    updated[s].allocPct = Math.max(5, oldOther + share);
+                    const oldOther = stockData[s].allocPct || 0;
+                    const oldFlexible = Math.max(0, oldOther - 5);
+                    const share = oldFlexibleTotal > 0 ? oldFlexible / oldFlexibleTotal : 1 / others.length;
+                    updated[s].allocPct = 5 + share * Math.max(0, newFlexibleTotal);
+                }
+            } else {
+                const newOthersTotal = 100 - newPct;
+                for (const s of others) {
+                    const oldOther = stockData[s].allocPct || 0;
+                    updated[s].allocPct = (oldOther / oldOthersTotal) * newOthersTotal;
                 }
             }
 
-            // Renormalize to exactly 100%
-            const finalData = this.renormalizeAllocPct(updated, stocks);
-            return { stockData: finalData };
+            return { stockData: updated };
         });
     }
 

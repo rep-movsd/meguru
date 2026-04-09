@@ -25,6 +25,8 @@ class FetchModal extends Component {
         };
         this.abortController = new AbortController();
         this.logRef = createRef();
+        this.completeTimer = 0;
+        this.bCancelled = false;
     }
 
     componentDidMount() {
@@ -32,7 +34,12 @@ class FetchModal extends Component {
     }
 
     componentWillUnmount() {
+        this.bCancelled = true;
         this.abortController.abort();
+        if (this.completeTimer) {
+            clearTimeout(this.completeTimer);
+            this.completeTimer = 0;
+        }
     }
 
     componentDidUpdate() {
@@ -46,6 +53,17 @@ class FetchModal extends Component {
         this.setState(prev => ({
             arrLog: [...prev.arrLog, entry]
         }));
+    }
+
+    scheduleComplete = (nDataYears) => {
+        if (this.completeTimer) {
+            clearTimeout(this.completeTimer);
+        }
+        this.completeTimer = setTimeout(() => {
+            this.completeTimer = 0;
+            if (this.bCancelled) return;
+            this.props.onComplete(this.props.sSymbol, this.props.params, nDataYears);
+        }, 500);
     }
 
     startFetching = async () => {
@@ -73,7 +91,7 @@ class FetchModal extends Component {
         if (arrMissingYears.length === 0) {
             this.addLog({ nYear: null, sStatus: 'ok', sMessage: 'All years already cached in OPFS' });
             this.setState({ bDone: true, nTotal: 0, nFetched: 0 });
-            setTimeout(() => this.props.onComplete(sSymbol, this.props.params, nCachedDataYears), 500);
+            this.scheduleComplete(nCachedDataYears);
             return;
         }
 
@@ -87,7 +105,7 @@ class FetchModal extends Component {
         let nFetched = 0;
 
         try {
-            const { mapYearCsv, arrNoDataYears } = await fetchYears(
+            const { mapYearCsv, arrNoDataYears, arrSkippedNoDataYears } = await fetchYears(
                 sSymbol,
                 arrMissingYears,
                 (progress) => {
@@ -109,6 +127,9 @@ class FetchModal extends Component {
             for (const nYear of arrNoDataYears) {
                 await writeNoData(sSymbol, nYear);
             }
+            for (const nYear of arrSkippedNoDataYears) {
+                await writeNoData(sSymbol, nYear);
+            }
 
             const nDataYears = mapYearCsv.size + nCachedDataYears;
             this.addLog({
@@ -119,7 +140,7 @@ class FetchModal extends Component {
             this.setState({ bDone: true, nDataYears });
 
             // Auto-proceed after a short delay
-            setTimeout(() => this.props.onComplete(sSymbol, this.props.params, nDataYears), 500);
+            this.scheduleComplete(nDataYears);
 
         } catch (err) {
             if (err.name === 'AbortError') return;
@@ -129,6 +150,11 @@ class FetchModal extends Component {
     }
 
     handleCancel = () => {
+        this.bCancelled = true;
+        if (this.completeTimer) {
+            clearTimeout(this.completeTimer);
+            this.completeTimer = 0;
+        }
         this.abortController.abort();
         this.props.onCancel();
     }
