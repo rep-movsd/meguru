@@ -19,15 +19,18 @@ const ALLOC_MODES = [
     { value: 'custom', label: 'Custom' }
 ];
 
+const LS_KEY = 'meguru_state';
+
 class App extends Component {
     constructor(props) {
         super(props);
         this._paramChangeRaf = 0;
         this._pendingParamChanges = {};
+        this._saveTimer = 0;
         this.state = {
             // Stock list (insertion order)
             stocks: [],
-            // Per-stock data: { [symbol]: { params, visible, color, allocPct } }
+            // Per-stock data: { [symbol]: { params, visible, color, allocPct, nDataYears } }
             stockData: {},
             // UI state
             selectedStock: null,
@@ -44,10 +47,120 @@ class App extends Component {
         };
     }
 
+    componentDidMount() {
+        this._restoreState();
+    }
+
+    componentDidUpdate(_, prevState) {
+        // Debounce localStorage writes — only save when persisted fields change
+        const dominated = ['stocks', 'stockData', 'selectedStock', 'expandedStock',
+                           'allocMode', 'viewMode', 'selectedYear'];
+        const changed = dominated.some(k => prevState[k] !== this.state[k]);
+        if (changed) {
+            clearTimeout(this._saveTimer);
+            this._saveTimer = setTimeout(() => this._saveState(), 300);
+        }
+    }
+
     componentWillUnmount() {
         cancelAnimationFrame(this._paramChangeRaf);
         this._paramChangeRaf = 0;
         this._pendingParamChanges = {};
+        clearTimeout(this._saveTimer);
+        // Flush any pending save immediately
+        this._saveState();
+    }
+
+    // ------------------------------------------------------------------
+    // Persistence (localStorage)
+    // ------------------------------------------------------------------
+
+    _saveState = () => {
+        const { stocks, stockData, selectedStock, expandedStock,
+                allocMode, viewMode, selectedYear } = this.state;
+
+        // Strip color from stockData (recomputed on restore) and engine results
+        const savedStockData = {};
+        for (const s of stocks) {
+            if (!stockData[s]) continue;
+            const { params, visible, allocPct, nDataYears } = stockData[s];
+            savedStockData[s] = { params, visible, allocPct, nDataYears };
+        }
+
+        try {
+            localStorage.setItem(LS_KEY, JSON.stringify({
+                stocks,
+                stockData: savedStockData,
+                selectedStock,
+                expandedStock,
+                allocMode,
+                viewMode,
+                selectedYear
+            }));
+        } catch (err) {
+            console.warn('Failed to save state to localStorage:', err.message);
+        }
+    }
+
+    _restoreState = () => {
+        let saved;
+        try {
+            const sRaw = localStorage.getItem(LS_KEY);
+            if (!sRaw) return;
+            saved = JSON.parse(sRaw);
+        } catch (err) {
+            console.warn('Failed to restore state from localStorage:', err.message);
+            return;
+        }
+
+        const stocks = Array.isArray(saved.stocks) ? saved.stocks : [];
+        if (stocks.length === 0) return;
+
+        const stockData = saved.stockData || {};
+
+        // Re-seed the engine with saved stocks
+        const allocMode = saved.allocMode || 'equal';
+        engine.setAllocMode(allocMode);
+
+        for (const symbol of stocks) {
+            const sd = stockData[symbol];
+            if (!sd || !sd.params) continue;
+            engine.addStock(symbol, sd.params);
+            if (sd.visible === false) {
+                engine.setStockVisible(symbol, false);
+            }
+        }
+
+        // Recompute colors from insertion order
+        let restoredStockData = {};
+        for (const s of stocks) {
+            const sd = stockData[s];
+            if (!sd) continue;
+            restoredStockData[s] = {
+                params: sd.params,
+                visible: sd.visible !== false,
+                allocPct: sd.allocPct || (100 / stocks.length),
+                nDataYears: sd.nDataYears || 25,
+                color: '#888'
+            };
+        }
+        restoredStockData = this.recomputeColors(stocks, restoredStockData);
+
+        // Validate selectedStock still exists
+        const selectedStock = stocks.includes(saved.selectedStock) ? saved.selectedStock : null;
+        const expandedStock = stocks.includes(saved.expandedStock) ? saved.expandedStock : null;
+
+        this.setState({
+            stocks,
+            stockData: restoredStockData,
+            selectedStock,
+            expandedStock,
+            allocMode,
+            viewMode: saved.viewMode || 'line',
+            selectedYear: saved.selectedYear || 'Average'
+        }, () => {
+            this.refreshAll(selectedStock);
+        });
     }
 
     // ------------------------------------------------------------------
