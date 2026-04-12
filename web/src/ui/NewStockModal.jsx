@@ -86,18 +86,20 @@ class NewStockModal extends Component {
             nWinMax: DEFAULT_PARAMS.nWinMax,
             fPctWin: DEFAULT_PARAMS.fPctWin,
             stockList: _cachedStockList || [],
-            bLoadingList: !_cachedStockList
+            bLoadingList: !_cachedStockList,
+            bAttempted: false
         };
         this._modalRef = createRef();
         this._prevFocus = null;
     }
 
     handleStockChange = (value) => {
-        this.setState({ stock: value.toUpperCase() });
+        this.setState({ stock: value.toUpperCase(), bAttempted: false });
     }
 
     handleAdd = () => {
         const { stock, nYears, nWinMin, nWinMax, fPctWin } = this.state;
+        this.setState({ bAttempted: true });
         const validation = validateForm(this.state);
         if (!validation.canAdd) return;
         if (this.props.onAdd) {
@@ -155,10 +157,12 @@ class NewStockModal extends Component {
 
     render() {
         const { onClose, existingStocks } = this.props;
-        const { stock, nYears, nWinMin, nWinMax, fPctWin, stockList, bLoadingList } = this.state;
+        const { stock, nYears, nWinMin, nWinMax, fPctWin, stockList, bLoadingList, bAttempted } = this.state;
 
         const isExisting = existingStocks && existingStocks.includes(stock);
         const { bIsValidStock, arrParamErrors, canAdd } = validateForm(this.state);
+        const bShowStockError = bAttempted && !bLoadingList && stock && !bIsValidStock;
+        const bShowParamErrors = bAttempted && arrParamErrors.length > 0;
 
         return (
             <div className="modal-overlay" onClick={this.handleOverlayClick}>
@@ -180,9 +184,9 @@ class NewStockModal extends Component {
                             onSubmit={this.handleAdd}
                             placeholder="Search stock..."
                         />
-                        {!bLoadingList && stock && !bIsValidStock && (
-                            <div className="error-message">Select a valid stock symbol from the list</div>
-                        )}
+                        <div className="error-message" style={{ visibility: bShowStockError ? 'visible' : 'hidden' }}>
+                            Select a valid stock symbol from the list
+                        </div>
                     </div>
 
                     <div className="modal-row">
@@ -232,13 +236,13 @@ class NewStockModal extends Component {
                         </div>
                     </div>
 
-                    {arrParamErrors.length > 0 && (
-                        <div className="error-message modal-validation-errors">
-                            {arrParamErrors.map((sMessage, i) => (
-                                <div key={i}>{sMessage}</div>
-                            ))}
-                        </div>
-                    )}
+                    <div className="error-message modal-validation-errors"
+                         style={{ visibility: bShowParamErrors ? 'visible' : 'hidden' }}>
+                        {bShowParamErrors
+                            ? arrParamErrors.map((sMessage, i) => <div key={i}>{sMessage}</div>)
+                            : <div>&nbsp;</div>
+                        }
+                    </div>
 
                     <div className="modal-actions">
                         <button className="modal-btn secondary" onClick={onClose}>

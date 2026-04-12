@@ -1,5 +1,5 @@
 import { Component, render } from 'preact';
-import engine from '../wasm/engine';
+import engine, { initEngine } from '../wasm/engine.js';
 import { getBasketColors } from './utils';
 import BasketList from './BasketList';
 import BasketGraph from './BasketGraph';
@@ -48,7 +48,21 @@ class App extends Component {
     }
 
     componentDidMount() {
-        this._restoreState();
+        // Race engine init against a timeout so the app never hangs.
+        // If the WASM module can't load (e.g. Worker spawn fails, OPFS not
+        // available), the UI still becomes interactive after the timeout.
+        const INIT_TIMEOUT_MS = 10000;
+        const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Engine init timed out')), INIT_TIMEOUT_MS)
+        );
+
+        Promise.race([initEngine(), timeout])
+            .then(() => this._restoreState())
+            .catch(err => {
+                console.error('Engine init failed:', err);
+                // Still restore UI state (engine calls will be no-ops)
+                this._restoreState();
+            });
     }
 
     componentDidUpdate(_, prevState) {
@@ -102,7 +116,7 @@ class App extends Component {
         }
     }
 
-    _restoreState = () => {
+    _restoreState = async () => {
         let saved;
         try {
             const sRaw = localStorage.getItem(LS_KEY);
@@ -118,14 +132,14 @@ class App extends Component {
 
         const stockData = saved.stockData || {};
 
-        // Re-seed the engine with saved stocks
+        // Re-seed the engine with saved stocks (async — JS reads OPFS, feeds CSV to C++)
         const allocMode = saved.allocMode || 'equal';
         engine.setAllocMode(allocMode);
 
         for (const symbol of stocks) {
             const sd = stockData[symbol];
             if (!sd || !sd.params) continue;
-            engine.addStock(symbol, sd.params);
+            await engine.addStock(symbol, sd.params);
             if (sd.visible === false) {
                 engine.setStockVisible(symbol, false);
             }
@@ -189,8 +203,8 @@ class App extends Component {
             this.setState({ stockDetail: null });
             return;
         }
-        const stockDetail = this._parseEngineResult(engine.getStockDetail(symbol));
-        this.setState({ stockDetail });
+        const stockDetail = engine.getStockDetail(symbol);
+        this.setState({ stockDetail: stockDetail || null });
     }
 
     refreshAll = (selectedStock) => {
@@ -242,15 +256,15 @@ class App extends Component {
     }
 
     // Phase 2: FetchModal completed — add stock to engine and basket
-    handleFetchComplete = (symbol, params, nDataYears) => {
+    handleFetchComplete = async (symbol, params, nDataYears) => {
         const { stocks, stockData } = this.state;
 
         // Clamp nYears to available data
         const nMaxYears = Math.max(1, nDataYears || 1);
         const clampedParams = { ...params, nYears: Math.min(params.nYears, nMaxYears) };
 
-        // Add to engine
-        engine.addStock(symbol, clampedParams);
+        // Add to engine (async — JS reads OPFS, feeds CSV to C++)
+        await engine.addStock(symbol, clampedParams);
 
         // Update state
         const newStocks = stocks.includes(symbol) ? [...stocks] : [...stocks, symbol];
@@ -322,7 +336,7 @@ class App extends Component {
         // where selectedStock changed but stockDetail is still stale/null,
         // which causes BasketGraph to recreate the chart with no data.
         const stockDetail = symbol
-            ? this._parseEngineResult(engine.getStockDetail(symbol))
+            ? (engine.getStockDetail(symbol) || null)
             : null;
         this.setState({
             selectedStock: symbol,

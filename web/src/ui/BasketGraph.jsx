@@ -752,9 +752,12 @@ class BasketGraph extends Component {
                 onViewModeChange, onYearChange, onAllocModeChange, onUpdateAllocPct } = this.props;
 
         const hasData = selectedStock ? !!stockDetail : !!basketResult;
-        const yearsList = selectedStock
+        // stockDetail.years is a flat int array [2024, 2023, ...],
+        // basketResult.years is [{year: 2024, ...}, ...] — normalize to objects.
+        const rawYears = selectedStock
             ? (stockDetail?.years || [])
             : (basketResult?.years || []);
+        const yearsList = rawYears.map(y => typeof y === 'number' ? { year: y } : y);
         const sortedYearsList = [...yearsList].sort((a, b) => b.year - a.year);
 
         const overlayStats = this.calculateOverlayStats();

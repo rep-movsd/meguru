@@ -1,0 +1,122 @@
+MEGURU SESSION — Resume from here
+==================================
+
+## What is Meguru
+
+Client-side browser app for seasonal stock trading analysis of Indian (NSE) stocks.
+Vite 6 + Preact (class components only, no hooks), Chart.js, C++ WASM engine,
+Yahoo Finance data via Cloudflare Worker CORS proxy.
+Two sub-projects: engine/ (C++) and web/ (JS).
+
+## Architecture: JS-feeds-CSV (FINAL)
+
+JS reads CSV strings from OPFS via File System Access API (storage.js),
+passes each to _module.loadCsv(symbol, year, csvString),
+then calls _module.compute(symbol, params).
+No WasmFS, no pthreads, no JSPI. All C++ calls synchronous.
+engine.addStock() in engine.js is async (OPFS reads async).
+
+## WASM Build
+
+Flags: --bind, -sMODULARIZE=1, -sEXPORT_ES6=1, -sEXPORT_NAME=createEngine,
+-sALLOW_MEMORY_GROWTH=1, -sENVIRONMENT=web, -sASSERTIONS=2, --no-entry.
+MEGURU_DEBUG=ON (DEBUG_LOG macro → printf → console.log).
+
+Build commands:
+  cd engine/build_wasm && rm -rf *
+  export PATH="/usr/lib/emscripten:$PATH"
+  emcmake cmake .. -DCMAKE_BUILD_TYPE=Release -DMEGURU_DEBUG=ON
+  emmake make -j$(nproc)
+  cp meguru.js meguru.wasm ../../web/public/wasm/
+
+Emscripten: /usr/lib/emscripten/ (pacman, v5.0.5)
+Artifacts: web/public/wasm/meguru.js (~115K) + meguru.wasm (~210K)
+Blob URL trick: Vite 6 blocks import() of JS from public/. engine.js fetches
+meguru.js as text → blob URL → import(). locateFile callback for .wasm path.
+
+## Current State: WORKING END-TO-END
+
+Stock add → FetchModal downloads Yahoo data → OPFS write → engine.addStock()
+reads OPFS CSVs → feeds to C++ loadCsv() → compute() → StatsPanel shows real
+trade window data from C++ engine. Vite build clean (20 modules, no errors).
+
+Wrangler proxy: web/worker/ (wrangler.jsonc + index.js), port 8787.
+Start: cd web/worker && wrangler dev --port 8787
+
+## embind val contract: getStockDetail
+
+Returns native JS object (val::object/val::array), not JSON string.
+{
+  "stock": "RELIANCE",
+  "years": [2024, 2023, ...],           // flat int array, most-recent-first
+  "stats": [
+    {
+      "iBeg": 45, "iEnd": 72,
+      "pctWin": 80.0, "pctExpected": 5.23, "fProfitRatio": 3.42,
+      "yearlyReturns": [4.2, -1.3, 7.8, ...]  // matches years[] order
+    }
+  ]
+}
+
+## Bugs Fixed This Session
+
+1. valarray brace-init: TPrices{0.0, DAYS} → initializer_list (2-elem), not
+   valarray(0.0, DAYS) (366 zeros). Heap corruption → crash in free() after
+   loadCsv. Fixed in types.h:91, basket.h:10, basket.cpp:226,236.
+
+2. App.jsx sync→async: _restoreState and handleFetchComplete were calling
+   engine.addStock() synchronously (leftover from WasmFS approach). Now async/await.
+
+3. Modal layout jump: dropdown open/close + error message toggle changed modal
+   height → re-centered → visible jump. Fixed:
+   - Error messages use visibility:hidden/visible (always reserve space)
+   - Stock error only shown after Add clicked (bAttempted flag)
+   - Modal overlay back to align-items:center (height now stable)
+
+## Remaining TODO
+
+- Remove -sASSERTIONS=2 from CMakeLists.txt once stable (saves binary size)
+- BasketGraph not wired to real engine data yet (stockDetail.stats used by
+  StatsPanel only; graph still needs basket-level data)
+- Stub methods in engine.js: setStockVisible, setAllocMode, setMarketCap,
+  setCustomWeight, getBasketResult, getBasketStocks, getStockParams
+
+## C++ Style Rules
+
+Hungarian: n=count, i=index, f=float, pct=percent, s=string, b=bool, arr=array, map=map, m_=member
+Prefixes: T=type, C=class, I=interface, E=enum
+Aliases: str, cstr, sv, vstr, vint, vf64, i32, i64, u64, f64
+TPrices=valarray<f64>, TDayIndices=vint
+C++23, #pragma once, using namespace std
+std::sort not std::ranges::sort, std::move() not move()
+CREF(T), CAUTOREF, CAUTO, FOR, FORLE, DEBUG_LOG macros
+See CPP_STYLE.md
+
+## Key Files
+
+### C++ Engine
+engine/CMakeLists.txt
+engine/src/types.h, engine.h, basket.h, basket.cpp, bindings.cpp, main.cpp
+engine/build_wasm/ — WASM build output
+
+### Web App
+web/src/wasm/engine.js — async WASM loader + wrapper
+web/public/wasm/meguru.js + meguru.wasm — build artifacts
+web/src/ui/App.jsx — root component, state mgmt, engine calls
+web/src/ui/StatsPanel.jsx — trade window stats table
+web/src/ui/BasketGraph.jsx — chart component
+web/src/ui/NewStockModal.jsx — stock search + add dialog
+web/src/ui/SearchableDropdown.jsx — reusable search dropdown
+web/src/ui/FetchModal.jsx — Yahoo Finance download progress
+web/src/data/storage.js — OPFS read/write
+web/src/data/yahoo.js — Yahoo Finance fetch helper
+web/src/ui/styles.css — all styles
+web/vite.config.js — minimal config (no COOP/COEP needed)
+web/worker/index.js + wrangler.jsonc — CORS proxy
+
+### Reference
+PROJECT.md, CPP_STYLE.md
+
+## Caveman Mode
+
+Active (ultra). Persist all responses. Off only: "stop caveman" / "normal mode".

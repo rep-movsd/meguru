@@ -19,9 +19,9 @@ class StatsPanel extends Component {
         }
 
         const { stats, years } = stockDetail;
-        const yearList = years ? years.map(y => y.year).sort((a, b) => b - a) : [];
+        const yearList = Array.isArray(years) ? years : [];
 
-        const nFixedCols = 6;
+        const nFixedCols = 5;
         const nYearCols = yearList.length;
         const nFixedWidth = 76;
         const nYearWidth = 68;
@@ -42,10 +42,9 @@ class StatsPanel extends Component {
                         <tr>
                             <th>Day Range</th>
                             <th>Win %</th>
-                            <th>Skew</th>
-                            <th>Sharpe</th>
                             <th>Expected %</th>
                             <th>%/day</th>
+                            <th>Profit Ratio</th>
                             {yearList.map(year => <th key={year}>{year}</th>)}
                         </tr>
                     </thead>
@@ -58,10 +57,9 @@ class StatsPanel extends Component {
                                 <tr key={idx}>
                                     <td>{String(stat.iBeg).padStart(3, '\u2007')}-{String(stat.iEnd).padStart(3, '\u2007')}</td>
                                     <td>{stat.pctWin.toFixed(1)}%</td>
-                                    <td>{stat.fSkew.toFixed(2)}</td>
-                                    <td>{stat.fSharpe.toFixed(2)}</td>
                                     <td>{stat.pctExpected.toFixed(2)}%</td>
                                     <td>{pctPerDay.toFixed(3)}%</td>
+                                    <td>{stat.fProfitRatio.toFixed(2)}x</td>
                                     {stat.yearlyReturns && stat.yearlyReturns.map((ret, i) => (
                                         <td key={i} className={ret >= 0 ? 'positive' : 'negative'}>
                                             {ret.toFixed(2)}%

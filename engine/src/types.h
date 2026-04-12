@@ -1,158 +1,139 @@
 #pragma once
 
+// ---------------------------------------------------------------------------
+// common.h — shared aliases, macros, includes, and fundamental types.
+// ---------------------------------------------------------------------------
+
+#define CREF(T)   const T&
+#define CAUTOREF  const auto&
+#define CAUTO     const auto
+
+#define FOR(X, MIN, MAX)   for(i32 X = MIN; X < MAX; X++)
+#define FORLE(X, MIN, MAX) for(i32 X = MIN; X <= MAX; X++)
+
+// ---------------------------------------------------------------------------
+// Debug logging — enabled via cmake -DMEGURU_DEBUG=ON
+// Emscripten routes printf to console.log.
+// ---------------------------------------------------------------------------
+
+#ifdef MEGURU_DEBUG
+    #include <cstdio>
+    #define DEBUG_LOG(fmt, ...) printf("[meguru] " fmt "\n", ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG(fmt, ...) ((void)0)
+#endif
+
 #include <cstdint>
-#include <vector>
-#include <array>
-#include <valarray>
+#include <cassert>
+
 #include <string>
+#include <string_view>
+#include <vector>
+#include <map>
+#include <valarray>
+#include <algorithm>
+#include <ranges>
 
-using std::array, std::string, std::vector, std::valarray;
+#include <charconv>
+#include <format>
+#include <fstream>
+#include <sstream>
+#include <chrono>
+#include <filesystem>
 
-using i32  = int32_t;
-using i64  = int64_t;
+using namespace std;
 
-// All years are treated as 366-day leap years for index consistency.
-// Non-leap years shift days after Feb 28 up by one so index 59 is always Feb 29.
+// ---------------------------------------------------------------------------
+// Scalar aliases
+// ---------------------------------------------------------------------------
+
+using i32 = int32_t;
+using i64 = int64_t;
+using u64 = uint64_t;
+using f64 = double;
+
+// ---------------------------------------------------------------------------
+// String aliases
+// ---------------------------------------------------------------------------
+
+using str  = string;
+using cstr = const string;
+using sv   = string_view;
+
+// ---------------------------------------------------------------------------
+// Container aliases
+// ---------------------------------------------------------------------------
+
+using vstr = vector<string>;
+using vint = vector<i32>;
+using vf64 = vector<f64>;
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 constexpr i32 DAYS = 366;
 
 // ---------------------------------------------------------------------------
-// Price data
+// Domain types
 // ---------------------------------------------------------------------------
 
-// Raw price in integer cents (1/100 of currency unit)
-using TPrice = int32_t;
+// 366-element price array (one per day-of-year)
+using TPrices = valarray<f64>;
 
-// Daily prices for one year, indexed 0..365
-using TArrPrices = valarray<i64>;
+// 366-element day index array — maps each slot to the real trading day index
+// Real trading day: arrDayIdx[i] == i
+// Backfilled gap:   arrDayIdx[i] > i (points to the future day used to fill)
+using TDayIndices = vint;
 
-// One year of daily price data with date strings
-struct TYearPriceEntries {
-    array<string, DAYS> sDates;
-    TArrPrices arrPrices = TArrPrices(static_cast<i64>(0), DAYS);
+// One year of daily data: prices + parallel day indices (both 366 elements, backfilled)
+struct TYearData {
+    TPrices     arrPrices = TPrices(0.0, DAYS);
+    TDayIndices arrDayIdx = TDayIndices(DAYS, -1);
 };
 
-// Multiple years of price data (index 0 = most recent year)
-using TArrPriceEntriesPerYear = vector<TYearPriceEntries>;
+// All cached year data for a stock, keyed by year number
+using TYearDataMap = map<i32, TYearData>;
+
+// A discovered trade window
+struct TWindow {
+    i32 iBeg  = 0;
+    i32 iEnd  = 0;
+    f64 fGain = 0.0;   // avg daily gain used during discovery
+};
+using TWindows = vector<TWindow>;
+
+// Per-stock strategy parameters
+struct TPlanParams {
+    i32 nYears       = 10;    // how many years to backtest
+    i32 nWinMin      = 10;    // min window size (days)
+    i32 nWinMax      = 31;    // max window size (days)
+    f64 pctThreshold = 1.0;   // min gain % to count as a win
+};
+
+// Stats for one discovered trade window
+struct TWindowStat {
+    i32  iBeg          = 0;
+    i32  iEnd          = 0;
+    f64  pctWin        = 0.0;   // % of years with gain > 0
+    f64  pctExpected   = 0.0;   // mean gain % across years
+    f64  fProfitRatio  = 0.0;   // sum(wins) / -sum(losses), loss seeded at 0.01
+    vf64 arrYearGains;          // gain % per year, ordered most-recent-first
+};
+using TWindowStats = vector<TWindowStat>;
 
 // ---------------------------------------------------------------------------
-// Trade windows and statistics
+// Graph data — normalized B&H curves for charting
 // ---------------------------------------------------------------------------
 
-// A buy/sell day pair within a year (day-of-year indices, 0-365)
-using TDayRange  = std::pair<i32, i32>;
-using TDayRanges = std::vector<TDayRange>;
+// Per-stock: map of year-string ("2024", "average") → 366 normalized values
+// Normalization: (price[d] / price[0]) - 1.0  → 0 at start, +1 = doubled
+using TYearCurve = map<str, TPrices>;
 
-// Combined stats for one trade window across all analyzed years
-struct TTradeStat {
-    i32    iBeg        = 0;       // Window start day-of-year
-    i32    iEnd        = 0;       // Window end day-of-year
-    double pctWin      = 0.0;    // % of years that were winners (>1% gain)
-    double fSkew       = 0.0;    // Median / Mean
-    double fSharpe     = 0.0;    // Sharpe ratio
-    double pctExpected = 0.0;    // Expectancy (weighted avg of win/loss)
-    vector<double> arrPctDelta;  // Per-year gain/loss % for this window
-};
-
-using TTradeStats = vector<TTradeStat>;
-
-// Simplified trade window for visualization
-struct TTradeWindow {
-    i32    iBeg      = 0;
-    i32    iEnd      = 0;
-    double priceBeg  = 0.0;    // Buy price
-    double priceEnd  = 0.0;    // Sell price (after 2x fee deduction)
-};
-
-// ---------------------------------------------------------------------------
-// Stock parameters (per-stock strategy config)
-// ---------------------------------------------------------------------------
-
-struct TStockParams {
-    i32    nYears  = 10;     // Number of historical years to analyze
-    i32    nWinMin = 10;     // Minimum trade window size (days)
-    i32    nWinMax = 31;     // Maximum trade window size (days)
-    double fPctWin = 60.0;   // Win-rate threshold (%)
-};
-
-// ---------------------------------------------------------------------------
-// Allocation
-// ---------------------------------------------------------------------------
-
-enum class EAllocMode {
-    Equal,     // Equal weight across all visible stocks
-    MCap,      // Weight by market capitalization
-    AvgRet,    // Weight by average historical return
-    Custom     // User-specified weights
-};
-
-// ---------------------------------------------------------------------------
-// Results — Stock-level (single stock detail / plan view)
-// ---------------------------------------------------------------------------
-
-// Multiplier info at end of each trade window (for chart labels)
-struct TWindowMultiplier {
-    i32    iBeg                 = 0;
-    i32    iEnd                 = 0;
-    double windowMultiplier     = 1.0;   // This window's price ratio
-    double cumulativeMultiplier = 1.0;   // Running product across windows
-};
-
-// Per-year result for a single stock (returned by getStockDetail)
-struct TStockYearResult {
-    i32                year = 0;
-    array<double, DAYS> prices   = {};    // Daily price (double, from cents/100)
-    array<double, DAYS> returns  = {};    // Daily plan return %
-    vector<TTradeWindow>      windows;
-    vector<TWindowMultiplier> windowMultipliers;
-};
-
-// Complete detail for one stock (selected in basket)
-struct TStockDetail {
-    string                   sStock;
-    TTradeStats              stats;        // Trade window stats
-    vector<TStockYearResult> years;        // Per-year detail
-    TStockYearResult         average;      // Average across years
-};
-
-// ---------------------------------------------------------------------------
-// Results — Basket-level (aggregate across all visible stocks)
-// ---------------------------------------------------------------------------
-
-// Per-stock summary within basket results
-struct TBasketStockSummary {
-    string sStock;
-    i32    daysInMarket = 0;    // Sum of (iEnd - iBeg) across trade windows
-    struct YearReturn {
-        i32    year = 0;
-        double plan = 0.0;     // Final plan return %
-        double bh   = 0.0;     // Final buy & hold return %
-    };
-    vector<YearReturn> years;
-};
-
-// Per-year basket result (weighted aggregate)
-struct TBasketYearResult {
-    i32                 year = 0;
-    array<double, DAYS> returns = {};     // Weighted daily plan return %
-    array<double, DAYS> buyHold = {};     // Weighted daily buy & hold %
-};
-
-// Basket aggregate statistics
-struct TBasketStats {
-    double avgPlan    = 0.0;
-    double avgBh      = 0.0;
-    i32    beatsBh    = 0;
-    i32    totalYears = 0;
-    double sharpe     = 0.0;
-};
-
-// Complete basket result
-struct TBasketResult {
-    vector<string>             stocks;     // Participating stock symbols
-    vector<TBasketYearResult>  years;
-    TBasketYearResult          average;
-    vector<TBasketStockSummary> perStock;
-    TBasketStats               stats;
-    vector<vector<double>>     weights;    // weights[yearIdx][stockIdx]
-    EAllocMode                 alloc = EAllocMode::Equal;
+// Full graph result returned by getGraphData()
+struct TGraphData {
+    vstr                  arrStocks;       // stock symbols, same order as arrPerStock
+    vint                  arrYears;        // nYear most-recent years (desc)
+    vector<TYearCurve>    arrPerStock;     // parallel to arrStocks
+    TYearCurve            dctBasketAvg;    // equal-weight avg across stocks
 };
