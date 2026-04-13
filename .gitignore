@@ -21,6 +21,10 @@ web/dist/
 
 # CMake
 cmake-build-*/
+engine/build*/
+
+# WASM output copied to web
+web/public/wasm/
 
 # OS
 .DS_Store
