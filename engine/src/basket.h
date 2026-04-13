@@ -1,16 +1,8 @@
 #pragma once
 
 #include "engine.h"
-
-// Per-stock cached state
-struct TPlan {
-    TPlanParams    m_params;
-    TYearDataMap   m_mapYearData;       // all available years, cached
-    vint           m_arrYears;          // year numbers used, most-recent-first
-    TPrices        m_arrAvgCurve = TPrices(0.0, DAYS);
-    TWindows       m_arrWindows;
-    TWindowStats   m_arrWindowStats;    // stats per surviving window
-};
+#include "plan.h"
+#include "stockdata.h"
 
 // ---------------------------------------------------------------------------
 // CBasket — concrete implementation of IBasket.
@@ -18,22 +10,31 @@ struct TPlan {
 
 class CBasket : public IBasket {
 
+    // In-memory CSV store (WASM: filled by JS via store(), native: unused)
+    TStockData m_stockData;
+
     // Map of stock name to plan
     map<str, TPlan> m_dctPlanForStock;
 
     // List of stock names in insertion order
     vstr m_arrStocks;
 
+    // Allocation
+    EAllocMode m_eAllocMode = EAllocMode::Equal;
+    vf64       m_arrCustomWeights;   // user-supplied weights for Custom mode, parallel to m_arrStocks
+
 public:
     void addStock(cstr& sSymbol, CREF(TPlanParams) params) override;
     void removeStock(cstr& sSymbol) override;
     void setParams(cstr& sSymbol, CREF(TPlanParams) params) override;
 
-    // Load a single year's CSV data (Date,Close) from a string.
-    void loadCsv(cstr& sSymbol, i32 nYear, cstr& sCsv);
+    // Store a raw CSV string into the in-memory store.
+    // Called from JS/embind before addStock().
+    // sPath key format: "SYMBOL.NS_YYYY.csv"
+    void storeCsv(cstr& sPath, cstr& sCsv) { m_stockData.store(sPath, sCsv); }
 
-    // Trigger computation after all CSVs have been loaded for a stock.
-    void compute(cstr& sSymbol, CREF(TPlanParams) params);
+    // Set allocation mode and optional custom weights (stored, computed lazily in getGraphData).
+    void setAlloc(EAllocMode eMode, CREF(vf64) arrCustomWeights = {});
 
     [[nodiscard]] CREF(TWindows) getWindows(cstr& sSymbol) const override;
     [[nodiscard]] CREF(TWindowStats) getWindowStats(cstr& sSymbol) const override;

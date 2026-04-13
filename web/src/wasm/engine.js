@@ -33,8 +33,8 @@ export async function initEngine() {
     _bReady = true;
 }
 
-// Read all year CSVs for a stock from OPFS and load them into the C++ engine.
-// Returns the number of years loaded.
+// Read all year CSVs for a stock from OPFS and store them into the C++ engine.
+// Returns the number of years stored.
 async function _feedStockData(symbol) {
     if (!_module) return 0;
 
@@ -44,7 +44,9 @@ async function _feedStockData(symbol) {
     for (const nYear of arrYears) {
         const sCsv = await readStockYear(symbol, nYear);
         if (sCsv) {
-            _module.loadCsv(symbol, nYear, sCsv);
+            // Key format matches native filenames: SYMBOL.NS_YYYY.csv
+            const sPath = `${symbol}.NS_${nYear}.csv`;
+            _module.storeCsv(sPath, sCsv);
             nLoaded++;
         }
     }
@@ -58,13 +60,13 @@ async function _feedStockData(symbol) {
 
 const engine = {
 
-    // addStock is async: reads OPFS data from JS, feeds CSV strings to C++,
-    // then triggers C++ computation. All C++ calls are synchronous.
+    // addStock is async: reads OPFS data from JS, stores CSV strings into
+    // TStockData via storeCsv(), then calls addStock() which loads + computes.
     async addStock(symbol, params) {
         if (!_module) return;
         const nLoaded = await _feedStockData(symbol);
         if (nLoaded === 0) return;
-        _module.compute(
+        _module.addStock(
             symbol,
             params.nYears || 10,
             params.nWinMin || 10,
@@ -109,8 +111,10 @@ const engine = {
         // TODO: implement in C++ engine
     },
 
-    setAllocMode(_mode) {
-        // TODO: implement in C++ engine
+    setAllocMode(mode, customWeights = []) {
+        if (!_module) return;
+        // mode: 0=Equal, 1=Return, 2=Custom
+        _module.setAlloc(mode, customWeights);
     },
 
     setMarketCap(_symbol, _mcap) {

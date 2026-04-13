@@ -123,17 +123,30 @@ struct TWindowStat {
 using TWindowStats = vector<TWindowStat>;
 
 // ---------------------------------------------------------------------------
+// Allocation
+// ---------------------------------------------------------------------------
+
+enum class EAllocMode : i32 {
+    Equal   = 0,   // equal weight across all stocks
+    Return  = 1,   // weight by avg historical return
+    Custom  = 2    // user-specified weights (passed via setAlloc)
+};
+
+// ---------------------------------------------------------------------------
 // Graph data — normalized B&H curves for charting
 // ---------------------------------------------------------------------------
 
-// Per-stock: map of year-string ("2024", "average") → 366 normalized values
+// Per-stock: map of year (i32) → 366 normalized values.
+// Key 0 = average across all years.
 // Normalization: (price[d] / price[0]) - 1.0  → 0 at start, +1 = doubled
-using TYearCurve = map<str, TPrices>;
+using TReturnsForYear = map<i32, TPrices>;
 
 // Full graph result returned by getGraphData()
 struct TGraphData {
-    vstr                  arrStocks;       // stock symbols, same order as arrPerStock
-    vint                  arrYears;        // nYear most-recent years (desc)
-    vector<TYearCurve>    arrPerStock;     // parallel to arrStocks
-    TYearCurve            dctBasketAvg;    // equal-weight avg across stocks
+    vstr                       arrStocks;               // stock symbols, same order as arrPerStock
+    vint                       arrYears;                // nYear most-recent years (desc)
+    vector<TReturnsForYear>    arrReturnsPerStockPlan;  // return curve per stock for each year for plan
+    vector<TReturnsForYear>    arrReturnsPerStockHold;  // return curve per stock for each year for Buy and hold
+
+    TReturnsForYear            dctReturnsForBasket;     // return curve combined across stocks
 };

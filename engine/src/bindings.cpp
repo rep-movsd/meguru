@@ -14,19 +14,22 @@ static CBasket g_basket;
 // Embind wrappers
 // ---------------------------------------------------------------------------
 
-// Load a single year's CSV data from JS string into the engine cache.
-// Call once per year, then call compute() to trigger analysis.
-void jsLoadCsv(const str& sSymbol, i32 nYear, const str& sCsv) {
-    DEBUG_LOG("jsLoadCsv: symbol=%s year=%d csvLen=%d", sSymbol.c_str(), nYear, (i32)sCsv.size());
-    g_basket.loadCsv(sSymbol, nYear, sCsv);
+// Store a raw CSV string into the in-memory store.
+// JS calls this once per year before calling addStock().
+// sPath key format: "SYMBOL.NS_YYYY.csv"
+void jsStoreCsv(const str& sPath, const str& sCsv) {
+    DEBUG_LOG("jsStoreCsv: path=%s csvLen=%d", sPath.c_str(), (i32)sCsv.size());
+    g_basket.storeCsv(sPath, sCsv);
 }
 
-// Run computation on a stock whose year data was loaded via loadCsv().
-void jsCompute(const str& sSymbol, i32 nYears, i32 nWinMin, i32 nWinMax, f64 pctThreshold) {
-    DEBUG_LOG("jsCompute: symbol=%s nYears=%d nWinMin=%d nWinMax=%d pctThreshold=%.1f",
+// Add a stock (or update params if already present).
+// TStockData::load() reads from m_dctData (filled by storeCsv) in WASM,
+// or from the filesystem in native builds.
+void jsAddStock(const str& sSymbol, i32 nYears, i32 nWinMin, i32 nWinMax, f64 pctThreshold) {
+    DEBUG_LOG("jsAddStock: symbol=%s nYears=%d nWinMin=%d nWinMax=%d pctThreshold=%.1f",
               sSymbol.c_str(), nYears, nWinMin, nWinMax, pctThreshold);
     TPlanParams params{nYears, nWinMin, nWinMax, pctThreshold};
-    g_basket.compute(sSymbol, params);
+    g_basket.addStock(sSymbol, params);
 }
 
 void jsRemoveStock(const str& sSymbol) {
@@ -85,6 +88,29 @@ static val vecToJsArray(CREF(TPrices) v) {
     return arr;
 }
 
+// Set allocation mode and optional custom weights.
+// eMode: 0=Equal, 1=Return, 2=Custom.
+// jsWeights: JS array of f64 (only used for Custom mode).
+void jsSetAlloc(i32 eMode, val jsWeights) {
+    vf64 arrWeights;
+    if(jsWeights.isArray()) {
+        CAUTO nLen = jsWeights["length"].as<i32>();
+        arrWeights.reserve(nLen);
+        FOR(i, 0, nLen) arrWeights.push_back(jsWeights[i].as<f64>());
+    }
+    g_basket.setAlloc(static_cast<EAllocMode>(eMode), arrWeights);
+}
+
+// Helper: convert TReturnsForYear (map<i32, TPrices>) to JS object.
+// Keys become strings: year number or "0" for average.
+static val returnsToJs(CREF(TReturnsForYear) curves) {
+    val obj = val::object();
+    for(CAUTOREF [iKey, arrValues] : curves) {
+        obj.set(to_string(iKey), vecToJsArray(arrValues));
+    }
+    return obj;
+}
+
 val jsGetGraphData(i32 nYear) {
     CAUTO data = g_basket.getGraphData(nYear);
 
@@ -100,23 +126,22 @@ val jsGetGraphData(i32 nYear) {
     for(CAUTO y : data.arrYears) jsYears.call<void>("push", y);
     result.set("years", jsYears);
 
-    // perStock: array of { "2024": f64[366], "average": f64[366] }
-    val jsPerStock = val::array();
-    for(CAUTOREF curves : data.arrPerStock) {
-        val obj = val::object();
-        for(CAUTOREF [sKey, arrValues] : curves) {
-            obj.set(sKey, vecToJsArray(arrValues));
-        }
-        jsPerStock.call<void>("push", obj);
+    // perStockHold: array of { "2024": f64[366], "0": f64[366] }
+    val jsPerStockHold = val::array();
+    for(CAUTOREF curves : data.arrReturnsPerStockHold) {
+        jsPerStockHold.call<void>("push", returnsToJs(curves));
     }
-    result.set("perStock", jsPerStock);
+    result.set("perStockHold", jsPerStockHold);
 
-    // basketAvg: { "2024": f64[366], "average": f64[366] }
-    val jsBasketAvg = val::object();
-    for(CAUTOREF [sKey, arrValues] : data.dctBasketAvg) {
-        jsBasketAvg.set(sKey, vecToJsArray(arrValues));
+    // perStockPlan: array of { "2024": f64[366], "0": f64[366] }
+    val jsPerStockPlan = val::array();
+    for(CAUTOREF curves : data.arrReturnsPerStockPlan) {
+        jsPerStockPlan.call<void>("push", returnsToJs(curves));
     }
-    result.set("basketAvg", jsBasketAvg);
+    result.set("perStockPlan", jsPerStockPlan);
+
+    // basketAvg: { "2024": f64[366], "0": f64[366] }
+    result.set("basketAvg", returnsToJs(data.dctReturnsForBasket));
 
     return result;
 }
@@ -126,10 +151,11 @@ val jsGetGraphData(i32 nYear) {
 // ---------------------------------------------------------------------------
 
 EMSCRIPTEN_BINDINGS(meguru) {
-    emscripten::function("loadCsv",         &jsLoadCsv);
-    emscripten::function("compute",         &jsCompute);
+    emscripten::function("storeCsv",        &jsStoreCsv);
+    emscripten::function("addStock",        &jsAddStock);
     emscripten::function("removeStock",     &jsRemoveStock);
     emscripten::function("setParams",       &jsSetParams);
     emscripten::function("getStockDetail",  &jsGetStockDetail);
     emscripten::function("getGraphData",    &jsGetGraphData);
+    emscripten::function("setAlloc",        &jsSetAlloc);
 }

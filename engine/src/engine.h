@@ -5,8 +5,9 @@
 // ---------------------------------------------------------------------------
 // IBasket — manages a set of trade plans keyed by stock name.
 //
-// Adding a stock reads and caches its price data from OPFS, then computes
-// trade windows. Editing params recomputes windows. Deleting purges the cache.
+// WASM: JS stores CSV strings via storeCsv() into TStockData, then calls
+//       addStock() which loads from the in-memory store.
+// Native: addStock() loads CSV files directly from the filesystem.
 // ---------------------------------------------------------------------------
 
 class IBasket {
