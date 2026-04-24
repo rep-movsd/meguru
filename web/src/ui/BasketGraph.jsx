@@ -577,14 +577,14 @@ class BasketGraph extends Component {
 
     updateBarChart = () => {
         const { basketResult, stockData } = this.props;
-        if (!basketResult || !basketResult.perStock) {
+        if (!basketResult || !basketResult.perStockPlan) {
             this.chart.data.labels = [];
             this.chart.data.datasets = [];
             this.chart.update();
             return;
         }
 
-        const { perStock, years, stocks, weights } = basketResult;
+        const { years, perStockHold, perStockPlan, weightsPerStock } = basketResult;
         if (!years || years.length === 0) {
             this.chart.data.labels = [];
             this.chart.data.datasets = [];
@@ -592,15 +592,25 @@ class BasketGraph extends Component {
             return;
         }
 
-        const labels = years.map(yr => yr.year.toString());
+        const stocks = Object.keys(perStockPlan);
+        const labels = years.map(y => y.toString());
         const datasets = [];
         const BH_COLOR = 'rgba(140, 140, 140, 0.7)';
         const fallbackColors = getBasketColors(stocks);
 
-        // B&H dataset
-        const bhData = years.map(yr => {
-            if (yr.buyHold?.length > 365) return yr.buyHold[365];
-            return 0;
+        // B&H bar per year: equal-weight avg of per-stock B&H final returns (no fees, hodl).
+        // Uses last day of each year's B&H curve (fractional → %).
+        const bhData = years.map(year => {
+            const yKey = String(year);
+            let sum = 0, n = 0;
+            for (const sym of stocks) {
+                const curve = perStockHold[sym]?.[yKey];
+                if (curve && curve.length > 365) {
+                    sum += curve[365];
+                    n++;
+                }
+            }
+            return n > 0 ? (sum / n) * 100 : 0;
         });
 
         datasets.push({
@@ -613,23 +623,24 @@ class BasketGraph extends Component {
             categoryPercentage: 0.9
         });
 
-        const yearWeights = weights || [];
+        // Per-stock plan bars: weighted contribution per year.
+        //   contribution[year] = perStockPlan[sym][year][365] * weightsPerStock[sym][year]
+        // Sum across stocks per year = basketAvg[year][365]. Stack sums → basket total.
+        stocks.forEach(sym => {
+            const color = stockData?.[sym]?.color || fallbackColors[sym] || 'rgb(128,128,128)';
+            const planCurves = perStockPlan[sym] || {};
+            const weights    = weightsPerStock?.[sym] || {};
 
-        // Per-stock plan datasets
-        stocks.forEach((stock, stockIdx) => {
-            const sd = perStock[stockIdx];
-            const color = stockData?.[stock]?.color || fallbackColors[stock] || 'rgb(128,128,128)';
-            const stockYearMap = {};
-            sd.years.forEach(yr => { stockYearMap[yr.year] = yr.plan; });
-
-            const data = years.map((yr, yIdx) => {
-                const w = yearWeights[yIdx]?.[stockIdx] || 0;
-                const plan = stockYearMap[yr.year] || 0;
-                return plan * w;
+            const data = years.map(year => {
+                const yKey = String(year);
+                const curve = planCurves[yKey];
+                const w     = weights[yKey] || 0;
+                if (!curve || curve.length <= 365) return 0;
+                return curve[365] * w * 100;
             });
 
             datasets.push({
-                label: stock + ' (Plan)',
+                label: sym + ' (Plan)',
                 data,
                 backgroundColor: color,
                 borderColor: 'rgba(255,255,255,0.3)',

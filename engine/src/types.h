@@ -138,15 +138,18 @@ enum class EAllocMode : i32 {
 
 // Per-stock: map of year (i32) → 366 normalized values.
 // Key 0 = average across all years.
-// Normalization: (price[d] / price[0]) - 1.0  → 0 at start, +1 = doubled
+// Normalization: (price[d] / price[0]) - 1.0 = 0 at start, +1 = doubled
 using TReturnsForYear = map<i32, TPrices>;
+
+// Per-stock: map of year (i32) → weight (f64). Key 0 = base/unadjusted weight.
+// For other years: effective weight after renormalizing for missing-data stocks.
+using TWeightsForYear = map<i32, f64>;
 
 // Full graph result returned by getGraphData()
 struct TGraphData {
-    vstr                       arrStocks;               // stock symbols, same order as arrPerStock
-    vint                       arrYears;                // nYear most-recent years (desc)
-    vector<TReturnsForYear>    arrReturnsPerStockPlan;  // return curve per stock for each year for plan
-    vector<TReturnsForYear>    arrReturnsPerStockHold;  // return curve per stock for each year for Buy and hold
-
-    TReturnsForYear            dctReturnsForBasket;     // return curve combined across stocks
+    vint                              arrYears;                // nYear most-recent years (desc)
+    map<str, TReturnsForYear>         dctReturnsPerStockPlan;  // symbol → year → 366 plan return values
+    map<str, TReturnsForYear>         dctReturnsPerStockHold;  // symbol → year → 366 B&H return values
+    TReturnsForYear                   dctReturnsForBasket;     // weighted avg across stocks
+    map<str, TWeightsForYear>         dctWeightsPerStock;      // symbol → year → effective weight (renorm'd)
 };

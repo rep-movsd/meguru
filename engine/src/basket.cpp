@@ -84,58 +84,114 @@ TGraphData CBasket::getGraphData(i32 nYears) const {
         result.arrYears.push_back(iYear);
     }
 
-    // 2. Outer loop: stocks. Inner loop: years.
+    // 2. Per-stock curves: outer loop stocks, inner loop years.
     for(CAUTOREF [sSymbol, plan] : m_dctPlanForStock) {
-        result.arrStocks.push_back(sSymbol);
+        auto& dctPlan = result.dctReturnsPerStockPlan[sSymbol];
+        auto& dctHold = result.dctReturnsPerStockHold[sSymbol];
 
-        // placeholder for this stock's plan curves for each year
-        result.arrReturnsPerStockPlan.push_back({});
-        result.arrReturnsPerStockHold.push_back({});
-
-        // Average returns
-        TPrices arrPricesAvgPlan(0.0, DAYS);
-        TPrices arrPricesAvgHold(0.0, DAYS);
+        TPrices arrAvgPlan(0.0, DAYS);
+        TPrices arrAvgHold(0.0, DAYS);
         i32 nYearsWithData = 0;
 
         for(CAUTO iYear : result.arrYears) {
             CAUTO itYearData = plan.m_mapYearData.find(iYear);
             if(itYearData != plan.m_mapYearData.end() && itYearData->second.arrPrices[0]) {
                 CAUTOREF arrPrices = itYearData->second.arrPrices;
-                auto &returnHold = result.arrReturnsPerStockHold.back()[iYear];
-                auto &returnPlan = result.arrReturnsPerStockPlan.back()[iYear];
 
-                // For B&H, normalize prices so start is 0 and +1 means 100%
-                returnHold = (arrPrices / arrPrices[0]) - 1.0;
-                returnPlan = calcPlanGains(plan.m_arrWindowStats, arrPrices);
+                dctHold[iYear] = (arrPrices / arrPrices[0]) - 1.0;
+                dctPlan[iYear] = calcPlanGains(plan.m_arrWindowStats, arrPrices);
 
-                // Accumulate into average before moving
-                arrPricesAvgHold += returnHold;
-                arrPricesAvgPlan += returnPlan;
+                arrAvgHold += dctHold[iYear];
+                arrAvgPlan += dctPlan[iYear];
                 ++nYearsWithData;
             }
         }
 
         if(nYearsWithData > 0) {
-            arrPricesAvgHold /= nYearsWithData;
-            arrPricesAvgPlan /= nYearsWithData;
+            arrAvgHold /= nYearsWithData;
+            arrAvgPlan /= nYearsWithData;
         }
-        result.arrReturnsPerStockHold.back()[0] = std::move(arrPricesAvgHold);
-        result.arrReturnsPerStockPlan.back()[0] = std::move(arrPricesAvgPlan);
+        dctHold[0] = std::move(arrAvgHold);
+        dctPlan[0] = std::move(arrAvgPlan);
     }
 
-    // TODO: compute basketAvg per year + "average"
 
-    // For each year
-    for(CAUTO iYear : result.arrYears) {
-        // For each stock
-        i32 nStocks = m_arrStocks.size();
-        FOR(n, 0, nStocks) {
-            cstr sYearKey = to_string(iYear);
-            CAUTOREF retHold = result.arrReturnsPerStockHold[n];
-            CAUTOREF retPlan = result.arrReturnsPerStockPlan[n];
+    // 3. Basket weighted-average across stocks.
+    //    Uses plan curves only (B&H basket not meaningful for allocation).
+    //    Key 0 = average across all years (same as per-stock key 0).
+    CAUTO& dctPlan = result.dctReturnsPerStockPlan;
+    const i32 nStocks = static_cast<i32>(m_arrStocks.size());
 
+    if(nStocks > 0) {
 
+        // --- compute base weights per alloc mode ---
+        vf64 arrBaseWeights(nStocks, 1.0 / nStocks);  // default: equal
 
+        switch(m_eAllocMode) {
+        case EAllocMode::Equal:
+            // already initialized to equal
+            break;
+
+        case EAllocMode::Return: {
+            // Weight by each stock's avg plan return at end of year (key 0, last day).
+            // Clamp negatives to 0 — losing stocks get no weight.
+            f64 fTotalWeight = 0.0;
+            FOR(i, 0, nStocks) {
+                CAUTO it = dctPlan.find(m_arrStocks[i]);
+                f64 fReturn = (it != dctPlan.end())
+                    ? max(0.0, it->second.at(0)[DAYS - 1])
+                    : 0.0;
+                arrBaseWeights[i] = fReturn;
+                fTotalWeight += fReturn;
+            }
+            // Normalize, fall back to equal if all returns <= 0
+            if(fTotalWeight > 0.0)
+                for(auto& w : arrBaseWeights) w /= fTotalWeight;
+            else
+                for(auto& w : arrBaseWeights) w = 1.0 / nStocks;
+            break;
+        }
+
+        case EAllocMode::Custom:
+            // Custom weights must match stock count — setAlloc() caller's contract.
+            assert(static_cast<i32>(m_arrCustomWeights.size()) == nStocks
+                   && "custom weights size must match stock count");
+            arrBaseWeights = m_arrCustomWeights;
+            break;
+        }
+
+        // --- per-year basket curve (plus key 0 for overall average) ---
+        vint arrKeys = result.arrYears;
+        arrKeys.push_back(0);  // key 0 = average curve
+
+        for(CAUTO iKey : arrKeys) {
+            // Collect participating stocks (have data for this year key)
+            // and renormalize their weights to sum to 1.
+            f64 fWeightSum = 0.0;
+            FOR(i, 0, nStocks) {
+                CAUTO it = dctPlan.find(m_arrStocks[i]);
+                if(it != dctPlan.end() && it->second.contains(iKey))
+                    fWeightSum += arrBaseWeights[i];
+            }
+
+            if(fWeightSum == 0.0) continue;  // no stock has data for this key
+
+            TPrices arrBasket(0.0, DAYS);
+            FOR(i, 0, nStocks) {
+                CAUTO it = dctPlan.find(m_arrStocks[i]);
+                if(it == dctPlan.end()) continue;
+                CAUTO itCurve = it->second.find(iKey);
+                if(itCurve == it->second.end()) continue;
+
+                // Renormalized weight: this stock's share of participating weight
+                CAUTO fW = arrBaseWeights[i] / fWeightSum;
+                arrBasket += itCurve->second * fW;
+
+                // Record effective weight for UI (bar chart stacks, alloc bar)
+                result.dctWeightsPerStock[m_arrStocks[i]][iKey] = fW;
+            }
+
+            result.dctReturnsForBasket[iKey] = std::move(arrBasket);
         }
     }
 

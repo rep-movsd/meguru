@@ -111,37 +111,47 @@ static val returnsToJs(CREF(TReturnsForYear) curves) {
     return obj;
 }
 
+// Helper: convert map<str, TReturnsForYear> to JS object { "SYMBOL": { "2024": [...], "0": [...] } }
+static val stockReturnsToJs(CREF(map<str, TReturnsForYear>) dct) {
+    val obj = val::object();
+    for(CAUTOREF [sSymbol, curves] : dct) {
+        obj.set(sSymbol, returnsToJs(curves));
+    }
+    return obj;
+}
+
+// Helper: convert map<str, TWeightsForYear> to JS object { "SYMBOL": { "2024": f64, "0": f64 } }
+static val stockWeightsToJs(CREF(map<str, TWeightsForYear>) dct) {
+    val obj = val::object();
+    for(CAUTOREF [sSymbol, weights] : dct) {
+        val inner = val::object();
+        for(CAUTOREF [iYear, fW] : weights) inner.set(to_string(iYear), fW);
+        obj.set(sSymbol, inner);
+    }
+    return obj;
+}
+
 val jsGetGraphData(i32 nYear) {
     CAUTO data = g_basket.getGraphData(nYear);
 
     val result = val::object();
-
-    // stocks: string[]
-    val jsStocks = val::array();
-    for(CAUTOREF s : data.arrStocks) jsStocks.call<void>("push", s);
-    result.set("stocks", jsStocks);
 
     // years: int[]
     val jsYears = val::array();
     for(CAUTO y : data.arrYears) jsYears.call<void>("push", y);
     result.set("years", jsYears);
 
-    // perStockHold: array of { "2024": f64[366], "0": f64[366] }
-    val jsPerStockHold = val::array();
-    for(CAUTOREF curves : data.arrReturnsPerStockHold) {
-        jsPerStockHold.call<void>("push", returnsToJs(curves));
-    }
-    result.set("perStockHold", jsPerStockHold);
+    // perStockHold: { "RELIANCE": { "2024": f64[366], "0": f64[366] }, ... }
+    result.set("perStockHold", stockReturnsToJs(data.dctReturnsPerStockHold));
 
-    // perStockPlan: array of { "2024": f64[366], "0": f64[366] }
-    val jsPerStockPlan = val::array();
-    for(CAUTOREF curves : data.arrReturnsPerStockPlan) {
-        jsPerStockPlan.call<void>("push", returnsToJs(curves));
-    }
-    result.set("perStockPlan", jsPerStockPlan);
+    // perStockPlan: { "RELIANCE": { "2024": f64[366], "0": f64[366] }, ... }
+    result.set("perStockPlan", stockReturnsToJs(data.dctReturnsPerStockPlan));
 
     // basketAvg: { "2024": f64[366], "0": f64[366] }
     result.set("basketAvg", returnsToJs(data.dctReturnsForBasket));
+
+    // weightsPerStock: { "RELIANCE": { "2024": f64, "0": f64 }, ... }  (effective, renormalized)
+    result.set("weightsPerStock", stockWeightsToJs(data.dctWeightsPerStock));
 
     return result;
 }

@@ -194,7 +194,11 @@ class App extends Component {
     }
 
     refreshBasket = () => {
-        const basketResult = this._parseEngineResult(engine.getBasketResult());
+        // getGraphData returns native JS obj directly (no JSON parse needed):
+        //   { years:int[], perStockHold:{sym:{year:[366],"0":[366]}},
+        //     perStockPlan:{sym:{...}}, basketAvg:{year:[366],"0":[366]},
+        //     weightsPerStock:{sym:{year:f64,"0":f64}} }
+        const basketResult = engine.getGraphData(10);
         this.setState({ basketResult });
     }
 
