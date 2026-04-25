@@ -173,6 +173,7 @@ class App extends Component {
             viewMode: saved.viewMode || 'line',
             selectedYear: saved.selectedYear || 'Average'
         }, () => {
+            if (allocMode === 'custom') this.pushCustomWeightsToEngine();
             this.refreshAll(selectedStock);
         });
     }
@@ -406,15 +407,22 @@ class App extends Component {
     // ------------------------------------------------------------------
 
     handleAllocModeChange = (mode) => {
-        engine.setAllocMode(mode);
         this.setState({ allocMode: mode }, () => {
+            if (mode === 'custom') {
+                // Push current per-stock allocPct values down to the engine.
+                this.pushCustomWeightsToEngine();
+            } else {
+                engine.setAllocMode(mode);
+            }
             this.refreshBasket();
         });
     }
 
     // Update custom allocation for a stock by delta (e.g. +5 or -5).
     // Distributes the opposite proportionally among other visible stocks while
-    // preserving a 5% minimum for every other visible stock.
+    // preserving a 5% minimum for every other visible stock. After the state
+    // mutation we push the updated weight vector down to the engine and
+    // refresh the basket so the chart reflects the new allocation.
     handleUpdateAllocPct = (symbol, delta) => {
         this.setState(prev => {
             const { stocks, stockData } = prev;
@@ -461,7 +469,30 @@ class App extends Component {
             }
 
             return { stockData: updated };
+        }, () => {
+            // Push fresh custom weights to the engine and recompute the basket.
+            this.pushCustomWeightsToEngine();
+            this.refreshBasket();
         });
+    }
+
+    // Build weight vector from current stockData and push to engine in 'custom'
+    // allocation mode. Order must match engine's m_arrStocks (= state.stocks
+    // append order, since both grow via the same addStock flow). Hidden stocks
+    // contribute 0; visible weights are normalized so the total sums to 1.
+    pushCustomWeightsToEngine = () => {
+        const { stocks, stockData } = this.state;
+        if (stocks.length === 0) return;
+
+        const arr = stocks.map(s => {
+            const sd = stockData[s];
+            if (!sd || sd.visible === false) return 0;
+            return Math.max(0, sd.allocPct || 0);
+        });
+        const total = arr.reduce((sum, w) => sum + w, 0);
+        const normalized = total > 0 ? arr.map(w => w / total) : arr;
+
+        engine.setAllocMode('custom', normalized);
     }
 
     // ------------------------------------------------------------------
@@ -508,6 +539,7 @@ class App extends Component {
 
         engine.setAllocMode('custom');
         this.setState({ stockData: updated, allocMode: 'custom' }, () => {
+            this.pushCustomWeightsToEngine();
             this.refreshBasket();
         });
     }
@@ -643,7 +675,9 @@ class App extends Component {
 
         // --- Add each stock from payload ---
         const allocMode = payload.allocMode || 'equal';
-        engine.setAllocMode(allocMode);
+        // Set non-custom modes immediately; custom needs weights *and* the
+        // stock list populated, so we set it after addStock() completes.
+        if (allocMode !== 'custom') engine.setAllocMode(allocMode);
 
         const newStocks = [];
         const newStockData = {};
@@ -689,6 +723,7 @@ class App extends Component {
             stockData: finalStockData,
             allocMode
         }, () => {
+            if (allocMode === 'custom') this.pushCustomWeightsToEngine();
             this.refreshAll(null);
         });
     }
