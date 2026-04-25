@@ -761,7 +761,7 @@ class BasketGraph extends Component {
         const { selectedStock, basketResult, stockDetail, stockData, stocks,
                 allocMode, allocModes, viewMode, selectedYear,
                 onViewModeChange, onYearChange, onAllocModeChange, onUpdateAllocPct,
-                onExportCsv } = this.props;
+                onCopyToCustom, onExportCsv } = this.props;
 
         const hasData = selectedStock ? !!stockDetail : !!basketResult;
         // stockDetail.years is a flat int array [2024, 2023, ...],
@@ -778,6 +778,9 @@ class BasketGraph extends Component {
         const isCustom = allocMode === 'custom';
 
         const showLineControls = selectedStock || viewMode === 'line';
+        // Year combo is always visible (used by line chart + Export CSV).
+        // Bar chart ignores selectedYear and shows the multi-year view.
+        const showYearCombo = !!selectedStock || true;
 
         return (
             <div className="graph-area">
@@ -800,8 +803,20 @@ class BasketGraph extends Component {
                             </label>
                         )}
 
-                        {/* Year selector — shown for line view and stock view */}
-                        {showLineControls && (
+                        {/* Copy current weights to custom — basket mode only, hidden when already custom */}
+                        {!selectedStock && !isCustom && (
+                            <button
+                                className="toggle-btn"
+                                onClick={() => onCopyToCustom && onCopyToCustom()}
+                                disabled={!hasData || stocks.length < 2}
+                                title="Snapshot the current weights into custom allocation and switch to custom mode"
+                            >
+                                Copy to custom
+                            </button>
+                        )}
+
+                        {/* Year selector — always visible (line chart + export CSV use it; bar chart ignores) */}
+                        {showYearCombo && (
                             <select
                                 value={selectedYear}
                                 onChange={(e) => onYearChange(e.target.value)}

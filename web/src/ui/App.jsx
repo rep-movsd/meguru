@@ -476,6 +476,54 @@ class App extends Component {
         this.setState({ selectedYear: year });
     }
 
+    // Snapshot the currently-displayed alloc weights into stockData[s].allocPct
+    // and switch allocMode to 'custom'. Source matches the alloc bar:
+    //   line view + numeric year -> that year's weights
+    //   bar view OR 'Average'    -> average weights across all years
+    // Only visible stocks contribute. Pcts are normalized to 100.
+    handleCopyToCustom = () => {
+        const { basketResult, stocks, stockData, viewMode, selectedYear } = this.state;
+        if (!basketResult || stocks.length === 0) return;
+
+        const basketStocks = basketResult.stocks || [];
+        const weights = basketResult.weights;
+        if (!weights || weights.length === 0) return;
+
+        const n = basketStocks.length;
+        let yearWeights = new Array(n).fill(0);
+
+        const useAverage = viewMode === 'bar' || selectedYear === 'Average';
+        if (useAverage) {
+            for (const yw of weights) {
+                for (let i = 0; i < n; i++) yearWeights[i] += (yw[i] || 0);
+            }
+            for (let i = 0; i < n; i++) yearWeights[i] /= weights.length;
+        } else {
+            const yearIdx = basketResult.years?.findIndex(
+                y => y.year === parseInt(selectedYear)
+            );
+            yearWeights = (yearIdx >= 0 ? weights[yearIdx] : weights[0]).slice();
+        }
+
+        // Filter to visible stocks + normalize to 100.
+        const visible = basketStocks
+            .map((s, i) => ({ s, w: yearWeights[i] || 0 }))
+            .filter(({ s }) => stockData[s]?.visible);
+
+        const total = visible.reduce((sum, { w }) => sum + w, 0);
+        if (total <= 0) return;
+
+        const updated = { ...stockData };
+        for (const { s, w } of visible) {
+            updated[s] = { ...updated[s], allocPct: (w / total) * 100 };
+        }
+
+        engine.setAllocMode('custom');
+        this.setState({ stockData: updated, allocMode: 'custom' }, () => {
+            this.refreshBasket();
+        });
+    }
+
     handleOpenModal = () => {
         this.setState({ modalOpen: true });
     }
@@ -684,6 +732,7 @@ class App extends Component {
                         onYearChange={this.handleYearChange}
                         onAllocModeChange={this.handleAllocModeChange}
                         onUpdateAllocPct={this.handleUpdateAllocPct}
+                        onCopyToCustom={this.handleCopyToCustom}
                         onExportCsv={this.handleExportCsv}
                     />
                 </div>
