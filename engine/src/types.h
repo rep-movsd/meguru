@@ -145,11 +145,15 @@ using TReturnsForYear = map<i32, TPrices>;
 // For other years: effective weight after renormalizing for missing-data stocks.
 using TWeightsForYear = map<i32, f64>;
 
+// Per-symbol maps used in TGraphData and embind helpers
+using TReturnsPerStock = map<str, TReturnsForYear>;
+using TWeightsPerStock = map<str, TWeightsForYear>;
+
 // Full graph result returned by getGraphData()
 struct TGraphData {
-    vint                              arrYears;                // nYear most-recent years (desc)
-    map<str, TReturnsForYear>         dctReturnsPerStockPlan;  // symbol → year → 366 plan return values
-    map<str, TReturnsForYear>         dctReturnsPerStockHold;  // symbol → year → 366 B&H return values
-    TReturnsForYear                   dctReturnsForBasket;     // weighted avg across stocks
-    map<str, TWeightsForYear>         dctWeightsPerStock;      // symbol → year → effective weight (renorm'd)
+    vint                arrYears;                // nYear most-recent years (desc)
+    TReturnsPerStock    dctReturnsPerStockPlan;  // symbol → year → 366 plan return values
+    TReturnsPerStock    dctReturnsPerStockHold;  // symbol → year → 366 B&H return values
+    TReturnsForYear     dctReturnsForBasket;     // weighted avg across stocks
+    TWeightsPerStock    dctWeightsPerStock;      // symbol → year → effective weight (renorm'd)
 };

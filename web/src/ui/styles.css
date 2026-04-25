@@ -127,6 +127,12 @@ body {
     color: #ddd;
 }
 
+.basket-header-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
 .basket-items {
     flex: 1;
     overflow-y: auto;

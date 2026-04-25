@@ -62,6 +62,34 @@ i32 getDayIndexForYMD(sv sDate) {
     return idxDay;
 }
 
+// Reverse of getDayIndexForYMD. Mirrors the leap-shift logic:
+// leap year:      date = Jan-1 + iDay
+// non-leap year:  iDay == 59 is the synthetic Feb-29 slot ("YYYY-02-29")
+//                 iDay  > 59 → real date = Jan-1 + (iDay - 1)
+//                 iDay  < 59 → real date = Jan-1 + iDay
+str dayIdxToDate(i32 iYear, i32 iDay) {
+    using namespace chrono;
+
+    if(iDay < 0 || iDay >= DAYS) return "";
+
+    const year yyyy{iYear};
+
+    // Non-leap Feb-29 slot: emit synthetic date
+    if(!yyyy.is_leap() && iDay == 59) {
+        return format("{:04d}-02-29", iYear);
+    }
+
+    const i32 iOffset = (!yyyy.is_leap() && iDay > 59) ? iDay - 1 : iDay;
+    const sys_days sdJan1{yyyy / 1 / 1};
+    const sys_days sd = sdJan1 + days{iOffset};
+    const year_month_day ymd{sd};
+
+    return format("{:04d}-{:02d}-{:02d}",
+                  static_cast<i32>(ymd.year()),
+                  static_cast<unsigned>(ymd.month()),
+                  static_cast<unsigned>(ymd.day()));
+}
+
 // ---------------------------------------------------------------------------
 // Price data utilities
 // ---------------------------------------------------------------------------

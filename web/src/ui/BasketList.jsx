@@ -13,6 +13,8 @@ import { Component } from 'preact';
 //   onToggleExpand: (symbol) => void
 //   onParamChange: (symbol, params) => void
 //   onOpenModal: () => void
+//   onSaveBasket: () => void
+//   onLoadBasket: (File) => void
 
 class BasketList extends Component {
 
@@ -33,17 +35,54 @@ class BasketList extends Component {
         onParamChange(stock, newParams);
     }
 
+    handleLoadClick = () => {
+        if (this._fileInput) this._fileInput.click();
+    }
+
+    handleFileChange = (e) => {
+        const { onLoadBasket } = this.props;
+        const file = e.target.files && e.target.files[0];
+        if (file && onLoadBasket) onLoadBasket(file);
+        // Clear value so picking the same file twice still fires onChange
+        e.target.value = '';
+    }
+
     render() {
         const { stocks, stockData, selectedStock, expandedStock,
-                onSelect, onToggleVisible, onRemove, onToggleExpand, onOpenModal } = this.props;
+                onSelect, onToggleVisible, onRemove, onToggleExpand, onOpenModal,
+                onSaveBasket } = this.props;
 
         return (
             <div className="basket-list">
                 <div className="basket-header">
                     <h2>Basket</h2>
-                    <button className="new-stock-btn" onClick={onOpenModal}>
-                        + New
-                    </button>
+                    <div className="basket-header-actions">
+                        <button
+                            className="new-stock-btn"
+                            onClick={onSaveBasket}
+                            disabled={stocks.length === 0}
+                            title="Save basket to JSON file"
+                        >
+                            Save
+                        </button>
+                        <button
+                            className="new-stock-btn"
+                            onClick={this.handleLoadClick}
+                            title="Load basket from JSON file"
+                        >
+                            Load
+                        </button>
+                        <button className="new-stock-btn" onClick={onOpenModal}>
+                            + New
+                        </button>
+                        <input
+                            type="file"
+                            accept="application/json,.json"
+                            ref={(el) => { this._fileInput = el; }}
+                            style={{ display: 'none' }}
+                            onChange={this.handleFileChange}
+                        />
+                    </div>
                 </div>
 
                 {stocks.length === 0 ? (

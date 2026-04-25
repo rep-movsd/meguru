@@ -40,6 +40,14 @@ public:
     [[nodiscard]] CREF(TWindowStats) getWindowStats(cstr& sSymbol) const override;
     [[nodiscard]] CREF(vint) getYears(cstr& sSymbol) const override;
 
+    // Accessors used by verifycsv
+    [[nodiscard]] CREF(vstr) getStocks() const { return m_arrStocks; }
+    [[nodiscard]] CREF(TPlan) getPlan(cstr& sSymbol) const {
+        static const TPlan empty;
+        CAUTO it = m_dctPlanForStock.find(sSymbol);
+        return it == m_dctPlanForStock.end() ? empty : it->second;
+    }
+
     // Graph data: normalized B&H curves for nYear most-recent years.
     // nYear = how many past years to show (independent of per-stock stats nYears).
     // Stocks missing data for a year are skipped in basket avg for that year.

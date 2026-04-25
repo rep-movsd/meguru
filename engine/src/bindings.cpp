@@ -1,4 +1,5 @@
 #include "basket.h"
+#include "verifycsv.h"
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
@@ -112,7 +113,7 @@ static val returnsToJs(CREF(TReturnsForYear) curves) {
 }
 
 // Helper: convert map<str, TReturnsForYear> to JS object { "SYMBOL": { "2024": [...], "0": [...] } }
-static val stockReturnsToJs(CREF(map<str, TReturnsForYear>) dct) {
+static val stockReturnsToJs(CREF(TReturnsPerStock) dct) {
     val obj = val::object();
     for(CAUTOREF [sSymbol, curves] : dct) {
         obj.set(sSymbol, returnsToJs(curves));
@@ -121,7 +122,7 @@ static val stockReturnsToJs(CREF(map<str, TReturnsForYear>) dct) {
 }
 
 // Helper: convert map<str, TWeightsForYear> to JS object { "SYMBOL": { "2024": f64, "0": f64 } }
-static val stockWeightsToJs(CREF(map<str, TWeightsForYear>) dct) {
+static val stockWeightsToJs(CREF(TWeightsPerStock) dct) {
     val obj = val::object();
     for(CAUTOREF [sSymbol, weights] : dct) {
         val inner = val::object();
@@ -156,6 +157,13 @@ val jsGetGraphData(i32 nYear) {
     return result;
 }
 
+// Export a Google-Sheets-ready verification CSV for a given year.
+// iYear <= 0 → use (current year - 1).
+str jsExportVerifyCsv(i32 iYear) {
+    DEBUG_LOG("jsExportVerifyCsv: year=%d", iYear);
+    return exportVerifyCsv(g_basket, iYear);
+}
+
 // ---------------------------------------------------------------------------
 // Embind module registration
 // ---------------------------------------------------------------------------
@@ -168,4 +176,5 @@ EMSCRIPTEN_BINDINGS(meguru) {
     emscripten::function("getStockDetail",  &jsGetStockDetail);
     emscripten::function("getGraphData",    &jsGetGraphData);
     emscripten::function("setAlloc",        &jsSetAlloc);
+    emscripten::function("exportVerifyCsv", &jsExportVerifyCsv);
 }

@@ -484,6 +484,163 @@ class App extends Component {
         this.setState({ modalOpen: false });
     }
 
+    // Export a Google-Sheets-ready verification CSV for the current year.
+    // selectedYear may be "Average" — pass 0 to let the engine pick (curYear-1).
+    handleExportCsv = () => {
+        const { selectedYear } = this.state;
+        const year = (typeof selectedYear === 'number') ? selectedYear : 0;
+        const sCsv = engine.exportVerifyCsv(year);
+        if (!sCsv) return;
+
+        const sLabel = (year > 0) ? String(year) : 'latest';
+        const blob = new Blob([sCsv], { type: 'text/csv;charset=utf-8;' });
+        const sUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = sUrl;
+        a.download = `meguru_verify_${sLabel}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(sUrl);
+    }
+
+    // ------------------------------------------------------------------
+    // Save / load basket to/from JSON file
+    // ------------------------------------------------------------------
+
+    // Save current basket (stocks + params + alloc) to a JSON file.
+    // User provides a name via prompt; name also becomes the filename.
+    handleSaveBasket = () => {
+        const { stocks, stockData, allocMode } = this.state;
+
+        if (stocks.length === 0) {
+            alert('Basket is empty — nothing to save.');
+            return;
+        }
+
+        const sDefault = 'basket';
+        const sName = prompt('Name this basket:', sDefault);
+        if (sName === null) return;  // user cancelled
+        const sSafe = (sName.trim() || sDefault).replace(/[^\w\-.]/g, '_');
+
+        const payload = {
+            version: 1,
+            name: sName.trim() || sDefault,
+            allocMode,
+            stocks: stocks.map(s => {
+                const sd = stockData[s] || {};
+                const p = sd.params || {};
+                return {
+                    symbol: s,
+                    nYears:   p.nYears   ?? 10,
+                    nWinMin:  p.nWinMin  ?? 10,
+                    nWinMax:  p.nWinMax  ?? 31,
+                    fPctWin:  p.fPctWin  ?? 60,
+                    // Only meaningful in custom alloc, but always snapshotted.
+                    allocPct: sd.allocPct ?? (100 / stocks.length),
+                    visible:  sd.visible !== false
+                };
+            })
+        };
+
+        const sJson = JSON.stringify(payload, null, 2);
+        const blob = new Blob([sJson], { type: 'application/json;charset=utf-8;' });
+        const sUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = sUrl;
+        a.download = `${sSafe}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(sUrl);
+    }
+
+    // Load a basket from a JSON file. Replaces current basket entirely.
+    // Triggered by BasketList; receives a File object from the hidden input.
+    handleLoadBasket = async (file) => {
+        if (!file) return;
+
+        let payload;
+        try {
+            const sText = await file.text();
+            payload = JSON.parse(sText);
+        } catch (err) {
+            alert('Failed to read basket file: ' + err.message);
+            return;
+        }
+
+        if (!payload || payload.version !== 1 || !Array.isArray(payload.stocks)) {
+            alert('Not a valid basket file.');
+            return;
+        }
+
+        // --- Tear down current basket (engine + state) ---
+        const { stocks: oldStocks } = this.state;
+        for (const s of oldStocks) {
+            engine.removeStock(s);
+        }
+
+        this.setState({
+            stocks: [],
+            stockData: {},
+            selectedStock: null,
+            expandedStock: null,
+            basketResult: null,
+            stockDetail: null
+        });
+
+        // --- Add each stock from payload ---
+        const allocMode = payload.allocMode || 'equal';
+        engine.setAllocMode(allocMode);
+
+        const newStocks = [];
+        const newStockData = {};
+
+        for (const entry of payload.stocks) {
+            const symbol = entry.symbol;
+            if (!symbol) continue;
+
+            const params = {
+                nYears:  entry.nYears  ?? 10,
+                nWinMin: entry.nWinMin ?? 10,
+                nWinMax: entry.nWinMax ?? 31,
+                fPctWin: entry.fPctWin ?? 60
+            };
+
+            // engine.addStock reads OPFS data; if unavailable, skip silently.
+            try {
+                await engine.addStock(symbol, params);
+            } catch (err) {
+                console.warn(`Failed to load ${symbol}:`, err.message);
+                continue;
+            }
+
+            newStocks.push(symbol);
+            newStockData[symbol] = {
+                params,
+                visible: entry.visible !== false,
+                allocPct: entry.allocPct ?? (100 / payload.stocks.length),
+                nDataYears: params.nYears,
+                color: '#888'
+            };
+
+            if (entry.visible === false) {
+                engine.setStockVisible(symbol, false);
+            }
+        }
+
+        // Recompute colors in insertion order
+        const finalStockData = this.recomputeColors(newStocks, newStockData);
+
+        this.setState({
+            stocks: newStocks,
+            stockData: finalStockData,
+            allocMode
+        }, () => {
+            this.refreshAll(null);
+        });
+    }
+
     // ------------------------------------------------------------------
     // Render
     // ------------------------------------------------------------------
@@ -509,6 +666,8 @@ class App extends Component {
                         onToggleExpand={this.handleToggleExpand}
                         onParamChange={this.handleParamChange}
                         onOpenModal={this.handleOpenModal}
+                        onSaveBasket={this.handleSaveBasket}
+                        onLoadBasket={this.handleLoadBasket}
                     />
 
                     <BasketGraph
@@ -525,6 +684,7 @@ class App extends Component {
                         onYearChange={this.handleYearChange}
                         onAllocModeChange={this.handleAllocModeChange}
                         onUpdateAllocPct={this.handleUpdateAllocPct}
+                        onExportCsv={this.handleExportCsv}
                     />
                 </div>
 

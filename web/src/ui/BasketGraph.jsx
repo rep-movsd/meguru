@@ -760,7 +760,8 @@ class BasketGraph extends Component {
     render() {
         const { selectedStock, basketResult, stockDetail, stockData, stocks,
                 allocMode, allocModes, viewMode, selectedYear,
-                onViewModeChange, onYearChange, onAllocModeChange, onUpdateAllocPct } = this.props;
+                onViewModeChange, onYearChange, onAllocModeChange, onUpdateAllocPct,
+                onExportCsv } = this.props;
 
         const hasData = selectedStock ? !!stockDetail : !!basketResult;
         // stockDetail.years is a flat int array [2024, 2023, ...],
@@ -821,6 +822,18 @@ class BasketGraph extends Component {
                     </div>
 
                     <div className="graph-controls-right">
+                        {/* Export verification CSV — basket mode only */}
+                        {!selectedStock && (
+                            <button
+                                className="toggle-btn"
+                                onClick={() => onExportCsv && onExportCsv()}
+                                disabled={!hasData || stocks.length === 0}
+                                title="Download a Google-Sheets-ready CSV to hand-verify engine math"
+                            >
+                                Export CSV
+                            </button>
+                        )}
+
                         {/* View toggle — only in basket mode */}
                         {!selectedStock && (
                             <div className="view-toggle">

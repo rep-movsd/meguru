@@ -113,8 +113,24 @@ const engine = {
 
     setAllocMode(mode, customWeights = []) {
         if (!_module) return;
-        // mode: 0=Equal, 1=Return, 2=Custom
-        _module.setAlloc(mode, customWeights);
+        // Accept either a numeric enum (0=Equal, 1=Return, 2=Custom)
+        // or a string from the UI: 'equal' | 'avgret' | 'mcap' | 'custom'.
+        // 'mcap' isn't implemented in the engine — falls back to Equal.
+        let iMode = 0;
+        if (typeof mode === 'number') {
+            iMode = mode;
+        } else {
+            const sMap = { equal: 0, avgret: 1, mcap: 0, custom: 2 };
+            iMode = sMap[mode] ?? 0;
+        }
+        _module.setAlloc(iMode, customWeights);
+    },
+
+    // Export Google-Sheets-ready verification CSV for the given year.
+    // Pass 0 (or omit) to use the most recent complete year.
+    exportVerifyCsv(year = 0) {
+        if (!_module) return '';
+        return _module.exportVerifyCsv(year);
     },
 
     setMarketCap(_symbol, _mcap) {

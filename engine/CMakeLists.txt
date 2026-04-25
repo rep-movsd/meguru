@@ -11,7 +11,7 @@ if(EMSCRIPTEN)
     # -----------------------------------------------------------------
     set(CMAKE_EXECUTABLE_SUFFIX ".js")
 
-    add_executable(meguru src/utils.cpp src/plan.cpp src/basket.cpp src/bindings.cpp)
+    add_executable(meguru src/utils.cpp src/plan.cpp src/basket.cpp src/verifycsv.cpp src/bindings.cpp)
     target_include_directories(meguru PRIVATE src)
 
     if(MEGURU_DEBUG)
@@ -35,7 +35,7 @@ else()
     # -----------------------------------------------------------------
     # Native build: basket + test harness
     # -----------------------------------------------------------------
-    add_executable(meguru src/main.cpp src/utils.cpp src/plan.cpp src/basket.cpp)
+    add_executable(meguru src/main.cpp src/utils.cpp src/plan.cpp src/basket.cpp src/verifycsv.cpp)
     target_include_directories(meguru PRIVATE src)
 
     if(MEGURU_DEBUG)
