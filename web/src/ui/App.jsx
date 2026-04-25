@@ -479,36 +479,24 @@ class App extends Component {
     // Snapshot the currently-displayed alloc weights into stockData[s].allocPct
     // and switch allocMode to 'custom'. Source matches the alloc bar:
     //   line view + numeric year -> that year's weights
-    //   bar view OR 'Average'    -> average weights across all years
+    //   bar view OR 'Average'    -> average weights across all years ("0" key)
     // Only visible stocks contribute. Pcts are normalized to 100.
     handleCopyToCustom = () => {
         const { basketResult, stocks, stockData, viewMode, selectedYear } = this.state;
         if (!basketResult || stocks.length === 0) return;
 
-        const basketStocks = basketResult.stocks || [];
-        const weights = basketResult.weights;
-        if (!weights || weights.length === 0) return;
-
-        const n = basketStocks.length;
-        let yearWeights = new Array(n).fill(0);
-
+        const wMap = basketResult.weightsPerStock || {};
         const useAverage = viewMode === 'bar' || selectedYear === 'Average';
-        if (useAverage) {
-            for (const yw of weights) {
-                for (let i = 0; i < n; i++) yearWeights[i] += (yw[i] || 0);
-            }
-            for (let i = 0; i < n; i++) yearWeights[i] /= weights.length;
-        } else {
-            const yearIdx = basketResult.years?.findIndex(
-                y => y.year === parseInt(selectedYear)
-            );
-            yearWeights = (yearIdx >= 0 ? weights[yearIdx] : weights[0]).slice();
-        }
+        const yearKey = useAverage ? '0' : String(parseInt(selectedYear));
 
-        // Filter to visible stocks + normalize to 100.
-        const visible = basketStocks
-            .map((s, i) => ({ s, w: yearWeights[i] || 0 }))
-            .filter(({ s }) => stockData[s]?.visible);
+        // Only visible stocks contribute.
+        const visible = stocks
+            .filter(s => stockData[s]?.visible !== false)
+            .map(s => {
+                const wByYear = wMap[s] || {};
+                const w = wByYear[yearKey];
+                return { s, w: (w !== undefined ? w : (wByYear['0'] || 0)) };
+            });
 
         const total = visible.reduce((sum, { w }) => sum + w, 0);
         if (total <= 0) return;
@@ -557,8 +545,9 @@ class App extends Component {
     // ------------------------------------------------------------------
 
     // Save current basket (stocks + params + alloc) to a JSON file.
-    // User provides a name via prompt; name also becomes the filename.
-    handleSaveBasket = () => {
+    // Uses showSaveFilePicker (Chromium) when available so the user gets a
+    // real "Save As" dialog; falls back to <a download> elsewhere.
+    handleSaveBasket = async () => {
         const { stocks, stockData, allocMode } = this.state;
 
         if (stocks.length === 0) {
@@ -566,14 +555,9 @@ class App extends Component {
             return;
         }
 
-        const sDefault = 'basket';
-        const sName = prompt('Name this basket:', sDefault);
-        if (sName === null) return;  // user cancelled
-        const sSafe = (sName.trim() || sDefault).replace(/[^\w\-.]/g, '_');
-
         const payload = {
             version: 1,
-            name: sName.trim() || sDefault,
+            name: 'basket',
             allocMode,
             stocks: stocks.map(s => {
                 const sd = stockData[s] || {};
@@ -584,7 +568,6 @@ class App extends Component {
                     nWinMin:  p.nWinMin  ?? 10,
                     nWinMax:  p.nWinMax  ?? 31,
                     fPctWin:  p.fPctWin  ?? 60,
-                    // Only meaningful in custom alloc, but always snapshotted.
                     allocPct: sd.allocPct ?? (100 / stocks.length),
                     visible:  sd.visible !== false
                 };
@@ -593,10 +576,31 @@ class App extends Component {
 
         const sJson = JSON.stringify(payload, null, 2);
         const blob = new Blob([sJson], { type: 'application/json;charset=utf-8;' });
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: 'basket.json',
+                    types: [{
+                        description: 'Meguru basket',
+                        accept: { 'application/json': ['.json'] }
+                    }]
+                });
+                const w = await handle.createWritable();
+                await w.write(blob);
+                await w.close();
+                return;
+            } catch (e) {
+                if (e?.name === 'AbortError') return;  // user cancelled
+                console.warn('showSaveFilePicker failed, falling back:', e);
+            }
+        }
+
+        // Fallback: anchor download
         const sUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = sUrl;
-        a.download = `${sSafe}.json`;
+        a.download = 'basket.json';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

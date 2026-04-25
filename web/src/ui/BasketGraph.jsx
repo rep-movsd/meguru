@@ -708,49 +708,57 @@ class BasketGraph extends Component {
     // -----------------------------------------------------------------------
 
     getAllocBarData = () => {
-        const { basketResult, stockData, allocMode } = this.props;
+        const { basketResult, stockData, stocks: appStocks, allocMode,
+                selectedYear, viewMode } = this.props;
         if (!basketResult) return null;
 
-        const stocks = basketResult.stocks || [];
-        if (stocks.length === 0) return null;
+        // Source the symbol list from the parent app (engine state) — the
+        // graph result no longer carries a separate `stocks` array; it lives
+        // in the keys of weightsPerStock / perStockPlan.
+        const wMap = basketResult.weightsPerStock || {};
+        const symbols = (appStocks || []).filter(s => wMap[s] !== undefined);
+        if (symbols.length === 0) return null;
 
+        // Custom: use stockData[s].allocPct, normalized to 100 across visible.
         if (allocMode === 'custom') {
-            const visibleStocks = stocks.filter(s => stockData?.[s]?.visible);
-            const total = visibleStocks.reduce((sum, s) => sum + (stockData?.[s]?.allocPct || 0), 0);
-            return visibleStocks.map(s => ({
+            const visible = symbols.filter(s => stockData?.[s]?.visible !== false);
+            const total = visible.reduce(
+                (sum, s) => sum + (stockData?.[s]?.allocPct || 0), 0
+            );
+            return visible.map(s => ({
                 stock: s,
-                pct: total > 0 ? (stockData?.[s]?.allocPct || 0) / total * 100 : 100 / visibleStocks.length,
+                pct: total > 0
+                    ? (stockData?.[s]?.allocPct || 0) / total * 100
+                    : 100 / visible.length,
                 color: stockData?.[s]?.color || '#888'
             }));
         }
 
-        const weights = basketResult.weights;
-        if (!weights || weights.length === 0) return null;
+        // Engine-driven: pull weights from weightsPerStock map.
+        // Bar view OR 'Average' selection -> use the "0" entry (avg across years).
+        // Otherwise -> selected year's weight.
+        const useAverage = viewMode === 'bar' || selectedYear === 'Average';
+        const yearKey = useAverage ? '0' : String(parseInt(selectedYear));
 
-        const { selectedYear, viewMode } = this.props;
-        let yearWeights;
+        const raw = symbols.map(s => {
+            const wByYear = wMap[s] || {};
+            const w = wByYear[yearKey];
+            // Fallback: if a specific year is missing, fall back to avg ('0').
+            return { stock: s, w: (w !== undefined ? w : (wByYear['0'] || 0)) };
+        });
 
-        if (viewMode === 'bar' || selectedYear === 'Average') {
-            // Average weights across all years
-            const n = stocks.length;
-            yearWeights = new Array(n).fill(0);
-            for (const yw of weights) {
-                for (let i = 0; i < n; i++) yearWeights[i] += (yw[i] || 0);
-            }
-            for (let i = 0; i < n; i++) yearWeights[i] /= weights.length;
-        } else {
-            // Find weights for the selected year
-            const yearIdx = basketResult.years?.findIndex(
-                y => y.year === parseInt(selectedYear)
-            );
-            yearWeights = yearIdx >= 0 ? weights[yearIdx] : weights[0];
-        }
+        // Renormalize across visible stocks (engine renormalizes too, but be
+        // defensive in case weightsPerStock holds raw weights).
+        const total = raw.reduce((sum, x) => sum + (x.w || 0), 0);
+        if (total <= 0) return null;
 
-        return stocks.map((s, i) => ({
-            stock: s,
-            pct: (yearWeights[i] || 0) * 100,
-            color: stockData?.[s]?.color || '#888'
-        })).filter(d => d.pct > 0);
+        return raw
+            .filter(x => (x.w || 0) > 0)
+            .map(x => ({
+                stock: x.stock,
+                pct: (x.w / total) * 100,
+                color: stockData?.[x.stock]?.color || '#888'
+            }));
     }
 
     // -----------------------------------------------------------------------
