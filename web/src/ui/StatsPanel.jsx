@@ -1,4 +1,5 @@
 import { Component } from 'preact';
+import { calcQuality, formatQuality } from '../util/metrics';
 
 // Bottom stats panel (20% of viewport height).
 //
@@ -11,6 +12,8 @@ import { Component } from 'preact';
 //   basketResult: object|null - parsed getBasketResult() result
 
 class StatsPanel extends Component {
+
+    state = { capital: 100000 };
 
     renderTradeTable() {
         const { stockDetail } = this.props;
@@ -75,32 +78,110 @@ class StatsPanel extends Component {
     }
 
     renderPerStockSummary() {
-        const { basketResult } = this.props;
-        if (!basketResult || !basketResult.perStock || basketResult.perStock.length === 0) {
+        const { basketResult, stockData } = this.props;
+        if (!basketResult) {
             return <div className="empty-state">Add stocks to see summary</div>;
         }
 
-        const { perStock, stats } = basketResult;
+        const years = Array.isArray(basketResult.years) ? basketResult.years : [];
+        const planMap   = basketResult.perStockPlan   || {};
+        const holdMap   = basketResult.perStockHold   || {};
+        const basketAvg = basketResult.basketAvg      || {};
+        const weightMap = basketResult.weightsPerStock || {};
+        const daysMap   = basketResult.daysInMarket    || {};
 
-        // Precompute per-stock stats
-        const arrStockStats = perStock.map(sr => {
-            const nYrs = sr.years.length;
-            const avgPlan = nYrs > 0 ? sr.years.reduce((s, y) => s + y.plan, 0) / nYrs : 0;
-            const avgBh = nYrs > 0 ? sr.years.reduce((s, y) => s + y.bh, 0) / nYrs : 0;
-            const diff = avgPlan - avgBh;
-            const nBeatsBh = sr.years.filter(y => y.plan > y.bh).length;
-            const profitRatio = avgBh !== 0 ? avgPlan / avgBh : 0;
-            return { stock: sr.stock, avgPlan, avgBh, diff, nBeatsBh, nYrs, profitRatio, daysInMarket: sr.daysInMarket };
+        const symbols = Object.keys(planMap).filter(
+            sym => !stockData || stockData[sym]?.visible !== false
+        );
+        if (symbols.length === 0) {
+            return <div className="empty-state">Add stocks to see summary</div>;
+        }
+
+        // End-of-year fractional return for a curve. last value of [366] array.
+        const endVal = (curve) => {
+            if (!curve || curve.length === 0) return 0;
+            return curve[curve.length - 1];
+        };
+
+        // Per-stock metrics: average plan/hold % across years and quality
+        // scores (winRate * edge) for both plan and B&H per-year returns.
+        const arrStockStats = symbols.map(sym => {
+            const planByYear = planMap[sym] || {};
+            const holdByYear = holdMap[sym] || {};
+
+            let sumPlan = 0, sumHold = 0, nYrs = 0;
+            const planReturns = [];
+            const holdReturns = [];
+            for (const y of years) {
+                const k = String(y);
+                const p = endVal(planByYear[k]);
+                const h = endVal(holdByYear[k]);
+                if (planByYear[k] === undefined && holdByYear[k] === undefined) continue;
+                sumPlan += p;
+                sumHold += h;
+                planReturns.push(p);
+                holdReturns.push(h);
+                nYrs++;
+            }
+            const avgPlan = nYrs > 0 ? sumPlan / nYrs : 0;
+            const avgHold = nYrs > 0 ? sumHold / nYrs : 0;
+
+            return {
+                stock: sym,
+                avgPlan: avgPlan * 100,
+                avgBh:   avgHold * 100,
+                nYrs,
+                daysFrac: (daysMap[sym] || 0) * 100,
+                planQuality: calcQuality(planReturns, holdReturns, daysMap[sym] || 0)
+            };
         });
 
-        // Also compute basket totals from stats
-        const totals = stats ? {
-            avgPlan: stats.avgPlan,
-            avgBh: stats.avgBh,
-            diff: stats.avgPlan - stats.avgBh,
-            nBeatsBh: stats.beatsBh,
-            nYrs: stats.totalYears,
-            profitRatio: stats.avgBh !== 0 ? stats.avgPlan / stats.avgBh : 0,
+        // Basket totals: plan curve from basketAvg, B&H curve = weighted sum of
+        // per-stock hold curves using year-specific weights.
+        // Days-in-market: weighted average across stocks using key-0 weights.
+        let totalPlan = 0, totalHold = 0, totalYrs = 0;
+        const basketPlanReturns = [];
+        const basketBhReturns = [];
+        for (const y of years) {
+            const k = String(y);
+            const planEnd = endVal(basketAvg[k]);
+            // weighted B&H end-of-year
+            let bhEnd = 0, wSum = 0;
+            for (const sym of symbols) {
+                const w = (weightMap[sym] || {})[k];
+                if (w === undefined) continue;
+                const h = endVal((holdMap[sym] || {})[k]);
+                bhEnd += w * h;
+                wSum += w;
+            }
+            if (wSum > 0) bhEnd = bhEnd / wSum;
+
+            if (basketAvg[k] === undefined) continue;
+            totalPlan += planEnd;
+            totalHold += bhEnd;
+            basketPlanReturns.push(planEnd);
+            basketBhReturns.push(bhEnd);
+            totalYrs++;
+        }
+        // Weighted-average days-in-market across stocks (using key-0 weights)
+        let basketDaysFrac = 0, basketWSum = 0;
+        for (const sym of symbols) {
+            const w = (weightMap[sym] || {})['0'];
+            const d = daysMap[sym];
+            if (w === undefined || d === undefined) continue;
+            basketDaysFrac += w * d;
+            basketWSum += w;
+        }
+        if (basketWSum > 0) basketDaysFrac /= basketWSum;
+
+        const totalsAvgPlan = totalYrs > 0 ? totalPlan / totalYrs : 0;
+        const totalsAvgBh   = totalYrs > 0 ? totalHold / totalYrs : 0;
+        const totals = totalYrs > 0 ? {
+            avgPlan:     totalsAvgPlan * 100,
+            avgBh:       totalsAvgBh   * 100,
+            nYrs:        totalYrs,
+            daysFrac:    basketDaysFrac * 100,
+            planQuality: calcQuality(basketPlanReturns, basketBhReturns, basketDaysFrac)
         } : null;
 
         const nLabelWidth = 100;
@@ -110,6 +191,10 @@ class StatsPanel extends Component {
 
         const fmtPct = (v) => (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
         const clsPct = (v) => v >= 0 ? 'positive' : 'negative';
+
+        // Allocation row: % of basket capital per stock (key-0 weight).
+        const fmtAllocPct = (w) => (w == null || !Number.isFinite(w)) ? '-' : (w * 100).toFixed(1) + '%';
+        const weightFor = (sym) => (weightMap[sym] || {})['0'];
 
         return (
             <div className="trade-table-container">
@@ -130,6 +215,13 @@ class StatsPanel extends Component {
                     </thead>
                     <tbody>
                         <tr>
+                            <td style={{ textAlign: 'left' }}>Allocation</td>
+                            {totals && <td>100.0%</td>}
+                            {arrStockStats.map(s => (
+                                <td key={s.stock}>{fmtAllocPct(weightFor(s.stock))}</td>
+                            ))}
+                        </tr>
+                        <tr>
                             <td style={{ textAlign: 'left' }}>Plan Return</td>
                             {totals && <td className={clsPct(totals.avgPlan)}>{fmtPct(totals.avgPlan)}</td>}
                             {arrStockStats.map(s => (
@@ -138,37 +230,23 @@ class StatsPanel extends Component {
                         </tr>
                         <tr>
                             <td style={{ textAlign: 'left' }}>B&H Return</td>
-                            {totals && <td>{fmtPct(totals.avgBh)}</td>}
+                            {totals && <td className={clsPct(totals.avgBh)}>{fmtPct(totals.avgBh)}</td>}
                             {arrStockStats.map(s => (
-                                <td key={s.stock}>{fmtPct(s.avgBh)}</td>
+                                <td key={s.stock} className={clsPct(s.avgBh)}>{fmtPct(s.avgBh)}</td>
                             ))}
                         </tr>
                         <tr>
-                            <td style={{ textAlign: 'left' }}>Difference</td>
-                            {totals && <td className={clsPct(totals.diff)}>{fmtPct(totals.diff)}</td>}
+                            <td style={{ textAlign: 'left' }}>Days In Market</td>
+                            {totals && <td>{totals.daysFrac.toFixed(1)}%</td>}
                             {arrStockStats.map(s => (
-                                <td key={s.stock} className={clsPct(s.diff)}>{fmtPct(s.diff)}</td>
+                                <td key={s.stock}>{s.daysFrac.toFixed(1)}%</td>
                             ))}
                         </tr>
                         <tr>
-                            <td style={{ textAlign: 'left' }}>Beats B&H</td>
-                            {totals && <td>{totals.nBeatsBh}/{totals.nYrs}</td>}
+                            <td style={{ textAlign: 'left' }}>Plan Quality</td>
+                            {totals && <td className={totals.planQuality > 0 ? 'positive' : 'negative'}>{formatQuality(totals.planQuality)}</td>}
                             {arrStockStats.map(s => (
-                                <td key={s.stock}>{s.nBeatsBh}/{s.nYrs}</td>
-                            ))}
-                        </tr>
-                        <tr>
-                            <td style={{ textAlign: 'left' }}>Profit Ratio</td>
-                            {totals && <td className={clsPct(totals.profitRatio - 1)}>{totals.profitRatio.toFixed(2)}x</td>}
-                            {arrStockStats.map(s => (
-                                <td key={s.stock} className={clsPct(s.profitRatio - 1)}>{s.profitRatio.toFixed(2)}x</td>
-                            ))}
-                        </tr>
-                        <tr>
-                            <td style={{ textAlign: 'left' }}>In Market</td>
-                            {totals && <td></td>}
-                            {arrStockStats.map(s => (
-                                <td key={s.stock}>{s.daysInMarket}/365</td>
+                                <td key={s.stock} className={s.planQuality > 0 ? 'positive' : 'negative'}>{formatQuality(s.planQuality)}</td>
                             ))}
                         </tr>
                     </tbody>

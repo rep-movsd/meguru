@@ -28,6 +28,14 @@ void CBasket::addStock(cstr& sSymbol, CREF(TPlanParams) params) {
 void CBasket::removeStock(cstr& sSymbol) {
     m_dctPlanForStock.erase(sSymbol);
     std::erase(m_arrStocks, sSymbol);
+    m_setHidden.erase(sSymbol);
+}
+
+void CBasket::setVisible(cstr& sSymbol, bool bVisible) {
+    if(!m_dctPlanForStock.contains(sSymbol)) return;
+    if(bVisible) m_setHidden.erase(sSymbol);
+    else         m_setHidden.insert(sSymbol);
+    DEBUG_LOG("CBasket::setVisible: %s = %d", sSymbol.c_str(), (int)bVisible);
 }
 
 void CBasket::setParams(cstr& sSymbol, CREF(TPlanParams) params) {
@@ -89,7 +97,14 @@ TGraphData CBasket::getGraphData(i32 nYears) const {
         auto& dctPlan = result.dctReturnsPerStockPlan[sSymbol];
         auto& dctHold = result.dctReturnsPerStockHold[sSymbol];
 
-        TPrices arrAvgPlan(0.0, DAYS);
+        // Days in market: sum of (iEnd - iBeg) across non-overlapping windows.
+        // Normalized to fraction of trading year (DAYS-1 = 365).
+        i32 nDaysIn = 0;
+        for(CAUTOREF stat : plan.m_arrWindowStats) {
+            nDaysIn += (stat.iEnd - stat.iBeg);
+        }
+        result.dctDaysInMarket[sSymbol] = static_cast<f64>(nDaysIn) / static_cast<f64>(DAYS - 1);
+
         TPrices arrAvgHold(0.0, DAYS);
         i32 nYearsWithData = 0;
 
@@ -102,17 +117,15 @@ TGraphData CBasket::getGraphData(i32 nYears) const {
                 dctPlan[iYear] = calcPlanGains(plan.m_arrWindowStats, arrPrices);
 
                 arrAvgHold += dctHold[iYear];
-                arrAvgPlan += dctPlan[iYear];
                 ++nYearsWithData;
             }
         }
 
         if(nYearsWithData > 0) {
             arrAvgHold /= nYearsWithData;
-            arrAvgPlan /= nYearsWithData;
         }
         dctHold[0] = std::move(arrAvgHold);
-        dctPlan[0] = std::move(arrAvgPlan);
+        dctPlan[0] = computeAvgPlanCurve(plan, result.arrYears);
     }
 
 
@@ -160,6 +173,12 @@ TGraphData CBasket::getGraphData(i32 nYears) const {
             break;
         }
 
+        // Zero out hidden stocks — they contribute nothing to basket aggregation.
+        // Per-key participation logic below renormalizes remaining weights.
+        FOR(i, 0, nStocks) {
+            if(m_setHidden.contains(m_arrStocks[i])) arrBaseWeights[i] = 0.0;
+        }
+
         // --- per-year basket curve (plus key 0 for overall average) ---
         vint arrKeys = result.arrYears;
         arrKeys.push_back(0);  // key 0 = average curve
@@ -196,4 +215,127 @@ TGraphData CBasket::getGraphData(i32 nYears) const {
     }
 
     return result;
+}
+
+// ---------------------------------------------------------------------------
+// optimizeStockParams — grid search over (nWinMin, pctThreshold)
+// ---------------------------------------------------------------------------
+
+TPlanParams CBasket::optimizeStockParams(cstr& sSymbol) {
+    CAUTO it = m_dctPlanForStock.find(sSymbol);
+    if(it == m_dctPlanForStock.end()) return {};
+
+    auto& plan = it->second;
+    const TPlanParams basePrm = plan.m_params;
+
+    // Grid: nWinMin in [3, 90] step 1; pctThreshold in [10, 100] step 1.
+    // ≈ 88 × 91 = 8008 combos. updatePlan is cheap (no I/O).
+    f64 fBestReturn = -1e30;
+    TPlanParams bestPrm = basePrm;
+
+    FOR(iWin, 3, 91) {
+        if(iWin > basePrm.nWinMax) break;
+        FOR(iPct, 50, 101) {
+            TPlanParams trialPrm = basePrm;
+            trialPrm.nWinMin      = iWin;
+            trialPrm.pctThreshold = static_cast<f64>(iPct);
+
+            plan.m_params = trialPrm;
+            updatePlan(plan);
+
+            // Plan return = last day of avg plan curve across plan.m_arrYears.
+            CAUTO arrAvg = computeAvgPlanCurve(plan, plan.m_arrYears);
+            CAUTO fAvg   = arrAvg[DAYS - 1];
+
+            if(fAvg > fBestReturn) {
+                fBestReturn = fAvg;
+                bestPrm     = trialPrm;
+            }
+        }
+    }
+
+    // Apply best
+    plan.m_params = bestPrm;
+    updatePlan(plan);
+    DEBUG_LOG("optimizeStockParams: %s best nWinMin=%d pct=%.1f return=%.4f",
+              sSymbol.c_str(), bestPrm.nWinMin, bestPrm.pctThreshold, fBestReturn);
+    return bestPrm;
+}
+
+// ---------------------------------------------------------------------------
+// optimizeAllocation — weights ∝ per-stock Quality
+// ---------------------------------------------------------------------------
+//
+// For each stock, compute its Quality from the per-year plan returns,
+// per-year B&H returns, and days-in-market fraction (same calcQuality
+// used by the UI). Weight each stock by max(0, quality), normalize.
+// All-zero / all-negative → equal weights.
+// Year set = each stock's own m_arrYears (matches displayed Quality).
+
+vf64 CBasket::optimizeAllocation() {
+    const i32 nStocks = static_cast<i32>(m_arrStocks.size());
+    if(nStocks == 0) return {};
+    if(nStocks == 1) {
+        m_eAllocMode      = EAllocMode::Custom;
+        m_arrCustomWeights = {1.0};
+        return m_arrCustomWeights;
+    }
+
+    vf64 arrQuality(nStocks, 0.0);
+    FOR(i, 0, nStocks) {
+        // Hidden stocks get 0 weight — excluded from optimization.
+        if(m_setHidden.contains(m_arrStocks[i])) continue;
+
+        CAUTO it = m_dctPlanForStock.find(m_arrStocks[i]);
+        if(it == m_dctPlanForStock.end()) continue;
+        CAUTOREF plan = it->second;
+
+        // Days-in-market fraction
+        i32 nDaysIn = 0;
+        for(CAUTOREF stat : plan.m_arrWindowStats) nDaysIn += (stat.iEnd - stat.iBeg);
+        CAUTO fDaysFrac = static_cast<f64>(nDaysIn) / static_cast<f64>(DAYS - 1);
+
+        // Per-year plan & B&H last-day returns across stock's own years
+        vf64 arrPlan, arrBh;
+        for(CAUTO iYear : plan.m_arrYears) {
+            CAUTO itY = plan.m_mapYearData.find(iYear);
+            if(itY == plan.m_mapYearData.end()) continue;
+            CAUTOREF arrPrices = itY->second.arrPrices;
+            if(arrPrices[0] == 0.0) continue;
+            CAUTO arrPlanCurve = calcPlanGains(plan.m_arrWindowStats, arrPrices);
+            arrPlan.push_back(arrPlanCurve[DAYS - 1]);
+            arrBh  .push_back((arrPrices[DAYS - 1] / arrPrices[0]) - 1.0);
+        }
+
+        arrQuality[i] = calcQuality(arrPlan, arrBh, fDaysFrac);
+        DEBUG_LOG("optimizeAllocation: %s quality=%.4f daysFrac=%.3f nYrs=%d",
+                  m_arrStocks[i].c_str(), arrQuality[i], fDaysFrac,
+                  static_cast<i32>(arrPlan.size()));
+    }
+
+    // Weights ∝ max(0, quality)
+    vf64 arrW(nStocks, 0.0);
+    f64 fSum = 0.0;
+    FOR(i, 0, nStocks) {
+        arrW[i] = std::max(0.0, arrQuality[i]);
+        fSum   += arrW[i];
+    }
+
+    if(fSum > 0.0) {
+        FOR(i, 0, nStocks) arrW[i] /= fSum;
+    } else {
+        // All non-positive → equal weights across visible stocks
+        i32 nVisible = 0;
+        FOR(i, 0, nStocks) if(!m_setHidden.contains(m_arrStocks[i])) ++nVisible;
+        if(nVisible == 0) nVisible = nStocks;  // shouldn't happen, safety
+        FOR(i, 0, nStocks) {
+            arrW[i] = m_setHidden.contains(m_arrStocks[i]) ? 0.0 : (1.0 / nVisible);
+        }
+    }
+
+    m_eAllocMode       = EAllocMode::Custom;
+    m_arrCustomWeights = arrW;
+
+    DEBUG_LOG("optimizeAllocation: nStocks=%d sumQuality=%.4f", nStocks, fSum);
+    return arrW;
 }

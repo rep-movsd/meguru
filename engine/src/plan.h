@@ -44,3 +44,16 @@ TPrices calcPlanGains(CREF(TWindowStats) arrWindowStats, CREF(TPrices) arrStockP
 
 // Full recompute of a plan: years → avg curve → windows → stats.
 void updatePlan(TPlan& plan);
+
+// Average plan-gains curve across the given years. Years missing data
+// (or with zero first-day price) are skipped. Returns DAYS-length valarray
+// of the per-year mean cumulative gain. Used by getGraphData (key 0) and
+// the auto-optimizer.
+TPrices computeAvgPlanCurve(CREF(TPlan) plan, CREF(vint) arrYears);
+
+// Quality score: capital efficiency × downside-risk penalty.
+// Port of metrics.js calcQuality. Pass an empty arrBhReturns + fDaysFrac<=0
+// to skip the efficiency term and return a downside-penalized scaled mean.
+f64 calcQuality(CREF(vf64) arrPlanReturns,
+                CREF(vf64) arrBhReturns,
+                f64 fDaysFrac);

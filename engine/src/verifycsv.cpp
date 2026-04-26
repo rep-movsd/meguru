@@ -140,7 +140,7 @@ void CVerifyCsvWriter::writeSummary(ostream& ofs) const {
 
     // Row 2
     vstr row2 = {"WEIGHTS"};
-    for(CAUTO w : m_arrWeights) row2.push_back(format("{:.6f}", w));
+    for(CAUTO w : m_arrWeights) row2.push_back(format("{:.2f}", w));
     writeVec(row2, ofs);
 
     // Row 3: RETURN_PCT
@@ -149,16 +149,16 @@ void CVerifyCsvWriter::writeSummary(ostream& ofs) const {
         // Profit column = J (ECSVCol::Profit = 9 → 'A'+9 = 'J'); Cash = I.
         CAUTO sProfitCell = REF(Profit, sd.iLastRow);
         CAUTO sCashStart  = REF(Cash,   sd.iStartRow);
-        row3.push_back(format("=LET(pre, {}/{}*100, IF(pre>0, pre*0.8, pre))",
+        row3.push_back(format("=ROUND(LET(pre, {}/{}*100, IF(pre>0, pre*0.8, pre)), 2)",
             sProfitCell, sCashStart));
     }
     if(nStocks > 0) {
         const char cFirst = 'A' + 1;
         const char cLast  = 'A' + nStocks;
-        row3.push_back(format("=SUMPRODUCT({}{}:{}{}, {}{}:{}{})",
+        row3.push_back(format("=ROUND(SUMPRODUCT({}{}:{}{}, {}{}:{}{}), 2)",
             cFirst, WeightsRow   + 1, cLast, WeightsRow   + 1,
             cFirst, ReturnPctRow + 1, cLast, ReturnPctRow + 1));
-        row3.push_back(format("{:.4f}%", m_fEngineBasketReturn * 100.0));
+        row3.push_back(format("{:.2f}%", m_fEngineBasketReturn * 100.0));
     } else {
         row3.push_back("");
         row3.push_back("");
@@ -197,25 +197,25 @@ void CVerifyCsvWriter::setTradeRow(CREF(TWindow) window, bool bIsBuy) {
     row[Action] = bIsBuy ? "BUY" : "SELL";
     row[Date]   = format("=DATE({}, {}, {})", m_sCellYear, sMonth, sDay);
     // Literal price from the year's data
-    row[Price]  = format("{:.4f}", (*m_pPrices)[iDay]);
+    row[Price]  = format("{:.2f}", (*m_pPrices)[iDay]);
 
     // Held = prev Held + Traded
-    row[Held] = "=" + CALC(Held, '+', Traded, -1);
+    row[Held] = "=ROUND(" + CALC(Held, '+', Traded, -1) + ", 2)";
 
     // Traded:
     //   BUY  : =FLOOR(Cash_prev / (1 + FeeRate) / Price)
     //   SELL : =-Held_prev
     if(bIsBuy) {
-        row[Traded] = format("=FLOOR({} / {})",
+        row[Traded] = format("=ROUND(FLOOR({} / {}), 2)",
             CALC(Cash, '/', Price, -1),
             format("(1 + {})", RATE_FEE));
     } else {
-        row[Traded] = "=-" + REF(Held, m_iRow - 1);
+        row[Traded] = "=ROUND(-" + REF(Held, m_iRow - 1) + ", 2)";
     }
 
-    row[Cost] = "=" + CALC(Price, '*', Traded);
-    row[Fees] = format("={}{} * {}", sFeeSign, REF(Cost, m_iRow), RATE_FEE);
-    row[Cash] = format("={} - {}", REF(Cash, m_iRow - 1), CALC(Cost, '+', Fees));
+    row[Cost] = "=ROUND(" + CALC(Price, '*', Traded) + ", 2)";
+    row[Fees] = format("=ROUND({}{} * {}, 2)", sFeeSign, REF(Cost, m_iRow), RATE_FEE);
+    row[Cash] = format("=ROUND({} - {}, 2)", REF(Cash, m_iRow - 1), CALC(Cost, '+', Fees));
 
     ++m_iRow;
 }
@@ -249,7 +249,7 @@ void CVerifyCsvWriter::writeStockSection(CREF(TVerifyStockData) sd, ostream& ofs
     // Profit on last row = Cash_last - Cash_start
     CAUTO sCashStart = REF(Cash, Start + m_iRowOffset);
     CAUTO sCashLast  = REF(Cash, m_iRow - 1);
-    m_grid.back()[Profit] = format("={} - {}", sCashLast, sCashStart);
+    m_grid.back()[Profit] = format("=ROUND({} - {}, 2)", sCashLast, sCashStart);
 
     for(CAUTOREF r : m_grid) writeRow(r, ofs);
 

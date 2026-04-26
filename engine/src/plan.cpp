@@ -163,3 +163,66 @@ void updatePlan(TPlan& plan) {
     plan.m_arrWindowStats = computeWindowStats(plan.m_arrWindows, plan.m_mapYearData,
                                                 plan.m_arrYears, plan.m_params);
 }
+
+// ---------------------------------------------------------------------------
+// computeAvgPlanCurve — average plan-gains curve across the given years
+// ---------------------------------------------------------------------------
+TPrices computeAvgPlanCurve(CREF(TPlan) plan, CREF(vint) arrYears) {
+    TPrices arrAvg(0.0, DAYS);
+    i32 nYearsWithData = 0;
+    for(CAUTO iYear : arrYears) {
+        CAUTO it = plan.m_mapYearData.find(iYear);
+        if(it == plan.m_mapYearData.end()) continue;
+        if(!it->second.arrPrices[0]) continue;
+        arrAvg += calcPlanGains(plan.m_arrWindowStats, it->second.arrPrices);
+        ++nYearsWithData;
+    }
+    if(nYearsWithData > 0) arrAvg /= nYearsWithData;
+    return arrAvg;
+}
+
+// ---------------------------------------------------------------------------
+// calcQuality — port of web/src/util/metrics.js calcQuality
+// ---------------------------------------------------------------------------
+//
+//   efficiency = mean(plan) / max(|expected|, eps) * sign(expected)
+//                where expected = mean(bh) * daysFrac
+//   downside   = sqrt(mean(min(plan_y, 0)^2))
+//   penalty    = 1 / (1 + K_DOWNSIDE * downside)
+//   quality    = efficiency * penalty   (or meanPlan*penalty*10 when no bh)
+//
+f64 calcQuality(CREF(vf64) arrPlanReturns,
+                CREF(vf64) arrBhReturns,
+                f64 fDaysFrac)
+{
+    const i32 n = static_cast<i32>(arrPlanReturns.size());
+    if(n == 0) return 0.0;
+
+    f64 fSumPlan   = 0.0;
+    f64 fSumDownSq = 0.0;
+    FOR(i, 0, n) {
+        CAUTO p = arrPlanReturns[i];
+        fSumPlan += p;
+        if(p < 0.0) fSumDownSq += p * p;
+    }
+    CAUTO fMeanPlan = fSumPlan / n;
+    CAUTO fDownside = std::sqrt(fSumDownSq / n);
+    constexpr f64 K_DOWNSIDE = 3.0;
+    CAUTO fPenalty = 1.0 / (1.0 + K_DOWNSIDE * fDownside);
+
+    // No benchmark / daysFrac → scaled mean × penalty
+    if(arrBhReturns.empty() || fDaysFrac <= 0.0) {
+        return fMeanPlan * fPenalty * 10.0;
+    }
+
+    f64 fSumBh = 0.0;
+    FOR(i, 0, static_cast<i32>(arrBhReturns.size())) fSumBh += arrBhReturns[i];
+    CAUTO fMeanBh = fSumBh / arrBhReturns.size();
+
+    CAUTO fExpected = fMeanBh * fDaysFrac;
+    constexpr f64 EPS = 0.01;
+    CAUTO fSign = (fExpected > 0.0) ? 1.0 : (fExpected < 0.0 ? -1.0 : 1.0);
+    CAUTO fEfficiency = fMeanPlan / std::max(std::abs(fExpected), EPS) * fSign;
+
+    return fEfficiency * fPenalty;
+}

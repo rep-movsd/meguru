@@ -15,6 +15,7 @@ import { Component } from 'preact';
 //   onOpenModal: () => void
 //   onSaveBasket: () => void
 //   onLoadBasket: (File) => void
+//   onOptimize: (symbol) => void
 
 class BasketList extends Component {
 
@@ -26,9 +27,10 @@ class BasketList extends Component {
         // When nYears changes, snap fPctWin to the nearest valid step
         if (field === 'nYears') {
             const fStep = 100 / value;
+            const fMin = Math.ceil(50 / fStep) * fStep;
             newParams.fPctWin = Math.round(newParams.fPctWin / fStep) * fStep;
-            // Clamp to [fStep, 100]
-            newParams.fPctWin = Math.max(fStep, Math.min(100, newParams.fPctWin));
+            // Clamp to [fMin, 100] — Win% floor 50%
+            newParams.fPctWin = Math.max(fMin, Math.min(100, newParams.fPctWin));
             newParams.fPctWin = +newParams.fPctWin.toFixed(2);
         }
 
@@ -138,6 +140,13 @@ class BasketList extends Component {
                                         <span className="stock-name">{stock}</span>
                                         <div className="item-actions">
                                             <button
+                                                className="icon-button optimize"
+                                                onClick={(e) => { e.stopPropagation(); this.props.onOptimize && this.props.onOptimize(stock); }}
+                                                title="Auto-optimize parameters"
+                                            >
+                                                {'\u{1F4A1}'}
+                                            </button>
+                                            <button
                                                 className="icon-button toggle-vis"
                                                 onClick={(e) => { e.stopPropagation(); onToggleVisible(stock); }}
                                                 title={isHidden ? 'Show' : 'Hide'}
@@ -158,7 +167,7 @@ class BasketList extends Component {
                                     {isExpanded && (
                                         <div className="basket-item-accordion">
                                             <div className="slider-group">
-                                                <label>Years</label>
+                                                <label>Sample years</label>
                                                 <input
                                                     type="range" min="1" max={data.nDataYears || 25} step="1"
                                                     value={p.nYears}
@@ -176,22 +185,15 @@ class BasketList extends Component {
                                                 <span className="slider-value">{p.nWinMin}</span>
                                             </div>
                                             <div className="slider-group">
-                                                <label>Max Window</label>
-                                                <input
-                                                    type="range" min="5" max="180" step="1"
-                                                    value={p.nWinMax}
-                                                    onInput={(e) => this.handleSliderChange(stock, 'nWinMax', parseInt(e.target.value))}
-                                                />
-                                                <span className="slider-value">{p.nWinMax}</span>
-                                            </div>
-                                            <div className="slider-group">
                                                 <label>Win %</label>
                                                 {(() => {
                                                     const fStep = +(100 / p.nYears).toFixed(2);
+                                                    // Floor min at 50% — snap up to nearest step >= 50.
+                                                    const fMin = Math.ceil(50 / fStep) * fStep;
                                                     return (
                                                         <>
                                                             <input
-                                                                type="range" min={fStep} max="100" step={fStep}
+                                                                type="range" min={fMin} max="100" step={fStep}
                                                                 value={p.fPctWin}
                                                                 onInput={(e) => this.handleSliderChange(stock, 'fPctWin', parseFloat(e.target.value))}
                                                             />

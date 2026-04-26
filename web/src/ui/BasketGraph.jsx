@@ -1,6 +1,7 @@
 import { Component, createRef } from 'preact';
 import Chart from 'chart.js/auto';
 import { getBasketColors } from './utils';
+import { calcQuality, formatQuality } from '../util/metrics';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -81,9 +82,8 @@ class BasketGraph extends Component {
         if (!this.chartRef.current) return;
         const ctx = this.chartRef.current.getContext('2d');
 
-        if (this.props.selectedStock) {
-            this.createStockChart(ctx);
-        } else if (this.props.viewMode === 'bar') {
+        // Always basket-level chart. Stock selection only drives the stats panel.
+        if (this.props.viewMode === 'bar') {
             this.createBarChart(ctx);
         } else {
             this.createLineChart(ctx);
@@ -116,6 +116,50 @@ class BasketGraph extends Component {
     };
 
     // Trade window overlay plugin (for stock mode)
+    // Plugin for basket line chart: shaded rectangles for the selected stock's
+    // trading windows. Source: chart.data.tradeWindows = [{iBeg,iEnd,pctExpected}].
+    // Dark green when avg expected > 0 (gain), dark red when < 0 (loss).
+    basketTradeWindowPlugin = {
+        id: 'basketTradeWindows',
+        afterDatasetsDraw: (chart) => {
+            const wins = chart.data.tradeWindows;
+            if (!wins || !wins.length) return;
+
+            const ctx = chart.ctx;
+            const xScale = chart.scales.x;
+            const yScale = chart.scales.y;
+
+            ctx.save();
+            for (const w of wins) {
+                const x1 = xScale.getPixelForValue(w.iBeg);
+                const x2 = xScale.getPixelForValue(w.iEnd);
+                const isGain = (w.pctExpected ?? 0) >= 0;
+                ctx.fillStyle = isGain
+                    ? 'rgba(0, 100, 0, 0.28)'
+                    : 'rgba(140, 0, 0, 0.28)';
+                ctx.fillRect(x1, yScale.top, x2 - x1, yScale.bottom - yScale.top);
+            }
+
+            // Labels above rectangles: avg expected %
+            ctx.font = '11px "Courier New", Courier, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+            ctx.shadowBlur = 3;
+
+            for (const w of wins) {
+                const x1 = xScale.getPixelForValue(w.iBeg);
+                const x2 = xScale.getPixelForValue(w.iEnd);
+                const xc = (x1 + x2) / 2;
+                const pct = w.pctExpected ?? 0;
+                const sign = pct >= 0 ? '+' : '';
+                ctx.fillStyle = pct >= 0 ? '#4CAF50' : '#f44336';
+                ctx.fillText(sign + pct.toFixed(1) + '%', xc, yScale.top + 6);
+            }
+            ctx.restore();
+        }
+    };
+
     tradeWindowPlugin = {
         id: 'tradeWindows',
         afterDatasetsDraw: (chart) => {
@@ -181,7 +225,7 @@ class BasketGraph extends Component {
         this.chart = new Chart(ctx, {
             type: 'line',
             data: { labels: [], datasets: [] },
-            plugins: [this.verticalLinePlugin],
+            plugins: [this.verticalLinePlugin, this.basketTradeWindowPlugin],
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -458,9 +502,9 @@ class BasketGraph extends Component {
     updateChart = () => {
         if (!this.chart) return;
 
-        if (this.props.selectedStock) {
-            this.updateStockChart();
-        } else if (this.props.viewMode === 'bar') {
+        // Graph is always basket-level. Selecting a stock only drives the
+        // bottom trade-windows panel — never switches the chart.
+        if (this.props.viewMode === 'bar') {
             this.updateBarChart();
         } else {
             this.updateLineChart();
@@ -468,7 +512,7 @@ class BasketGraph extends Component {
     }
 
     updateLineChart = () => {
-        const { basketResult } = this.props;
+        const { basketResult, selectedYear, stockData } = this.props;
         if (!basketResult) {
             this.chart.data.labels = [];
             this.chart.data.datasets = [];
@@ -476,22 +520,52 @@ class BasketGraph extends Component {
             return;
         }
 
-        const yearData = this._resolveYearData(basketResult);
-
-        if (!yearData) {
+        const { perStockPlan, perStockHold, basketAvg, weightsPerStock } = basketResult;
+        if (!basketAvg) {
             this.chart.data.labels = [];
             this.chart.data.datasets = [];
             this.chart.update();
             return;
         }
 
+        // Year key: 0 = average across years, else specific year (numeric).
+        const yearKey = (selectedYear === 'Average' || !selectedYear)
+            ? 0
+            : parseInt(selectedYear);
+
+        // Plan curve direct from engine (already weighted across stocks).
+        const planCurve = basketAvg[yearKey];
+        if (!planCurve) {
+            this.chart.data.labels = [];
+            this.chart.data.datasets = [];
+            this.chart.update();
+            return;
+        }
+
+        // Build basket B&H curve in JS: Σ stocks weight[s][yearKey] * hold[s][yearKey].
+        // Only visible stocks (engine already excluded hidden from weightsPerStock).
+        const bhCurve = new Array(DAYS).fill(0);
+        let bhWeightSum = 0;
+        const symbols = Object.keys(weightsPerStock || {});
+        for (const sym of symbols) {
+            if (stockData && stockData[sym]?.visible === false) continue;
+            const w = (weightsPerStock[sym] || {})[yearKey];
+            if (!w) continue;
+            const hold = (perStockHold?.[sym] || {})[yearKey];
+            if (!hold || hold.length !== DAYS) continue;
+            for (let i = 0; i < DAYS; i++) bhCurve[i] += w * hold[i];
+            bhWeightSum += w;
+        }
+        const hasBh = bhWeightSum > 0;
+
         const labels = Array.from({ length: DAYS }, (_, i) => i + 1);
         const datasets = [];
 
-        if (yearData.buyHold?.length > 0) {
+        if (hasBh) {
+            // Convert fractional returns to percentage for display consistency
             datasets.push({
                 label: 'B&H',
-                data: yearData.buyHold,
+                data: bhCurve.map(v => v * 100),
                 borderColor: 'rgb(75, 192, 192)',
                 tension: 0.1,
                 borderWidth: 1.5,
@@ -500,77 +574,42 @@ class BasketGraph extends Component {
             });
         }
 
-        if (yearData.returns?.length > 0) {
-            datasets.push({
-                label: 'Plan',
-                data: yearData.returns,
-                borderColor: 'rgb(76, 175, 80)',
-                tension: 0,
-                borderWidth: 2,
-                pointRadius: 0,
-                pointHoverRadius: 4
-            });
-        }
+        // planCurve is fractional returns ([0..1]) — multiply by 100 for percent
+        datasets.push({
+            label: 'Plan',
+            data: Array.from(planCurve, v => v * 100),
+            borderColor: 'rgb(76, 175, 80)',
+            tension: 0,
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 4
+        });
 
         this.chart.data.labels = labels;
         this.chart.data.datasets = datasets;
-        this.chart.update();
-    }
 
-    updateStockChart = () => {
-        const { stockDetail } = this.props;
-        if (!stockDetail) {
-            this.chart.data.labels = [];
-            this.chart.data.datasets = [];
-            this.chart.update();
-            return;
-        }
-
-        const yearData = this._resolveYearData(stockDetail);
-
-        if (!yearData) {
-            this.chart.data.labels = [];
-            this.chart.data.datasets = [];
-            this.chart.update();
-            return;
-        }
-
-        const labels = Array.from({ length: DAYS }, (_, i) => i + 1);
-        const datasets = [];
-
-        // B&H line (normalized prices)
-        if (yearData.prices?.length > 0) {
-            const basePrice = yearData.prices[0];
-            const normalized = yearData.prices.map(p => ((p / basePrice) - 1) * 100);
-            datasets.push({
-                label: 'B&H',
-                data: normalized,
-                originalPrices: yearData.prices,
-                borderColor: 'rgb(75, 192, 192)',
-                tension: 0.1,
-                borderWidth: 1.5,
-                pointRadius: 0,
-                pointHoverRadius: 4
+        // Trade-window overlay: only when a single stock is selected.
+        // For 'Average' selection use stat.pctExpected (avg across years).
+        // For a specific year use stat.yearlyReturns[idx] where idx maps via stockDetail.years.
+        const stockDetail = this.props.stockDetail;
+        if (this.props.selectedStock && stockDetail?.stats?.length) {
+            const sel = this.props.selectedYear;
+            const useAvg = (sel === 'Average' || !sel);
+            let yearIdx = -1;
+            if (!useAvg && Array.isArray(stockDetail.years)) {
+                yearIdx = stockDetail.years.indexOf(parseInt(sel));
+            }
+            this.chart.data.tradeWindows = stockDetail.stats.map(s => {
+                let pct = s.pctExpected;
+                if (!useAvg && yearIdx >= 0 && Array.isArray(s.yearlyReturns)) {
+                    const v = s.yearlyReturns[yearIdx];
+                    if (typeof v === 'number') pct = v;
+                }
+                return { iBeg: s.iBeg, iEnd: s.iEnd, pctExpected: pct };
             });
+        } else {
+            this.chart.data.tradeWindows = null;
         }
-
-        // Plan returns line
-        if (yearData.returns?.length > 0) {
-            datasets.push({
-                label: 'Plan',
-                data: yearData.returns,
-                borderColor: 'rgb(76, 175, 80)',
-                tension: 0,
-                borderWidth: 2,
-                pointRadius: 0,
-                pointHoverRadius: 4
-            });
-        }
-
-        this.chart.data.labels = labels;
-        this.chart.data.datasets = datasets;
-        this.chart.data.yearData = yearData;
-        this.chart.data.windowMultipliers = yearData.windowMultipliers || [];
 
         this.chart.update();
     }
@@ -661,46 +700,77 @@ class BasketGraph extends Component {
     // -----------------------------------------------------------------------
 
     calculateOverlayStats = () => {
-        const { selectedStock, stockDetail, basketResult, viewMode } = this.props;
-
-        if (selectedStock && stockDetail) {
-            const yearData = this._resolveYearData(stockDetail);
-            if (!yearData || !yearData.prices?.length) return null;
-
-            const basePrice = yearData.prices[0];
-            const finalPrice = yearData.prices[yearData.prices.length - 1];
-            const bhReturn = ((finalPrice / basePrice) - 1) * 100;
-            const planReturn = yearData.returns?.[365] ?? 0;
-            const stats = stockDetail.stats || [];
-            const daysInMarket = stats.reduce((sum, s) => sum + (s.iEnd - s.iBeg), 0);
-
-            return {
-                bhReturn: bhReturn.toFixed(2),
-                planReturn: planReturn.toFixed(2),
-                difference: (planReturn - bhReturn).toFixed(2),
-                isPositive: planReturn >= bhReturn,
-                daysInMarket
-            };
-        }
-
+        const { basketResult, viewMode, selectedYear } = this.props;
         if (!basketResult) return null;
 
         if (viewMode === 'line') {
-            const yearData = this._resolveYearData(basketResult);
-            if (!yearData) return null;
+            // Basket-level overlay: end-of-year plan curve. B&H synthesized
+            // from perStockHold weighted by visible weights (same as updateLineChart).
+            const yearKey = (selectedYear === 'Average' || !selectedYear)
+                ? 0 : parseInt(selectedYear);
+            const planCurve = basketResult.basketAvg?.[yearKey];
+            if (!planCurve) return null;
+            const planReturn = (planCurve[365] ?? 0) * 100;
 
-            const bhReturn = yearData.buyHold?.[365] ?? 0;
-            const planReturn = yearData.returns?.[365] ?? 0;
+            // B&H: weighted sum of perStockHold[sym][yearKey][365]
+            const weightMap = basketResult.weightsPerStock || {};
+            const holdMap   = basketResult.perStockHold   || {};
+            let bhReturn = 0;
+            for (const sym of Object.keys(weightMap)) {
+                const w = weightMap[sym]?.[yearKey] || 0;
+                const h = holdMap[sym]?.[yearKey];
+                if (!h) continue;
+                bhReturn += w * h[365];
+            }
+            bhReturn *= 100;
 
             return {
-                bhReturn: bhReturn.toFixed(2),
-                planReturn: planReturn.toFixed(2),
-                difference: (planReturn - bhReturn).toFixed(2),
-                isPositive: planReturn >= bhReturn
+                bhReturn:    bhReturn.toFixed(2),
+                planReturn:  planReturn.toFixed(2),
+                difference:  (planReturn - bhReturn).toFixed(2),
+                isPositive:  planReturn >= bhReturn
             };
         }
 
-        return null; // bar view stats are in StatsPanel
+        // Bar view: basket-level quality score across years.
+        //   per-year plan return r_y = sum_s ( perStockPlan[s][y][365] * w[s][y] )
+        //   per-year B&H  return b_y = sum_s ( perStockHold[s][y][365] * w[s][y] )
+        //   daysFrac = weighted avg days-in-market across stocks
+        //   quality = (mean(r) / (mean(b) * daysFrac)) / (1 + 3*downside(r))
+        const { years, perStockPlan, perStockHold, weightsPerStock, daysInMarket } = basketResult;
+        if (!years || !perStockPlan) return null;
+
+        const stocks = Object.keys(perStockPlan);
+        const planReturns = [];
+        const bhReturns = [];
+        for (const y of years) {
+            const k = String(y);
+            let rPlan = 0, rBh = 0;
+            for (const sym of stocks) {
+                const w = (weightsPerStock?.[sym] || {})[k] || 0;
+                const planCurve = perStockPlan[sym]?.[k];
+                const bhCurve   = perStockHold?.[sym]?.[k];
+                if (planCurve && planCurve.length > 365) rPlan += planCurve[365] * w;
+                if (bhCurve   && bhCurve.length   > 365) rBh   += bhCurve[365]   * w;
+            }
+            planReturns.push(rPlan);
+            bhReturns.push(rBh);
+        }
+        if (planReturns.length === 0) return null;
+
+        // Weighted basket days-in-market via key-0 weights
+        let daysFrac = 0, wSum = 0;
+        for (const sym of stocks) {
+            const w = (weightsPerStock?.[sym] || {})['0'];
+            const d = daysInMarket?.[sym];
+            if (w === undefined || d === undefined) continue;
+            daysFrac += w * d;
+            wSum += w;
+        }
+        if (wSum > 0) daysFrac /= wSum;
+
+        const quality = calcQuality(planReturns, bhReturns, daysFrac);
+        return { quality, nYrs: planReturns.length };
     }
 
     // -----------------------------------------------------------------------
@@ -767,28 +837,39 @@ class BasketGraph extends Component {
 
     render() {
         const { selectedStock, basketResult, stockDetail, stockData, stocks,
-                allocMode, allocModes, viewMode, selectedYear,
+                allocMode, allocModes, viewMode, selectedYear, displayYears,
                 onViewModeChange, onYearChange, onAllocModeChange, onUpdateAllocPct,
-                onCopyToCustom, onExportCsv } = this.props;
+                onCopyToCustom, onExportCsv, onExportCalendar, onOptimizeAllocation, onDisplayYearsChange } = this.props;
 
-        const hasData = selectedStock ? !!stockDetail : !!basketResult;
-        // stockDetail.years is a flat int array [2024, 2023, ...],
-        // basketResult.years is [{year: 2024, ...}, ...] — normalize to objects.
-        const rawYears = selectedStock
-            ? (stockDetail?.years || [])
-            : (basketResult?.years || []);
+        const hasData = !!basketResult;
+        // basketResult.years is a flat int array [2024, 2023, ...] — normalize to objects.
+        const rawYears = basketResult?.years || [];
         const yearsList = rawYears.map(y => typeof y === 'number' ? { year: y } : y);
         const sortedYearsList = [...yearsList].sort((a, b) => b.year - a.year);
 
         const overlayStats = this.calculateOverlayStats();
         // Show allocation bar in basket mode (both line and bar views)
-        const allocBarData = !selectedStock ? this.getAllocBarData() : null;
+        // Allocation bar is always basket-level — keep visible regardless of selection.
+        const allocBarData = this.getAllocBarData();
         const isCustom = allocMode === 'custom';
 
         const showLineControls = selectedStock || viewMode === 'line';
-        // Year combo is always visible (used by line chart + Export CSV).
-        // Bar chart ignores selectedYear and shows the multi-year view.
-        const showYearCombo = !!selectedStock || true;
+        // Year combo is shown only in stock-detail view. In basket view we use
+        // a global "show last N years" dropdown instead.
+        const showYearCombo = !!selectedStock || viewMode === 'line';
+
+        // Highest data-years across stocks — caps the global dropdown options.
+        let nMaxDataYears = 0;
+        if (stocks && stockData) {
+            for (const s of stocks) {
+                const n = stockData[s]?.nDataYears || 0;
+                if (n > nMaxDataYears) nMaxDataYears = n;
+            }
+        }
+        // Generate dropdown options: 5, 10, 15, 20, 25.
+        // Always show full set; data-cap only used to decide if "Max" expands beyond 25.
+        const arrYearOptions = [5, 10, 15, 20, 25];
+        const nDisplayYears = Number.isFinite(displayYears) ? displayYears : 10;
 
         return (
             <div className="graph-area">
@@ -823,6 +904,30 @@ class BasketGraph extends Component {
                             </button>
                         )}
 
+                        {/* Sample years dropdown — basket mode only. Sets the
+                            chart display window via getGraphData(N). Independent
+                            of each stock's params.nYears (stats lookback). */}
+                        {!selectedStock && viewMode === 'bar' && onDisplayYearsChange && stocks.length > 0 && (
+                            <label className="alloc-label">
+                                Backtest years:
+                                <select
+                                    className="alloc-select"
+                                    value={String(nDisplayYears)}
+                                    onChange={(e) => onDisplayYearsChange(e.target.value)}
+                                    disabled={!hasData}
+                                    title="How many recent years to chart (out-of-sample backtest beyond per-stock stats lookback)"
+                                >
+                                    {!arrYearOptions.includes(nDisplayYears) && nDisplayYears > 0 && (
+                                        <option value={String(nDisplayYears)}>{nDisplayYears}y</option>
+                                    )}
+                                    {arrYearOptions.map(n => (
+                                        <option key={n} value={String(n)}>{n}y</option>
+                                    ))}
+                                    <option value="max">Max</option>
+                                </select>
+                            </label>
+                        )}
+
                         {/* Year selector — always visible (line chart + export CSV use it; bar chart ignores) */}
                         {showYearCombo && (
                             <select
@@ -853,7 +958,19 @@ class BasketGraph extends Component {
                                 disabled={!hasData || stocks.length === 0}
                                 title="Download a Google-Sheets-ready CSV to hand-verify engine math"
                             >
-                                Export CSV
+                                Export backtest
+                            </button>
+                        )}
+
+                        {/* Export trade calendar — basket mode only */}
+                        {!selectedStock && (
+                            <button
+                                className="toggle-btn"
+                                onClick={() => onExportCalendar && onExportCalendar()}
+                                disabled={!hasData || stocks.length === 0}
+                                title="Download a CSV calendar with BUY/SELL actions per stock"
+                            >
+                                Export calendar
                             </button>
                         )}
 
@@ -880,7 +997,17 @@ class BasketGraph extends Component {
                 <div className="chart-area">
                     {/* Allocation bar with +/- buttons in custom mode */}
                     {allocBarData && allocBarData.length > 0 && (
-                        <div className="alloc-bar">
+                        <div className="alloc-bar-wrap">
+                            {onOptimizeAllocation && (
+                                <button
+                                    type="button"
+                                    className="alloc-optimize-btn"
+                                    onClick={() => onOptimizeAllocation()}
+                                    title="Auto-optimize allocation weights"
+                                    aria-label="Auto-optimize allocation"
+                                >{'\u{1F4A1}'}</button>
+                            )}
+                            <div className="alloc-bar">
                             {allocBarData.map(d => (
                                 <div
                                     key={d.stock}
@@ -917,6 +1044,7 @@ class BasketGraph extends Component {
                                     )}
                                 </div>
                             ))}
+                            </div>
                         </div>
                     )}
 
@@ -930,8 +1058,18 @@ class BasketGraph extends Component {
                         )}
                         <canvas ref={this.chartRef} />
 
-                        {/* Overlay stats — line views only */}
-                        {overlayStats && hasData && (
+                        {/* Overlay stats */}
+                        {overlayStats && hasData && overlayStats.quality != null && (
+                            <div className="chart-overlay-stats">
+                                <span className="summary-label">Quality:</span>
+                                <span className={`summary-value ${overlayStats.quality > 0 ? 'positive' : 'negative'}`}>
+                                    {formatQuality(overlayStats.quality)}
+                                </span>
+                                <span className="summary-label">over</span>
+                                <span className="summary-value">{overlayStats.nYrs}y</span>
+                            </div>
+                        )}
+                        {overlayStats && hasData && overlayStats.quality == null && (
                             <div className="chart-overlay-stats">
                                 <span className="summary-label">B&H:</span>
                                 <span className="summary-value">{overlayStats.bhReturn}%</span>

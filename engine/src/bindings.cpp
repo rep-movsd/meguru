@@ -1,5 +1,6 @@
 #include "basket.h"
 #include "verifycsv.h"
+#include "tradecalendar.h"
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
@@ -154,6 +155,11 @@ val jsGetGraphData(i32 nYear) {
     // weightsPerStock: { "RELIANCE": { "2024": f64, "0": f64 }, ... }  (effective, renormalized)
     result.set("weightsPerStock", stockWeightsToJs(data.dctWeightsPerStock));
 
+    // daysInMarket: { "RELIANCE": f64, ... }  (fraction 0..1 of trading year in plan windows)
+    val jsDays = val::object();
+    for(CAUTOREF [sSymbol, fFrac] : data.dctDaysInMarket) jsDays.set(sSymbol, fFrac);
+    result.set("daysInMarket", jsDays);
+
     return result;
 }
 
@@ -162,6 +168,38 @@ val jsGetGraphData(i32 nYear) {
 str jsExportVerifyCsv(i32 iYear) {
     DEBUG_LOG("jsExportVerifyCsv: year=%d", iYear);
     return exportVerifyCsv(g_basket, iYear);
+}
+
+str jsExportTradeCalendarCsv() {
+    DEBUG_LOG("jsExportTradeCalendarCsv");
+    return exportTradeCalendarCsv(g_basket);
+}
+
+// Auto-optimize stock params; returns chosen { nYears, nWinMin, nWinMax, pctThreshold }.
+emscripten::val jsOptimizeStockParams(const str& sSymbol) {
+    DEBUG_LOG("jsOptimizeStockParams: %s", sSymbol.c_str());
+    CAUTO prm = g_basket.optimizeStockParams(sSymbol);
+    emscripten::val result = emscripten::val::object();
+    result.set("nYears",       prm.nYears);
+    result.set("nWinMin",      prm.nWinMin);
+    result.set("nWinMax",      prm.nWinMax);
+    result.set("pctThreshold", prm.pctThreshold);
+    return result;
+}
+
+// Auto-optimize basket allocation; returns array of weights (parallel to stock list).
+emscripten::val jsOptimizeAllocation() {
+    DEBUG_LOG("jsOptimizeAllocation");
+    CAUTO arrW = g_basket.optimizeAllocation();
+    emscripten::val arr = emscripten::val::array();
+    FOR(i, 0, (i32)arrW.size()) arr.set(i, arrW[i]);
+    return arr;
+}
+
+// Toggle a stock's contribution to basket aggregation.
+void jsSetStockVisible(const str& sSymbol, bool bVisible) {
+    DEBUG_LOG("jsSetStockVisible: %s = %d", sSymbol.c_str(), (int)bVisible);
+    g_basket.setVisible(sSymbol, bVisible);
 }
 
 // ---------------------------------------------------------------------------
@@ -177,4 +215,8 @@ EMSCRIPTEN_BINDINGS(meguru) {
     emscripten::function("getGraphData",    &jsGetGraphData);
     emscripten::function("setAlloc",        &jsSetAlloc);
     emscripten::function("exportVerifyCsv", &jsExportVerifyCsv);
+    emscripten::function("exportTradeCalendarCsv", &jsExportTradeCalendarCsv);
+    emscripten::function("optimizeStockParams",    &jsOptimizeStockParams);
+    emscripten::function("optimizeAllocation",     &jsOptimizeAllocation);
+    emscripten::function("setStockVisible",        &jsSetStockVisible);
 }

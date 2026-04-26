@@ -224,16 +224,6 @@ class NewStockModal extends Component {
                                 max={PARAM_LIMITS.nWinMin.max}
                             />
                         </div>
-                        <div className="modal-field">
-                            <label>Max Window (days)</label>
-                            <input
-                                type="number"
-                                value={nWinMax}
-                                onInput={(e) => this.setState({ nWinMax: parseInt(e.target.value, 10) || 0 })}
-                                min={PARAM_LIMITS.nWinMax.min}
-                                max={PARAM_LIMITS.nWinMax.max}
-                            />
-                        </div>
                     </div>
 
                     <div className="error-message modal-validation-errors"

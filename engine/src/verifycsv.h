@@ -14,21 +14,19 @@
 //     ENGINE_RETURN_PCT, r1%, r2%, ..., =SUMPRODUCT(weights, returns)
 //     ENGINE_RETURN_AFTER_TAX_PCT, , , ..., =IF(TOTAL>0, TOTAL*0.8, TOTAL)
 //   <blank row>
-//   Header: Stock, Date, Action, Price, Held, Traded, Cost, Fees, Cash,
-//           Profit, TotalInvested, ProfitPct
+//   Header: Stock, Date, Action, Price, Held, Traded, Cost, Fees, Cash, Profit
 //   Per-stock sections: START row + BUY/SELL pairs + Profit on last row
 // ---------------------------------------------------------------------------
 
 // Data grid column layout (shared between header row + data rows).
 enum ECSVCol {
-    Stock, Date, Action, Price, Held, Traded, Cost, Fees, Cash,
-    Profit, TotalInvested, ProfitPct,
+    Stock, Date, Action, Price, Held, Traded, Cost, Fees, Cash, Profit,
     CSVLastCol
 };
 
 constexpr array<const char*, CSVLastCol> g_arrColNames = {
     "Stock", "Date", "Action", "Price", "Held", "Traded", "Cost",
-    "Fees", "Cash", "Profit", "Total Invested", "Profit %"
+    "Fees", "Cash", "Profit"
 };
 
 using TCSVRow = array<str, CSVLastCol>;

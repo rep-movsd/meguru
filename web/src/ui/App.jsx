@@ -41,9 +41,14 @@ class App extends Component {
             allocMode: 'equal',
             viewMode: 'line',
             selectedYear: 'Average',
+            displayYears: 10,
+            // Basket identity (set on load, used for export filenames)
+            basketName: 'basket',
             // Engine results (parsed JSON)
             basketResult: null,
-            stockDetail: null
+            stockDetail: null,
+            // Auto-optimize overlay state
+            optimizing: null  // null | symbol string
         };
     }
 
@@ -68,7 +73,7 @@ class App extends Component {
     componentDidUpdate(_, prevState) {
         // Debounce localStorage writes — only save when persisted fields change
         const dominated = ['stocks', 'stockData', 'selectedStock', 'expandedStock',
-                           'allocMode', 'viewMode', 'selectedYear'];
+                           'allocMode', 'viewMode', 'selectedYear', 'displayYears'];
         const changed = dominated.some(k => prevState[k] !== this.state[k]);
         if (changed) {
             clearTimeout(this._saveTimer);
@@ -91,7 +96,7 @@ class App extends Component {
 
     _saveState = () => {
         const { stocks, stockData, selectedStock, expandedStock,
-                allocMode, viewMode, selectedYear } = this.state;
+                allocMode, viewMode, selectedYear, displayYears } = this.state;
 
         // Strip color from stockData (recomputed on restore) and engine results
         const savedStockData = {};
@@ -109,7 +114,8 @@ class App extends Component {
                 expandedStock,
                 allocMode,
                 viewMode,
-                selectedYear
+                selectedYear,
+                displayYears
             }));
         } catch (err) {
             console.warn('Failed to save state to localStorage:', err.message);
@@ -171,7 +177,8 @@ class App extends Component {
             expandedStock,
             allocMode,
             viewMode: saved.viewMode || 'line',
-            selectedYear: saved.selectedYear || 'Average'
+            selectedYear: saved.selectedYear || 'Average',
+            displayYears: Number.isFinite(saved.displayYears) ? saved.displayYears : 10
         }, () => {
             if (allocMode === 'custom') this.pushCustomWeightsToEngine();
             this.refreshAll(selectedStock);
@@ -199,7 +206,9 @@ class App extends Component {
         //   { years:int[], perStockHold:{sym:{year:[366],"0":[366]}},
         //     perStockPlan:{sym:{...}}, basketAvg:{year:[366],"0":[366]},
         //     weightsPerStock:{sym:{year:f64,"0":f64}} }
-        const basketResult = engine.getGraphData(10);
+        // displayYears governs how many year-bars are emitted (chart window),
+        // distinct from each stock's params.nYears (stats lookback).
+        const basketResult = engine.getGraphData(this.state.displayYears || 10);
         this.setState({ basketResult });
     }
 
@@ -336,17 +345,31 @@ class App extends Component {
     }
 
     handleSelectStock = (symbol) => {
-        // symbol is null to deselect, or a stock name to select
-        // Set selectedStock and stockDetail together to avoid a render
-        // where selectedStock changed but stockDetail is still stale/null,
-        // which causes BasketGraph to recreate the chart with no data.
+        // symbol = stock name -> "solo": only this stock visible (others hidden),
+        //                        same as if user clicked green dots manually.
+        // symbol = null       -> restore all stocks to visible.
+        // Also fetches stockDetail so StatsPanel shows trade-windows table.
+        const { stockData, stocks } = this.state;
+        const newStockData = { ...stockData };
+        for (const sym of stocks) {
+            if (!newStockData[sym]) continue;
+            const visible = symbol ? (sym === symbol) : true;
+            if (newStockData[sym].visible !== visible) {
+                engine.setStockVisible(sym, visible);
+                newStockData[sym] = { ...newStockData[sym], visible };
+            }
+        }
+
         const stockDetail = symbol
             ? (engine.getStockDetail(symbol) || null)
             : null;
         this.setState({
             selectedStock: symbol,
             selectedYear: 'Average',
+            stockData: newStockData,
             stockDetail
+        }, () => {
+            this.refreshBasket();
         });
     }
 
@@ -398,6 +421,108 @@ class App extends Component {
             for (const [pendingSymbol, pendingParams] of Object.entries(pending)) {
                 engine.updateStockParams(pendingSymbol, pendingParams);
             }
+            this.refreshAll(this.state.selectedStock);
+        });
+    }
+
+    // Auto-optimize: brute-force grid search in C++ engine over (nWinMin, fPctWin).
+    // Shows blocking overlay while running. Engine call is synchronous (~8000
+    // updatePlan iterations); wrap in setTimeout so the overlay paints first.
+    handleOptimize = (symbol) => {
+        const { stockData } = this.state;
+        if (!stockData[symbol]) return;
+        this.setState({ optimizing: symbol }, () => {
+            setTimeout(() => {
+                try {
+                    const best = engine.optimizeStockParams(symbol);
+                    if (best && this.state.stockData[symbol]) {
+                        const newParams = {
+                            ...this.state.stockData[symbol].params,
+                            nWinMin: best.nWinMin,
+                            fPctWin: best.pctThreshold
+                        };
+                        this.setState({
+                            stockData: {
+                                ...this.state.stockData,
+                                [symbol]: { ...this.state.stockData[symbol], params: newParams }
+                            }
+                        }, () => this.refreshAll(this.state.selectedStock));
+                    }
+                } catch (e) {
+                    console.error('optimize failed', e);
+                } finally {
+                    this.setState({ optimizing: null });
+                }
+            }, 30);
+        });
+    }
+
+    // Brute-force search basket weight composition (5% step ≤5 stocks else
+    // 10%) to maximize basket plan return at last day. Switches to Custom
+    // alloc mode and writes the chosen weights into stockData[s].allocPct
+    // (×100) so UI sliders / persistence stay in sync.
+    handleOptimizeAllocation = () => {
+        const { stocks } = this.state;
+        if (stocks.length === 0) return;
+        this.setState({ optimizing: '__alloc__' }, () => {
+            setTimeout(() => {
+                try {
+                    const arrW = engine.optimizeAllocation();   // engine-order, sums to 1
+                    if (!arrW || arrW.length !== stocks.length) {
+                        console.error('optimizeAllocation: length mismatch', arrW);
+                        return;
+                    }
+                    const sd = { ...this.state.stockData };
+                    for (let i = 0; i < stocks.length; i++) {
+                        const sym = stocks[i];
+                        if (!sd[sym]) continue;
+                        sd[sym] = { ...sd[sym], allocPct: arrW[i] * 100 };
+                    }
+                    this.setState({ stockData: sd, allocMode: 'custom' }, () => {
+                        this.pushCustomWeightsToEngine();
+                        this.refreshAll(this.state.selectedStock);
+                    });
+                } catch (e) {
+                    console.error('optimizeAllocation failed', e);
+                } finally {
+                    this.setState({ optimizing: null });
+                }
+            }, 30);
+        });
+    }
+
+    // Global "Sample years" (display window). Drives getGraphData(N) only.
+    // Independent of each stock's params.nYears (stats lookback). When N
+    // exceeds a stock's nYears the engine still applies the same trade plan
+    // to older years (out-of-sample backtest).
+    //
+    // value = positive int OR 'max' (max nDataYears across loaded stocks).
+    handleDisplayYearsChange = (value) => {
+        const { stocks, stockData, selectedYear, basketResult } = this.state;
+
+        let n;
+        if (value === 'max') {
+            let nMax = 0;
+            for (const s of stocks) {
+                const v = stockData[s]?.nDataYears || 0;
+                if (v > nMax) nMax = v;
+            }
+            n = Math.max(1, nMax || 25);
+        } else {
+            n = parseInt(value, 10);
+            if (!Number.isFinite(n) || n < 1) n = 10;
+        }
+
+        // If currently selected year would fall outside the new window, snap
+        // back to "Average" so the line chart stays valid.
+        const arrYears = Array.isArray(basketResult?.years) ? basketResult.years : [];
+        const iLastYear = arrYears.length > 0 ? Math.max(...arrYears) : (new Date().getFullYear() - 1);
+        const iEarliest = iLastYear - n + 1;
+        const nextSelectedYear = (typeof selectedYear === 'number' && selectedYear < iEarliest)
+            ? 'Average'
+            : selectedYear;
+
+        this.setState({ displayYears: n, selectedYear: nextSelectedYear }, () => {
             this.refreshAll(this.state.selectedStock);
         });
     }
@@ -552,35 +677,123 @@ class App extends Component {
         this.setState({ modalOpen: false });
     }
 
-    // Export a Google-Sheets-ready verification CSV for the current year.
-    // selectedYear may be "Average" — pass 0 to let the engine pick (curYear-1).
-    handleExportCsv = () => {
-        const { selectedYear } = this.state;
-        const year = (typeof selectedYear === 'number') ? selectedYear : 0;
-        const sCsv = engine.exportVerifyCsv(year);
+    // Export a Google-Sheets-ready backtest CSV. Prompts for which year to
+    // export (the engine produces one year's worth of trade rows per call).
+    handleExportCsv = async () => {
+        const { basketResult, basketName } = this.state;
+        const arrYears = Array.isArray(basketResult?.years) ? basketResult.years : [];
+        if (arrYears.length === 0) {
+            alert('No basket data — add stocks first.');
+            return;
+        }
+
+        const sortedDesc = [...arrYears].sort((a, b) => b - a);
+        const sDefault = String(sortedDesc[0]);
+        const sPrompt =
+            `Export backtest for which year?\n\n` +
+            `Available: ${sortedDesc.join(', ')}\n` +
+            `Enter a year, or leave blank to use ${sDefault}.`;
+        const sInput = window.prompt(sPrompt, sDefault);
+        if (sInput === null) return;  // cancelled
+
+        const sTrimmed = sInput.trim();
+        const nYear = sTrimmed === '' ? sortedDesc[0] : parseInt(sTrimmed, 10);
+        if (!Number.isFinite(nYear) || !arrYears.includes(nYear)) {
+            alert(`Year ${sTrimmed} not in basket data.`);
+            return;
+        }
+
+        const sCsv = engine.exportVerifyCsv(nYear);
         if (!sCsv) return;
 
-        const sLabel = (year > 0) ? String(year) : 'latest';
         const blob = new Blob([sCsv], { type: 'text/csv;charset=utf-8;' });
+        const sFileName = `backtest_${basketName || 'basket'}_${nYear}.csv`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: sFileName,
+                    types: [{
+                        description: 'Backtest CSV',
+                        accept: { 'text/csv': ['.csv'] }
+                    }]
+                });
+                const w = await handle.createWritable();
+                await w.write(blob);
+                await w.close();
+                return;
+            } catch (e) {
+                if (e?.name === 'AbortError') return;
+                console.warn('showSaveFilePicker failed, falling back:', e);
+            }
+        }
+
         const sUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = sUrl;
-        a.download = `meguru_verify_${sLabel}.csv`;
+        a.download = sFileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(sUrl);
     }
 
-    // ------------------------------------------------------------------
-    // Save / load basket to/from JSON file
-    // ------------------------------------------------------------------
+    // Export a trade calendar CSV: Date | Stock1 | Stock2 | ... with BUY/SELL
+    // tokens on action days only. Year-agnostic (uses MM-DD); the same windows
+    // apply every calendar year.
+    handleExportCalendar = async () => {
+        const { stocks, basketName } = this.state;
+        if (!stocks || stocks.length === 0) {
+            alert('Basket is empty.');
+            return;
+        }
+
+        const sCsv = engine.exportTradeCalendarCsv();
+        console.log('[calendar] csv length:', sCsv?.length, 'preview:', sCsv?.slice(0, 200));
+        if (!sCsv) {
+            alert('Engine returned empty CSV.');
+            return;
+        }
+        const arrLines = sCsv.split('\n').filter(l => l.length > 0);
+        if (arrLines.length <= 1) {
+            alert('No trade windows found.');
+            return;
+        }
+
+        const blob = new Blob([sCsv], { type: 'text/csv;charset=utf-8;' });
+        const sFileName = `calendar_${basketName || 'basket'}.csv`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: sFileName,
+                    types: [{ description: 'Trade Calendar CSV', accept: { 'text/csv': ['.csv'] } }]
+                });
+                const w = await handle.createWritable();
+                await w.write(blob);
+                await w.close();
+                return;
+            } catch (e) {
+                if (e?.name === 'AbortError') return;
+                console.warn('showSaveFilePicker failed, falling back:', e);
+            }
+        }
+
+        const sUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = sUrl;
+        a.download = sFileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(sUrl);
+    }
 
     // Save current basket (stocks + params + alloc) to a JSON file.
     // Uses showSaveFilePicker (Chromium) when available so the user gets a
     // real "Save As" dialog; falls back to <a download> elsewhere.
     handleSaveBasket = async () => {
-        const { stocks, stockData, allocMode } = this.state;
+        const { stocks, stockData, allocMode, basketName } = this.state;
 
         if (stocks.length === 0) {
             alert('Basket is empty — nothing to save.');
@@ -589,7 +802,7 @@ class App extends Component {
 
         const payload = {
             version: 1,
-            name: 'basket',
+            name: basketName || 'basket',
             allocMode,
             stocks: stocks.map(s => {
                 const sd = stockData[s] || {};
@@ -608,11 +821,12 @@ class App extends Component {
 
         const sJson = JSON.stringify(payload, null, 2);
         const blob = new Blob([sJson], { type: 'application/json;charset=utf-8;' });
+        const sFileName = `${basketName || 'basket'}.json`;
 
         if (typeof window.showSaveFilePicker === 'function') {
             try {
                 const handle = await window.showSaveFilePicker({
-                    suggestedName: 'basket.json',
+                    suggestedName: sFileName,
                     types: [{
                         description: 'Meguru basket',
                         accept: { 'application/json': ['.json'] }
@@ -632,7 +846,7 @@ class App extends Component {
         const sUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = sUrl;
-        a.download = 'basket.json';
+        a.download = sFileName;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -721,7 +935,8 @@ class App extends Component {
         this.setState({
             stocks: newStocks,
             stockData: finalStockData,
-            allocMode
+            allocMode,
+            basketName: (typeof payload.name === 'string' && payload.name) ? payload.name : 'basket'
         }, () => {
             if (allocMode === 'custom') this.pushCustomWeightsToEngine();
             this.refreshAll(null);
@@ -735,7 +950,8 @@ class App extends Component {
     render() {
         const {
             stocks, stockData, selectedStock, expandedStock, modalOpen,
-            fetchModalData, allocMode, viewMode, selectedYear, basketResult, stockDetail
+            fetchModalData, allocMode, viewMode, selectedYear, displayYears,
+            basketResult, stockDetail
         } = this.state;
 
         return (
@@ -755,6 +971,7 @@ class App extends Component {
                         onOpenModal={this.handleOpenModal}
                         onSaveBasket={this.handleSaveBasket}
                         onLoadBasket={this.handleLoadBasket}
+                        onOptimize={this.handleOptimize}
                     />
 
                     <BasketGraph
@@ -773,6 +990,10 @@ class App extends Component {
                         onUpdateAllocPct={this.handleUpdateAllocPct}
                         onCopyToCustom={this.handleCopyToCustom}
                         onExportCsv={this.handleExportCsv}
+                        onExportCalendar={this.handleExportCalendar}
+                        onOptimizeAllocation={this.handleOptimizeAllocation}
+                        onDisplayYearsChange={this.handleDisplayYearsChange}
+                        displayYears={displayYears}
                     />
                 </div>
 
@@ -781,6 +1002,7 @@ class App extends Component {
                     selectedStock={selectedStock}
                     stockDetail={stockDetail}
                     basketResult={basketResult}
+                    stockData={stockData}
                 />
 
                 {/* New stock modal */}
@@ -800,6 +1022,25 @@ class App extends Component {
                         onComplete={this.handleFetchComplete}
                         onCancel={this.handleFetchCancel}
                     />
+                )}
+
+                {/* Auto-optimize blocking overlay */}
+                {this.state.optimizing && (
+                    <div className="optimize-overlay">
+                        <div className="optimize-modal">
+                            <div className="optimize-spinner">{'\u{1F4A1}'}</div>
+                            <div className="optimize-title">
+                                {this.state.optimizing === '__alloc__'
+                                    ? 'Optimizing allocation…'
+                                    : `Optimizing ${this.state.optimizing}…`}
+                            </div>
+                            <div className="optimize-sub">
+                                {this.state.optimizing === '__alloc__'
+                                    ? 'Searching weight compositions'
+                                    : 'Finding ideal parameters'}
+                            </div>
+                        </div>
+                    </div>
                 )}
             </div>
         );

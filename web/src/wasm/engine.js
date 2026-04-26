@@ -70,7 +70,7 @@ const engine = {
             symbol,
             params.nYears || 10,
             params.nWinMin || 10,
-            params.nWinMax || 31,
+            180,
             params.fPctWin || 60
         );
     },
@@ -86,7 +86,7 @@ const engine = {
             symbol,
             params.nYears || 10,
             params.nWinMin || 10,
-            params.nWinMax || 31,
+            180,
             params.fPctWin || 60
         );
     },
@@ -107,8 +107,9 @@ const engine = {
         return _module.getGraphData(nYear || 10);
     },
 
-    setStockVisible(_symbol, _visible) {
-        // TODO: implement in C++ engine
+    setStockVisible(symbol, visible) {
+        if (!_module) return;
+        _module.setStockVisible(symbol, !!visible);
     },
 
     setAllocMode(mode, customWeights = []) {
@@ -131,6 +132,30 @@ const engine = {
     exportVerifyCsv(year = 0) {
         if (!_module) return '';
         return _module.exportVerifyCsv(year);
+    },
+
+    // Export trade calendar CSV: Date,Stock1,Stock2,... rows with BUY/SELL.
+    // Year-agnostic (MM-DD).
+    exportTradeCalendarCsv() {
+        if (!_module) return '';
+        return _module.exportTradeCalendarCsv();
+    },
+
+    // Brute-force grid search over (nWinMin, pctThreshold) to maximize plan
+    // return. Mutates engine state in-place. Returns the chosen params.
+    optimizeStockParams(symbol) {
+        if (!_module) return null;
+        return _module.optimizeStockParams(symbol);
+    },
+
+    // Brute-force search over weight compositions (5% step ≤5 stocks else 10%)
+    // to maximize basket plan return. Switches engine to Custom mode with the
+    // chosen weights. Returns the array of weights (parallel to stock list).
+    optimizeAllocation() {
+        if (!_module) return [];
+        const v = _module.optimizeAllocation();
+        // emscripten::val::array() returns a JS array directly
+        return Array.isArray(v) ? v : Array.from({ length: v.length }, (_, i) => v[i]);
     },
 
     setMarketCap(_symbol, _mcap) {

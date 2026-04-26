@@ -30,6 +30,7 @@
 #include <string_view>
 #include <vector>
 #include <map>
+#include <set>
 #include <valarray>
 #include <algorithm>
 #include <ranges>
@@ -156,4 +157,5 @@ struct TGraphData {
     TReturnsPerStock    dctReturnsPerStockHold;  // symbol → year → 366 B&H return values
     TReturnsForYear     dctReturnsForBasket;     // weighted avg across stocks
     TWeightsPerStock    dctWeightsPerStock;      // symbol → year → effective weight (renorm'd)
+    map<str, f64>       dctDaysInMarket;         // symbol → fraction of trading days in plan windows (0..1)
 };
