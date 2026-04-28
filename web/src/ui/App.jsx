@@ -6,6 +6,7 @@ import BasketGraph from './BasketGraph';
 import StatsPanel from './StatsPanel';
 import NewStockModal from './NewStockModal';
 import FetchModal from './FetchModal';
+import HelpModal from './HelpModal';
 import { ensureStockData } from '../data/fetch.js';
 import './styles.css';
 
@@ -51,7 +52,9 @@ class App extends Component {
             // Auto-optimize overlay state
             optimizing: null,  // null | symbol string
             // Basket-load overlay state: null | { sSymbol, nDone, nTotal }
-            loadingBasket: null
+            loadingBasket: null,
+            // Help modal
+            helpOpen: false
         };
     }
 
@@ -1007,6 +1010,14 @@ class App extends Component {
 
         return (
             <div className="app">
+                {/* Help button — top-right corner */}
+                <button
+                    className="help-button"
+                    onClick={() => this.setState({ helpOpen: true })}
+                    title="Help & documentation"
+                    aria-label="Open help"
+                >?</button>
+
                 {/* Main area: basket list + graph */}
                 <div className="main-area">
                     <BasketList
@@ -1154,6 +1165,11 @@ class App extends Component {
                         </div>
                     );
                 })()}
+
+                {/* Help modal */}
+                {this.state.helpOpen && (
+                    <HelpModal onClose={() => this.setState({ helpOpen: false })} />
+                )}
             </div>
         );
     }
