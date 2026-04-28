@@ -469,31 +469,27 @@ class App extends Component {
     handleOptimizeAllocation = () => {
         const { stocks } = this.state;
         if (stocks.length === 0) return;
-        this.setState({ optimizing: '__alloc__' }, () => {
-            setTimeout(() => {
-                try {
-                    const arrW = engine.optimizeAllocation();   // engine-order, sums to 1
-                    if (!arrW || arrW.length !== stocks.length) {
-                        console.error('optimizeAllocation: length mismatch', arrW);
-                        return;
-                    }
-                    const sd = { ...this.state.stockData };
-                    for (let i = 0; i < stocks.length; i++) {
-                        const sym = stocks[i];
-                        if (!sd[sym]) continue;
-                        sd[sym] = { ...sd[sym], allocPct: arrW[i] * 100 };
-                    }
-                    this.setState({ stockData: sd, allocMode: 'custom' }, () => {
-                        this.pushCustomWeightsToEngine();
-                        this.refreshAll(this.state.selectedStock);
-                    });
-                } catch (e) {
-                    console.error('optimizeAllocation failed', e);
-                } finally {
-                    this.setState({ optimizing: null });
-                }
-            }, 30);
-        });
+        // Run synchronously without the blocking overlay — allocation
+        // optimization is fast and the modal would only flicker.
+        try {
+            const arrW = engine.optimizeAllocation();   // engine-order, sums to 1
+            if (!arrW || arrW.length !== stocks.length) {
+                console.error('optimizeAllocation: length mismatch', arrW);
+                return;
+            }
+            const sd = { ...this.state.stockData };
+            for (let i = 0; i < stocks.length; i++) {
+                const sym = stocks[i];
+                if (!sd[sym]) continue;
+                sd[sym] = { ...sd[sym], allocPct: arrW[i] * 100 };
+            }
+            this.setState({ stockData: sd, allocMode: 'custom' }, () => {
+                this.pushCustomWeightsToEngine();
+                this.refreshAll(this.state.selectedStock);
+            });
+        } catch (e) {
+            console.error('optimizeAllocation failed', e);
+        }
     }
 
     // Global "Sample years" (display window). Drives getGraphData(N) only.

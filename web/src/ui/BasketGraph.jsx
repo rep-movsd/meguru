@@ -54,6 +54,7 @@ class BasketGraph extends Component {
                 }));
             } catch (e) { /* ignore */ }
             // Destroy existing chart, then recreate with new scales.
+            this._detachBarListeners();
             if (this.chart) {
                 this.chart.destroy();
                 this.chart = null;
@@ -63,6 +64,7 @@ class BasketGraph extends Component {
     }
 
     componentDidMount() {
+        this._createTooltipEl();
         this.createChart();
     }
 
@@ -77,6 +79,7 @@ class BasketGraph extends Component {
             // Recreate chart when switching between stock/basket or line/bar.
             // Defer to next frame so the browser has completed layout and the
             // canvas has its final dimensions before Chart.js reads them.
+            this._detachBarListeners();
             if (this.chart) {
                 this.chart.destroy();
                 this.chart = null;
@@ -97,9 +100,136 @@ class BasketGraph extends Component {
 
     componentWillUnmount() {
         cancelAnimationFrame(this._createRaf);
+        this._detachBarListeners();
+        this._removeTooltipEl();
         if (this.chart) {
             this.chart.destroy();
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // DOM tooltip for bar chart
+    // -----------------------------------------------------------------------
+
+    _createTooltipEl = () => {
+        if (this.tooltipEl) return;
+        const el = document.createElement('div');
+        el.style.position       = 'absolute';
+        el.style.display        = 'none';
+        el.style.pointerEvents  = 'none';
+        el.style.background     = 'rgba(0,0,0,0.9)';
+        el.style.border         = '1px solid #444';
+        el.style.color          = '#fff';
+        el.style.font           = '11px "Courier New", Courier, monospace';
+        el.style.padding        = '4px 8px';
+        el.style.whiteSpace     = 'nowrap';
+        el.style.zIndex         = '10';
+        el.style.borderRadius   = '3px';
+        this.tooltipEl = el;
+        // Append once the canvas is in the DOM. chartRef may not yet be set
+        // on first call from componentDidMount; defer attach to the listener
+        // attachment phase (createBarChart) which guarantees canvas presence.
+    }
+
+    _ensureTooltipAttached = () => {
+        if (!this.tooltipEl) this._createTooltipEl();
+        const canvas = this.chartRef.current;
+        if (!canvas) return;
+        const parent = canvas.parentElement;
+        if (!parent) return;
+        if (this.tooltipEl.parentElement !== parent) {
+            parent.appendChild(this.tooltipEl);
+        }
+    }
+
+    _removeTooltipEl = () => {
+        if (this.tooltipEl && this.tooltipEl.parentElement) {
+            this.tooltipEl.parentElement.removeChild(this.tooltipEl);
+        }
+        this.tooltipEl = null;
+    }
+
+    _formatTooltip = (rect) => {
+        const yr = rect.year;
+        if (rect.type === 'bh') {
+            const sign = rect.value >= 0 ? '+' : '';
+            return `B&H (avg) — ${yr}: ${sign}${rect.value.toFixed(1)}%`;
+        }
+        // profit / profit-eaten / loss
+        const sign = rect.value >= 0 ? '+' : '';
+        return `${rect.sym} — ${yr}: ${sign}${rect.value.toFixed(1)}%`;
+    }
+
+    _attachBarListeners = () => {
+        const canvas = this.chartRef.current;
+        if (!canvas) return;
+        this._ensureTooltipAttached();
+        this._hoveredBarIdx = -1;
+
+        this._barMouseMove = (e) => {
+            const rectCanvas = canvas.getBoundingClientRect();
+            const px = e.clientX - rectCanvas.left;
+            const py = e.clientY - rectCanvas.top;
+            const rects = this.barRects || [];
+            let hitIdx = -1;
+            for (let i = 0; i < rects.length; i++) {
+                const r = rects[i];
+                if (px >= r.x && px <= r.x + r.w &&
+                    py >= r.y && py <= r.y + r.h) {
+                    hitIdx = i;
+                    break;
+                }
+            }
+            if (hitIdx === this._hoveredBarIdx) return;
+            this._hoveredBarIdx = hitIdx;
+
+            if (hitIdx < 0) {
+                if (this.tooltipEl) this.tooltipEl.style.display = 'none';
+                return;
+            }
+
+            const r = rects[hitIdx];
+            const tip = this.tooltipEl;
+            if (!tip) return;
+            tip.textContent = this._formatTooltip(r);
+            tip.style.display = 'block';
+
+            // Position relative to the tooltip's parent (chart-wrapper).
+            const parent = tip.parentElement;
+            if (!parent) return;
+            const wrapRect = parent.getBoundingClientRect();
+            const tipW = tip.offsetWidth;
+            const tipH = tip.offsetHeight;
+            const cx = r.x + r.w / 2 + (rectCanvas.left - wrapRect.left);
+            let ty   = r.y + (rectCanvas.top - wrapRect.top) - tipH - 6;
+            if (ty < 0) ty = r.y + r.h + (rectCanvas.top - wrapRect.top) + 6;
+            let tx = cx - tipW / 2;
+            const maxX = wrapRect.width - tipW - 2;
+            if (tx < 2) tx = 2;
+            if (tx > maxX) tx = maxX;
+            tip.style.left = tx + 'px';
+            tip.style.top  = ty + 'px';
+        };
+
+        this._barMouseLeave = () => {
+            this._hoveredBarIdx = -1;
+            if (this.tooltipEl) this.tooltipEl.style.display = 'none';
+        };
+
+        canvas.addEventListener('mousemove', this._barMouseMove);
+        canvas.addEventListener('mouseleave', this._barMouseLeave);
+    }
+
+    _detachBarListeners = () => {
+        const canvas = this.chartRef.current;
+        if (canvas && this._barMouseMove) {
+            canvas.removeEventListener('mousemove', this._barMouseMove);
+            canvas.removeEventListener('mouseleave', this._barMouseLeave);
+        }
+        this._barMouseMove  = null;
+        this._barMouseLeave = null;
+        this._hoveredBarIdx = -1;
+        if (this.tooltipEl) this.tooltipEl.style.display = 'none';
     }
 
     // -----------------------------------------------------------------------
@@ -363,123 +493,251 @@ class BasketGraph extends Component {
             }
         };
 
-        // Total labels on top of stacked bars.
-        // Net total per year = top of plan stack (if any positive contributions)
-        // or totalLoss (loss-only year). totalLossPerYear is set in updateBarChart.
-        const totalLabelPlugin = {
-            id: 'totalLabel',
-            afterDatasetsDraw: (chart) => {
+        // Custom bar painter. Reads per-year per-stock data cached on `this`
+        // by updateBarChart and paints two slots per year column:
+        //   - left slot:  B&H bar (full slot width)
+        //   - right slot: combined plan column. Above zero = full slot width.
+        //                 Below zero = profit-eaten (left half) + losses (right half).
+        // Also populates `this.barRects` for hit-testing by the DOM tooltip.
+        const customBarPlugin = {
+            id: 'customBar',
+            afterDraw: (chart) => {
+                this.barRects = [];
+
+                const years   = this.years;
+                const stocks  = this.stocksOrdered;
+                const contrib = this.contribPerStock;
+                const colors  = this.colorsPerStock;
+                const bhArr   = this.bhPerYear;
+                const lossArr = this.totalLossPerYear;
+                const netArr  = this.netPerYear;
+                if (!years || !years.length || !stocks || !contrib) return;
+
                 const ctx = chart.ctx;
-                const datasets = chart.data.datasets;
-                if (!datasets.length) return;
-                const totalLossPerYear = this.totalLossPerYear || [];
+                const xScale = chart.scales.x;
+                const yScale = chart.scales.y;
+                const chartArea = chart.chartArea;
+                if (!xScale || !yScale || !chartArea) return;
+
+                const y0 = yScale.getPixelForValue(0);
+                const yClamp = (v) => {
+                    const px = yScale.getPixelForValue(v);
+                    return Math.max(chartArea.top, Math.min(chartArea.bottom, px));
+                };
+
+                let categoryWidth;
+                if (years.length >= 2) {
+                    categoryWidth = xScale.getPixelForValue(1) - xScale.getPixelForValue(0);
+                } else {
+                    categoryWidth = chartArea.right - chartArea.left;
+                }
+                const groupWidth = categoryWidth * 0.9;
+                const slotWidth  = groupWidth / 2;
+                // Gap between B&H bar and combined plan column. Bars are
+                // shrunk on their inner edge to leave `gap` px between them.
+                const gap        = Math.max(4, slotWidth * 0.15);
+                const barWidth   = Math.max(2, slotWidth - gap);
+
                 ctx.save();
-                ctx.font = '11px "Courier New", Courier, monospace';
-                ctx.textAlign = 'center';
-                ctx.fillStyle = '#fff';
-                const numLabels = chart.data.labels.length;
 
-                // Index datasets by stack
-                const planIdx = [], lossIdx = [], bhIdx = [];
-                datasets.forEach((ds, idx) => {
-                    if (ds.stack === 'plan') planIdx.push(idx);
-                    else if (ds.stack === 'loss') lossIdx.push(idx);
-                    else if (ds.stack === 'bh') bhIdx.push(idx);
-                });
+                for (let yi = 0; yi < years.length; yi++) {
+                    const colCenter      = xScale.getPixelForValue(yi);
+                    const bhCenter       = colCenter - slotWidth / 2;
+                    const combinedCenter = colCenter + slotWidth / 2;
 
-                for (let li = 0; li < numLabels; li++) {
-                    // ----- Plan/Loss combined: net total ---------------------
-                    // Find max plan top (high) and its pixel y; find loss bottom too.
-                    let maxPlanTop = -Infinity, planTopPx = Infinity, planX = null;
-                    planIdx.forEach(idx => {
-                        const v = datasets[idx].data[li];
-                        if (Array.isArray(v) && v[1] > maxPlanTop) maxPlanTop = v[1];
-                        const meta = chart.getDatasetMeta(idx);
-                        const bar = meta.data[li];
-                        if (bar && bar.y < planTopPx) {
-                            planTopPx = bar.y;
-                            planX = bar.x;
-                        }
-                    });
-                    let minLossBottom = Infinity, lossBottomPx = -Infinity, lossX = null;
-                    lossIdx.forEach(idx => {
-                        const v = datasets[idx].data[li];
-                        if (Array.isArray(v) && v[0] < minLossBottom) minLossBottom = v[0];
-                        const meta = chart.getDatasetMeta(idx);
-                        const bar = meta.data[li];
-                        if (bar && bar.y > lossBottomPx) {
-                            lossBottomPx = bar.y;
-                            lossX = bar.x;
-                        }
-                    });
+                    const bh        = bhArr[yi]   || 0;
+                    const totalLoss = lossArr[yi] || 0;
+                    const net       = netArr[yi]  || 0;
+                    const year      = years[yi];
 
-                    const totalLoss = totalLossPerYear[li] || 0;
-                    const hasProfits = isFinite(maxPlanTop) && maxPlanTop > 0;
-                    const netTotal = hasProfits ? maxPlanTop : totalLoss;
-
-                    // Place label: above plan top if any profits, else below loss bottom.
-                    if (hasProfits && planX !== null && Math.abs(netTotal) > 0.5) {
-                        const sign = netTotal >= 0 ? '+' : '';
-                        ctx.textBaseline = 'bottom';
-                        ctx.fillText(sign + Math.round(netTotal) + '%', planX, planTopPx - 3);
-                    } else if (!hasProfits && lossX !== null && Math.abs(netTotal) > 0.5) {
-                        ctx.textBaseline = 'top';
-                        ctx.fillText(Math.round(netTotal) + '%', lossX, lossBottomPx + 3);
+                    // ---------- B&H bar ----------
+                    if (Math.abs(bh) > 0.01) {
+                        const yBh  = yClamp(bh);
+                        const yT   = Math.min(y0, yBh);
+                        const yB   = Math.max(y0, yBh);
+                        const x    = bhCenter - barWidth / 2;
+                        const w    = barWidth;
+                        const fill = 'rgba(140,140,140,0.7)';
+                        ctx.fillStyle = fill;
+                        ctx.fillRect(x, yT, w, yB - yT);
+                        this.barRects.push({
+                            type: 'bh', year, value: bh,
+                            x, y: yT, w, h: yB - yT, color: fill
+                        });
                     }
 
-                    // ----- B&H label ------------------------------------------
-                    bhIdx.forEach(idx => {
-                        const v = datasets[idx].data[li] || 0;
-                        const meta = chart.getDatasetMeta(idx);
-                        const bar = meta.data[li];
-                        if (bar && Math.abs(v) > 0.5) {
-                            const sign = v >= 0 ? '+' : '';
-                            ctx.textBaseline = v >= 0 ? 'bottom' : 'top';
-                            const labelY = v >= 0 ? bar.y - 3 : bar.y + 3;
-                            ctx.fillText(sign + Math.round(v) + '%', bar.x, labelY);
+                    // ---------- Combined column: profit pass ----------
+                    // Cursor starts at totalLoss (negative) and grows upward.
+                    let cursor = totalLoss;
+                    for (let si = 0; si < stocks.length; si++) {
+                        const c = contrib[si][yi];
+                        if (!(c > 0)) continue;
+                        const sym   = stocks[si];
+                        const color = colors[sym] || 'rgb(128,128,128)';
+                        const base  = cursor;
+                        const top   = cursor + c;
+
+                        // Above-zero portion: full bar width.
+                        if (top > 0) {
+                            const aboveBase = Math.max(0, base);
+                            const yT = yClamp(top);
+                            const yB = yClamp(aboveBase);
+                            if (yB - yT > 0.5) {
+                                const x = combinedCenter - barWidth / 2;
+                                const w = barWidth;
+                                ctx.fillStyle = color;
+                                ctx.fillRect(x, yT, w, yB - yT);
+                                this.barRects.push({
+                                    type: 'profit', sym, year, value: c,
+                                    x, y: yT, w, h: yB - yT, color
+                                });
+                            }
                         }
-                    });
+                        // Below-zero portion: left half (eaten by losses).
+                        if (base < 0) {
+                            const belowTop = Math.min(0, top);
+                            const yT = yClamp(belowTop);
+                            const yB = yClamp(base);
+                            if (yB - yT > 0.5) {
+                                const x = combinedCenter - barWidth / 2;
+                                const w = barWidth / 2;
+                                ctx.fillStyle = color;
+                                ctx.fillRect(x, yT, w, yB - yT);
+                                this.barRects.push({
+                                    type: 'profit-eaten', sym, year, value: c,
+                                    x, y: yT, w, h: yB - yT, color
+                                });
+                            }
+                        }
+                        cursor += c;
+                    }
+
+                    // ---------- Combined column: loss pass (right half) ----------
+                    let lossCursor = 0;
+                    for (let si = 0; si < stocks.length; si++) {
+                        const c = contrib[si][yi];
+                        if (!(c < 0)) continue;
+                        const sym   = stocks[si];
+                        const color = colors[sym] || 'rgb(128,128,128)';
+                        const base  = lossCursor;
+                        const top   = lossCursor + c;       // more negative
+                        const yT    = yClamp(base);
+                        const yB    = yClamp(top);
+                        if (yB - yT > 0.5) {
+                            const x = combinedCenter;
+                            const w = barWidth / 2;
+                            ctx.fillStyle = color;
+                            ctx.fillRect(x, yT, w, yB - yT);
+                            this.barRects.push({
+                                type: 'loss', sym, year, value: c,
+                                x, y: yT, w, h: yB - yT, color
+                            });
+                        }
+                        lossCursor += c;
+                    }
+
+                    // ---------- Labels ----------
+                    ctx.font      = 'bold 11px "Courier New", Courier, monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = '#fff';
+                    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+                    ctx.shadowBlur  = 3;
+
+                    // B&H label
+                    if (Math.abs(bh) >= 0.5) {
+                        const txt    = (bh >= 0 ? '+' : '') + bh.toFixed(1) + '%';
+                        const yBhPx  = yScale.getPixelForValue(bh);
+                        if (bh >= 0) {
+                            ctx.textBaseline = 'bottom';
+                            const ly = yBhPx - 3;
+                            if (ly > chartArea.top + 10) ctx.fillText(txt, bhCenter, ly);
+                        } else {
+                            ctx.textBaseline = 'top';
+                            const ly = yBhPx + 3;
+                            if (ly < chartArea.bottom - 10) ctx.fillText(txt, bhCenter, ly);
+                        }
+                    }
+
+                    // Combined-column net label.
+                    // Positive net: top edge of column = y(net); place above.
+                    // Negative net: bottom edge of column = y(totalLoss); place
+                    //   below that edge (net text still shown).
+                    if (Math.abs(net) >= 0.5) {
+                        const txt = (net >= 0 ? '+' : '') + net.toFixed(1) + '%';
+                        if (net >= 0) {
+                            ctx.textBaseline = 'bottom';
+                            const ly = yScale.getPixelForValue(net) - 3;
+                            if (ly > chartArea.top + 10) ctx.fillText(txt, combinedCenter, ly);
+                        } else {
+                            ctx.textBaseline = 'top';
+                            const ly = yScale.getPixelForValue(totalLoss) + 3;
+                            if (ly < chartArea.bottom - 10) ctx.fillText(txt, combinedCenter, ly);
+                        }
+                    }
+
+                    ctx.shadowBlur = 0;
                 }
+
                 ctx.restore();
             }
         };
 
-        // Gray overlay on the "eaten" portion of the plan bar
-        // (the part below 0 representing profits consumed by losses).
-        const lossOverlayPlugin = {
-            id: 'lossOverlay',
-            afterDatasetsDraw: (chart) => {
+        // Legend drawn in the top padding area: gray "B&H" swatch on the
+        // left and a multi-color "Plan" swatch (segmented with basket colors)
+        // on the right of it.
+        const legendPlugin = {
+            id: 'barLegend',
+            afterDraw: (chart) => {
+                const stocks = this.stocksOrdered || [];
+                const colors = this.colorsPerStock || {};
                 const ctx = chart.ctx;
-                const datasets = chart.data.datasets;
-                const totalLossPerYear = this.totalLossPerYear || [];
-                if (!datasets.length || !totalLossPerYear.length) return;
-                const yScale = chart.scales.y;
-                if (!yScale) return;
+                const chartArea = chart.chartArea;
+                if (!chartArea) return;
 
-                // Find first plan dataset for bar geometry (x, width).
-                let planAnchor = -1;
-                for (let i = 0; i < datasets.length; i++) {
-                    if (datasets[i].stack === 'plan') { planAnchor = i; break; }
-                }
-                if (planAnchor < 0) return;
-                const meta = chart.getDatasetMeta(planAnchor);
+                const swatchW = 24;
+                const swatchH = 12;
+                const gap     = 6;     // swatch ↔ label
+                const itemGap = 18;    // between B&H and Plan items
+                const cy      = chartArea.top - 18;     // vertical center
+                const swatchY = cy - swatchH / 2;
 
                 ctx.save();
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-                const numLabels = chart.data.labels.length;
-                for (let li = 0; li < numLabels; li++) {
-                    const totalLoss = totalLossPerYear[li] || 0;
-                    if (totalLoss >= 0) continue;
-                    const bar = meta.data[li];
-                    if (!bar) continue;
-                    const w = bar.width;
-                    const x = bar.x - w / 2;
-                    const yZero = yScale.getPixelForValue(0);
-                    const yLoss = yScale.getPixelForValue(totalLoss);
-                    if (yLoss > yZero) {
-                        ctx.fillRect(x, yZero, w, yLoss - yZero);
+                ctx.font = '11px "Courier New", Courier, monospace';
+                ctx.textBaseline = 'middle';
+                ctx.textAlign = 'left';
+
+                const bhLabel   = 'B&H';
+                const planLabel = 'Plan';
+                const bhTextW   = ctx.measureText(bhLabel).width;
+                const planTextW = ctx.measureText(planLabel).width;
+                const totalW = swatchW + gap + bhTextW + itemGap +
+                               swatchW + gap + planTextW;
+                let x = (chartArea.left + chartArea.right) / 2 - totalW / 2;
+
+                // B&H swatch
+                ctx.fillStyle = 'rgba(140,140,140,0.7)';
+                ctx.fillRect(x, swatchY, swatchW, swatchH);
+                x += swatchW + gap;
+                ctx.fillStyle = '#ddd';
+                ctx.fillText(bhLabel, x, cy);
+                x += bhTextW + itemGap;
+
+                // Plan swatch — segmented across basket colors. Falls back
+                // to a single neutral color when no stocks are loaded.
+                if (stocks.length > 0) {
+                    const segW = swatchW / stocks.length;
+                    for (let i = 0; i < stocks.length; i++) {
+                        ctx.fillStyle = colors[stocks[i]] || 'rgb(128,128,128)';
+                        ctx.fillRect(x + i * segW, swatchY, segW + 0.5, swatchH);
                     }
+                } else {
+                    ctx.fillStyle = 'rgb(128,128,128)';
+                    ctx.fillRect(x, swatchY, swatchW, swatchH);
                 }
+                x += swatchW + gap;
+                ctx.fillStyle = '#ddd';
+                ctx.fillText(planLabel, x, cy);
+
                 ctx.restore();
             }
         };
@@ -487,51 +745,23 @@ class BasketGraph extends Component {
         this.chart = new Chart(ctx, {
             type: 'bar',
             data: { labels: [], datasets: [] },
-            plugins: [altBgPlugin, totalLabelPlugin],
+            plugins: [altBgPlugin, customBarPlugin, legendPlugin],
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: false,
+                layout: { padding: { top: 44, bottom: 10 } },
                 plugins: {
                     legend: { display: false },
-                    tooltip: {
-                        mode: 'nearest',
-                        intersect: true,
-                        backgroundColor: 'rgba(0,0,0,0.9)',
-                        titleFont: { size: 11 },
-                        bodyFont: { size: 11 },
-                        borderColor: '#444',
-                        borderWidth: 1,
-                        callbacks: {
-                            title: (items) => items.length ? items[0].label : '',
-                            label: (context) => {
-                                // For floating bars the displayed magnitude is high - low.
-                                const raw = context.raw;
-                                let value;
-                                if (Array.isArray(raw)) {
-                                    value = raw[1] - raw[0];
-                                    if (context.dataset.stack === 'loss') value = -value;
-                                } else {
-                                    value = context.parsed.y;
-                                }
-                                if (Math.abs(value) < 0.01) return null;
-                                const sign = value >= 0 ? '+' : '';
-                                if (context.dataset.stack === 'bh') {
-                                    return ` B&H (avg): ${sign}${value.toFixed(1)}%`;
-                                }
-                                return ` ${context.dataset.label}: ${sign}${value.toFixed(1)}%`;
-                            }
-                        }
-                    }
+                    tooltip: { enabled: false }
                 },
                 scales: {
                     x: {
-                        stacked: true,
+                        type: 'category',
                         grid: { color: '#333' },
                         ticks: { color: '#888' }
                     },
                     y: {
-                        stacked: false,
                         position: 'left',
                         min: this.state.yMin, max: this.state.yMax,
                         afterFit: (axis) => { axis.width = 50; },
@@ -543,7 +773,6 @@ class BasketGraph extends Component {
                     },
                     yRight: {
                         position: 'right',
-                        stacked: false,
                         min: this.state.yMin, max: this.state.yMax,
                         afterFit: (axis) => { axis.width = 50; },
                         grid: { drawOnChartArea: false },
@@ -555,6 +784,8 @@ class BasketGraph extends Component {
                 }
             }
         });
+
+        this._attachBarListeners();
     }
 
     getLineScales = () => ({
@@ -733,30 +964,41 @@ class BasketGraph extends Component {
 
     updateBarChart = () => {
         const { basketResult, stockData } = this.props;
-        if (!basketResult || !basketResult.perStockPlan) {
-            this.chart.data.labels = [];
+
+        const reset = () => {
+            this.years              = [];
+            this.stocksOrdered      = [];
+            this.contribPerStock    = [];
+            this.colorsPerStock     = {};
+            this.totalLossPerYear   = [];
+            this.totalProfitPerYear = [];
+            this.netPerYear         = [];
+            this.bhPerYear          = [];
+            this.barRects           = [];
+            this.chart.data.labels   = [];
             this.chart.data.datasets = [];
-            this.totalLossPerYear = [];
+        };
+
+        if (!basketResult || !basketResult.perStockPlan) {
+            reset();
             this.chart.update();
             return;
         }
 
         const { years, perStockHold, perStockPlan, weightsPerStock } = basketResult;
         if (!years || years.length === 0) {
-            this.chart.data.labels = [];
-            this.chart.data.datasets = [];
-            this.totalLossPerYear = [];
+            reset();
             this.chart.update();
             return;
         }
 
         const stocks = Object.keys(perStockPlan);
-        const labels = years.map(y => y.toString());
-        const datasets = [];
-        const BH_COLOR = 'rgba(140, 140, 140, 0.7)';
         const fallbackColors = getBasketColors(stocks);
+        const colorsPerStock = {};
+        for (const sym of stocks) {
+            colorsPerStock[sym] = stockData?.[sym]?.color || fallbackColors[sym] || 'rgb(128,128,128)';
+        }
 
-        // ---- Per-year, per-stock contribution table -----------------------
         // contrib[symIdx][yearIdx] = weighted final return in % (signed).
         const contrib = stocks.map(sym => {
             const planCurves = perStockPlan[sym] || {};
@@ -770,7 +1012,6 @@ class BasketGraph extends Component {
             });
         });
 
-        // totalLoss[y] = sum of negative contributions (≤ 0).
         const totalLossPerYear = years.map((_, yi) => {
             let s = 0;
             for (let si = 0; si < stocks.length; si++) {
@@ -778,10 +1019,18 @@ class BasketGraph extends Component {
             }
             return s;
         });
-        this.totalLossPerYear = totalLossPerYear;
+        const totalProfitPerYear = years.map((_, yi) => {
+            let s = 0;
+            for (let si = 0; si < stocks.length; si++) {
+                if (contrib[si][yi] > 0) s += contrib[si][yi];
+            }
+            return s;
+        });
+        const netPerYear = years.map((_, yi) =>
+            totalProfitPerYear[yi] + totalLossPerYear[yi]);
 
-        // ---- B&H (unchanged) ---------------------------------------------
-        const bhData = years.map(year => {
+        // B&H per-year: equal-weighted average of held returns (matches prior).
+        const bhPerYear = years.map(year => {
             const yKey = String(year);
             let sum = 0, n = 0;
             for (const sym of stocks) {
@@ -793,71 +1042,30 @@ class BasketGraph extends Component {
             }
             return n > 0 ? (sum / n) * 100 : 0;
         });
-        datasets.push({
-            label: 'B&H',
-            data: bhData,
-            backgroundColor: BH_COLOR,
+
+        // Cache for plugin.
+        this.years              = years.slice();
+        this.stocksOrdered      = stocks;
+        this.contribPerStock    = contrib;
+        this.colorsPerStock     = colorsPerStock;
+        this.totalLossPerYear   = totalLossPerYear;
+        this.totalProfitPerYear = totalProfitPerYear;
+        this.netPerYear         = netPerYear;
+        this.bhPerYear          = bhPerYear;
+        this.barRects           = [];
+
+        // Provide labels for axis ticks. Datasets stay empty — custom plugin
+        // paints all bars. A transparent dummy dataset forces Chart.js to
+        // build the category scale ticks reliably.
+        this.chart.data.labels = years.map(y => y.toString());
+        this.chart.data.datasets = [{
+            type: 'bar',
+            data: years.map(() => 0),
+            backgroundColor: 'transparent',
             borderWidth: 0,
-            stack: 'bh',
-            barPercentage: 0.8,
-            categoryPercentage: 0.9
-        });
-
-        // ---- Plan stack: profitable contributions, anchored at totalLoss --
-        // Cursor starts at totalLoss[y] and grows upward as profitable
-        // stocks claim slices. Top of stack = totalLoss + sumProfits = net.
-        const planCursor = totalLossPerYear.slice();
-        // ---- Loss stack: negative contributions, growing downward from 0 -
-        const lossCursor = years.map(() => 0);
-
-        stocks.forEach((sym, si) => {
-            const color = stockData?.[sym]?.color || fallbackColors[sym] || 'rgb(128,128,128)';
-
-            const planData = years.map((_, yi) => {
-                const c = contrib[si][yi];
-                if (c > 0) {
-                    const lo = planCursor[yi];
-                    const hi = lo + c;
-                    planCursor[yi] = hi;
-                    return [lo, hi];
-                }
-                return [0, 0];
-            });
-            const lossData = years.map((_, yi) => {
-                const c = contrib[si][yi];
-                if (c < 0) {
-                    const hi = lossCursor[yi];
-                    const lo = hi + c;       // c is negative
-                    lossCursor[yi] = lo;
-                    return [lo, hi];
-                }
-                return [0, 0];
-            });
-
-            datasets.push({
-                label: sym + ' (Plan)',
-                data: planData,
-                backgroundColor: color,
-                borderColor: 'rgba(255,255,255,0.3)',
-                borderWidth: 1,
-                stack: 'plan',
-                barPercentage: 1.0,
-                categoryPercentage: 0.9
-            });
-            datasets.push({
-                label: sym + ' (Loss)',
-                data: lossData,
-                backgroundColor: color,
-                borderColor: 'rgba(255,255,255,0.3)',
-                borderWidth: 1,
-                stack: 'loss',
-                barPercentage: 1.0,
-                categoryPercentage: 0.9
-            });
-        });
-
-        this.chart.data.labels = labels;
-        this.chart.data.datasets = datasets;
+            barPercentage: 0.0001,
+            categoryPercentage: 0.0001
+        }];
         this.chart.update();
     }
 
