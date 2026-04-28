@@ -877,13 +877,14 @@ class BasketGraph extends Component {
                     <div className="graph-controls-left">
                         {/* Allocation dropdown */}
                         {!selectedStock && (
-                            <label className="alloc-label">
+                            <label className="alloc-label" title="How each stock is weighted in the basket">
                                 Alloc:
                                 <select
                                     className="alloc-select"
                                     value={allocMode}
                                     onChange={(e) => onAllocModeChange(e.target.value)}
                                     disabled={stocks.length < 2}
+                                    title="How each stock is weighted in the basket"
                                 >
                                     {allocModes.map(m => (
                                         <option key={m.value} value={m.value}>{m.label}</option>
@@ -934,6 +935,7 @@ class BasketGraph extends Component {
                                 value={selectedYear}
                                 onChange={(e) => onYearChange(e.target.value)}
                                 disabled={!hasData}
+                                title="Select a year to display, or average across all years"
                             >
                                 <option value="Average">Average</option>
                                 {sortedYearsList.map(y => (
@@ -980,12 +982,14 @@ class BasketGraph extends Component {
                                 <button
                                     className={`toggle-btn ${viewMode === 'line' ? 'active' : ''}`}
                                     onClick={() => onViewModeChange('line')}
+                                    title="Show daily plan vs buy-and-hold line chart"
                                 >
                                     Line
                                 </button>
                                 <button
                                     className={`toggle-btn ${viewMode === 'bar' ? 'active' : ''}`}
                                     onClick={() => onViewModeChange('bar')}
+                                    title="Show stacked yearly returns by stock"
                                 >
                                     Bar
                                 </button>
@@ -1003,7 +1007,7 @@ class BasketGraph extends Component {
                                     type="button"
                                     className="alloc-optimize-btn"
                                     onClick={() => onOptimizeAllocation()}
-                                    title="Auto-optimize allocation weights"
+                                    title="Auto-optimize basket allocation weights to maximize plan return"
                                     aria-label="Auto-optimize allocation"
                                 >{'\u{1F4A1}'}</button>
                             )}

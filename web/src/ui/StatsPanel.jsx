@@ -43,12 +43,12 @@ class StatsPanel extends Component {
                     </colgroup>
                     <thead>
                         <tr>
-                            <th>Day Range</th>
-                            <th>Win %</th>
-                            <th>Expected %</th>
-                            <th>%/day</th>
-                            <th>Profit Ratio</th>
-                            {yearList.map(year => <th key={year}>{year}</th>)}
+                            <th title="Day-of-year range when this trade window is active (1-366)">Day Range</th>
+                            <th title="Historical hit-rate: % of years this window ended positive">Win %</th>
+                            <th title="Average return across years for this window">Expected %</th>
+                            <th title="Average return per day in window (Expected % / days)">%/day</th>
+                            <th title="Average gain on winners / average loss on losers">Profit Ratio</th>
+                            {yearList.map(year => <th key={year} title={`Return for ${year}`}>{year}</th>)}
                         </tr>
                     </thead>
                     <tbody>
@@ -215,35 +215,35 @@ class StatsPanel extends Component {
                     </thead>
                     <tbody>
                         <tr>
-                            <td style={{ textAlign: 'left' }}>Allocation</td>
+                            <td style={{ textAlign: 'left' }} title="Fraction of basket capital allocated to this stock (key-0 weight)">Allocation</td>
                             {totals && <td>100.0%</td>}
                             {arrStockStats.map(s => (
                                 <td key={s.stock}>{fmtAllocPct(weightFor(s.stock))}</td>
                             ))}
                         </tr>
                         <tr>
-                            <td style={{ textAlign: 'left' }}>Plan Return</td>
+                            <td style={{ textAlign: 'left' }} title="Average yearly return when following the trade-window plan">Plan Return</td>
                             {totals && <td className={clsPct(totals.avgPlan)}>{fmtPct(totals.avgPlan)}</td>}
                             {arrStockStats.map(s => (
                                 <td key={s.stock} className={clsPct(s.avgPlan)}>{fmtPct(s.avgPlan)}</td>
                             ))}
                         </tr>
                         <tr>
-                            <td style={{ textAlign: 'left' }}>B&H Return</td>
+                            <td style={{ textAlign: 'left' }} title="Average yearly return for buy-and-hold (full-year exposure)">B&H Return</td>
                             {totals && <td className={clsPct(totals.avgBh)}>{fmtPct(totals.avgBh)}</td>}
                             {arrStockStats.map(s => (
                                 <td key={s.stock} className={clsPct(s.avgBh)}>{fmtPct(s.avgBh)}</td>
                             ))}
                         </tr>
                         <tr>
-                            <td style={{ textAlign: 'left' }}>Days In Market</td>
+                            <td style={{ textAlign: 'left' }} title="Fraction of the year capital is actively held under the plan">Days In Market</td>
                             {totals && <td>{totals.daysFrac.toFixed(1)}%</td>}
                             {arrStockStats.map(s => (
                                 <td key={s.stock}>{s.daysFrac.toFixed(1)}%</td>
                             ))}
                         </tr>
                         <tr>
-                            <td style={{ textAlign: 'left' }}>Plan Quality</td>
+                            <td style={{ textAlign: 'left' }} title="Risk-adjusted score: plan return vs B&H, penalized by downside volatility">Plan Quality</td>
                             {totals && <td className={totals.planQuality > 0 ? 'positive' : 'negative'}>{formatQuality(totals.planQuality)}</td>}
                             {arrStockStats.map(s => (
                                 <td key={s.stock} className={s.planQuality > 0 ? 'positive' : 'negative'}>{formatQuality(s.planQuality)}</td>

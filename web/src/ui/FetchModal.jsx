@@ -238,6 +238,7 @@ class FetchModal extends Component {
                                 <button
                                     className="modal-btn primary"
                                     onClick={() => this.props.onComplete(sSymbol, this.props.params, nDataYears)}
+                                    title="Add the stock using whatever data was successfully cached"
                                 >
                                     Add Anyway
                                 </button>
@@ -245,6 +246,7 @@ class FetchModal extends Component {
                             <button
                                 className="modal-btn secondary"
                                 onClick={this.handleCancel}
+                                title={bDone ? 'Close this dialog' : 'Cancel the fetch and close'}
                             >
                                 {bDone ? 'Close' : 'Cancel'}
                             </button>

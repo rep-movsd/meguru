@@ -190,7 +190,7 @@ class NewStockModal extends Component {
                     </div>
 
                     <div className="modal-row">
-                        <div className="modal-field">
+                        <div className="modal-field" title="Years of price history to analyze for trade-window statistics">
                             <label>Years</label>
                             <input
                                 type="number"
@@ -200,7 +200,7 @@ class NewStockModal extends Component {
                                 max={PARAM_LIMITS.nYears.max}
                             />
                         </div>
-                        <div className="modal-field">
+                        <div className="modal-field" title="Minimum historical win-rate required to keep a trade window">
                             <label>Win % Threshold</label>
                             <select
                                 value={fPctWin}
@@ -214,7 +214,7 @@ class NewStockModal extends Component {
                     </div>
 
                     <div className="modal-row">
-                        <div className="modal-field">
+                        <div className="modal-field" title="Shortest trade window length, in days">
                             <label>Min Window (days)</label>
                             <input
                                 type="number"
@@ -235,13 +235,20 @@ class NewStockModal extends Component {
                     </div>
 
                     <div className="modal-actions">
-                        <button className="modal-btn secondary" onClick={onClose}>
+                        <button
+                            className="modal-btn secondary"
+                            onClick={onClose}
+                            title="Close without adding"
+                        >
                             Cancel
                         </button>
                         <button
                             className="modal-btn primary"
                             onClick={this.handleAdd}
                             disabled={!canAdd}
+                            title={isExisting
+                                ? 'Replace this stock with new parameters'
+                                : 'Fetch data and add this stock to the basket'}
                         >
                             {isExisting ? 'Replace' : 'Add'}
                         </button>

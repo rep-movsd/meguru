@@ -74,7 +74,11 @@ class BasketList extends Component {
                         >
                             Load
                         </button>
-                        <button className="new-stock-btn" onClick={onOpenModal}>
+                        <button
+                            className="new-stock-btn"
+                            onClick={onOpenModal}
+                            title="Add a new stock to the basket"
+                        >
                             + New
                         </button>
                         <input
@@ -113,6 +117,9 @@ class BasketList extends Component {
                                         tabIndex="0"
                                         role="button"
                                         aria-pressed={isSelected}
+                                        title={isSelected
+                                            ? 'Click to deselect (show all stocks)'
+                                            : 'Click to solo this stock and view its trade windows'}
                                         onClick={(e) => {
                                             // Don't select if clicking action buttons
                                             if (e.target.closest('.item-actions') || e.target.closest('.icon-button')) return;
@@ -129,7 +136,7 @@ class BasketList extends Component {
                                         <button
                                             className={`icon-button expand${isExpanded ? ' open' : ''}`}
                                             onClick={(e) => { e.stopPropagation(); onToggleExpand(stock); }}
-                                            title="Toggle parameters"
+                                            title="Show/hide parameter sliders"
                                         >
                                             &#9654;
                                         </button>
@@ -142,21 +149,23 @@ class BasketList extends Component {
                                             <button
                                                 className="icon-button optimize"
                                                 onClick={(e) => { e.stopPropagation(); this.props.onOptimize && this.props.onOptimize(stock); }}
-                                                title="Auto-optimize parameters"
+                                                title="Auto-optimize this stock's window and win% parameters"
                                             >
                                                 {'\u{1F4A1}'}
                                             </button>
                                             <button
                                                 className="icon-button toggle-vis"
                                                 onClick={(e) => { e.stopPropagation(); onToggleVisible(stock); }}
-                                                title={isHidden ? 'Show' : 'Hide'}
+                                                title={isHidden
+                                                    ? 'Show — include this stock in the basket'
+                                                    : 'Hide — exclude this stock from the basket'}
                                             >
                                                 {isHidden ? '\u25CB' : '\u25CF'}
                                             </button>
                                             <button
                                                 className="icon-button delete"
                                                 onClick={(e) => { e.stopPropagation(); onRemove(stock); }}
-                                                title="Remove"
+                                                title="Remove from basket"
                                             >
                                                 {'\u2715'}
                                             </button>
@@ -166,7 +175,7 @@ class BasketList extends Component {
                                     {/* Accordion: param sliders */}
                                     {isExpanded && (
                                         <div className="basket-item-accordion">
-                                            <div className="slider-group">
+                                            <div className="slider-group" title="Years of historical data used to compute trade-window statistics">
                                                 <label>Sample years</label>
                                                 <input
                                                     type="range" min="1" max={data.nDataYears || 25} step="1"
@@ -175,7 +184,7 @@ class BasketList extends Component {
                                                 />
                                                 <span className="slider-value">{p.nYears}</span>
                                             </div>
-                                            <div className="slider-group">
+                                            <div className="slider-group" title="Minimum trade-window length, in days">
                                                 <label>Min Window</label>
                                                 <input
                                                     type="range" min="3" max="120" step="1"
@@ -184,7 +193,7 @@ class BasketList extends Component {
                                                 />
                                                 <span className="slider-value">{p.nWinMin}</span>
                                             </div>
-                                            <div className="slider-group">
+                                            <div className="slider-group" title="Minimum historical win-rate required to keep a trade window (floor 50%)">
                                                 <label>Win %</label>
                                                 {(() => {
                                                     const fStep = +(100 / p.nYears).toFixed(2);
