@@ -53,7 +53,11 @@ class BasketGraph extends Component {
                     yMin: this.state.yMin, yMax: this.state.yMax
                 }));
             } catch (e) { /* ignore */ }
-            // Recreate chart so new scales take effect cleanly
+            // Destroy existing chart, then recreate with new scales.
+            if (this.chart) {
+                this.chart.destroy();
+                this.chart = null;
+            }
             this.createChart();
         });
     }
