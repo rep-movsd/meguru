@@ -6,6 +6,7 @@ import BasketGraph from './BasketGraph';
 import StatsPanel from './StatsPanel';
 import NewStockModal from './NewStockModal';
 import FetchModal from './FetchModal';
+import { ensureStockData } from '../data/fetch.js';
 import './styles.css';
 
 // Root application component.
@@ -48,7 +49,9 @@ class App extends Component {
             basketResult: null,
             stockDetail: null,
             // Auto-optimize overlay state
-            optimizing: null  // null | symbol string
+            optimizing: null,  // null | symbol string
+            // Basket-load overlay state: null | { sSymbol, nDone, nTotal }
+            loadingBasket: null
         };
     }
 
@@ -896,6 +899,10 @@ class App extends Component {
         const newStocks = [];
         const newStockData = {};
 
+        const nTotal = payload.stocks.length;
+        let nDone = 0;
+        this.setState({ loadingBasket: { sSymbol: '', nDone: 0, nTotal } });
+
         for (const entry of payload.stocks) {
             const symbol = entry.symbol;
             if (!symbol) continue;
@@ -907,11 +914,22 @@ class App extends Component {
                 fPctWin: entry.fPctWin ?? 60
             };
 
-            // engine.addStock reads OPFS data; if unavailable, skip silently.
+            // Show which stock we're working on
+            this.setState({ loadingBasket: { sSymbol: symbol, nDone, nTotal } });
+
+            // Ensure data is in OPFS — download missing years from Yahoo if needed.
+            try {
+                await ensureStockData(symbol, null);
+            } catch (err) {
+                console.warn(`Failed to fetch data for ${symbol}:`, err.message);
+            }
+
+            // engine.addStock reads OPFS data; if still unavailable, skip silently.
             try {
                 await engine.addStock(symbol, params);
             } catch (err) {
                 console.warn(`Failed to load ${symbol}:`, err.message);
+                nDone++;
                 continue;
             }
 
@@ -927,7 +945,10 @@ class App extends Component {
             if (entry.visible === false) {
                 engine.setStockVisible(symbol, false);
             }
+            nDone++;
         }
+
+        this.setState({ loadingBasket: null });
 
         // Recompute colors in insertion order
         const finalStockData = this.recomputeColors(newStocks, newStockData);
@@ -1038,6 +1059,23 @@ class App extends Component {
                                 {this.state.optimizing === '__alloc__'
                                     ? 'Searching weight compositions'
                                     : 'Finding ideal parameters'}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Basket loading overlay */}
+                {this.state.loadingBasket && (
+                    <div className="optimize-overlay">
+                        <div className="optimize-modal">
+                            <div className="optimize-spinner">{'\u{1F4BE}'}</div>
+                            <div className="optimize-title">
+                                Loading basket…
+                            </div>
+                            <div className="optimize-sub">
+                                {this.state.loadingBasket.sSymbol
+                                    ? `${this.state.loadingBasket.sSymbol} (${this.state.loadingBasket.nDone}/${this.state.loadingBasket.nTotal})`
+                                    : `Preparing (${this.state.loadingBasket.nTotal} stocks)`}
                             </div>
                         </div>
                     </div>
