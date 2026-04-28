@@ -2,7 +2,11 @@
 // Same logic as FetchModal.startFetching but without UI. Returns number of
 // data-years available after the fetch (cached + freshly downloaded).
 //
-// onProgress: optional ({ nYear, sStatus, sMessage }) => void
+// onProgress: optional ({ sPhase, ... }) => void
+//   sPhase: 'scanning' | 'cached' | 'fetching' | 'done'
+//   When 'fetching':  { nYear, nYearDone, nYearTotal, sStatus, sMessage }
+//   When 'cached':    { nCachedYears }
+//   When 'done':      { nTotalYears }
 
 import { fetchYears } from './yahoo.js';
 import {
@@ -17,6 +21,8 @@ const MAX_YEARS = 25;
 export async function ensureStockData(sSymbol, onProgress, signal) {
     const log = (entry) => { if (onProgress) onProgress(entry); };
 
+    log({ sPhase: 'scanning' });
+
     const nCurrentYear = new Date().getFullYear();
     const arrMissingYears = [];
     let nCachedDataYears = 0;
@@ -30,21 +36,35 @@ export async function ensureStockData(sSymbol, onProgress, signal) {
     }
 
     if (arrMissingYears.length === 0) {
-        log({ nYear: null, sStatus: 'ok', sMessage: `${sSymbol}: cached` });
+        log({ sPhase: 'cached', nCachedYears: nCachedDataYears });
         return nCachedDataYears;
     }
 
-    log({
-        nYear: null, sStatus: 'info',
-        sMessage: `${sSymbol}: fetching ${arrMissingYears.length} year(s)`
-    });
+    const nYearTotal = arrMissingYears.length;
+    let nYearDone = 0;
+
+    // Wrap yahoo's per-year callback to add running counters.
+    const wrapped = (entry) => {
+        // entry: { nYear, sStatus, sMessage } where nYear may be null on terminal events
+        if (entry.nYear !== null) nYearDone++;
+        log({
+            sPhase:     'fetching',
+            nYear:      entry.nYear,
+            nYearDone,
+            nYearTotal,
+            sStatus:    entry.sStatus,
+            sMessage:   entry.sMessage
+        });
+    };
 
     const { mapYearCsv, arrNoDataYears, arrSkippedNoDataYears } =
-        await fetchYears(sSymbol, arrMissingYears, onProgress, signal);
+        await fetchYears(sSymbol, arrMissingYears, wrapped, signal);
 
     for (const [nYear, sCsv] of mapYearCsv)        await writeStockYear(sSymbol, nYear, sCsv);
     for (const nYear of arrNoDataYears)            await writeNoData(sSymbol, nYear);
     for (const nYear of arrSkippedNoDataYears)     await writeNoData(sSymbol, nYear);
 
-    return mapYearCsv.size + nCachedDataYears;
+    const nTotalYears = mapYearCsv.size + nCachedDataYears;
+    log({ sPhase: 'done', nTotalYears });
+    return nTotalYears;
 }

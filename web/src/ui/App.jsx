@@ -901,7 +901,14 @@ class App extends Component {
 
         const nTotal = payload.stocks.length;
         let nDone = 0;
-        this.setState({ loadingBasket: { sSymbol: '', nDone: 0, nTotal } });
+        this.setState({
+            loadingBasket: {
+                sSymbol: '', nDone: 0, nTotal,
+                sPhase: 'scanning',
+                nYear: null, nYearDone: 0, nYearTotal: 0,
+                sStatus: '', sMessage: ''
+            }
+        });
 
         for (const entry of payload.stocks) {
             const symbol = entry.symbol;
@@ -915,11 +922,34 @@ class App extends Component {
             };
 
             // Show which stock we're working on
-            this.setState({ loadingBasket: { sSymbol: symbol, nDone, nTotal } });
+            this.setState({
+                loadingBasket: {
+                    sSymbol: symbol, nDone, nTotal,
+                    sPhase: 'scanning',
+                    nYear: null, nYearDone: 0, nYearTotal: 0,
+                    sStatus: '', sMessage: ''
+                }
+            });
 
             // Ensure data is in OPFS — download missing years from Yahoo if needed.
+            const onProg = (entry) => {
+                this.setState((prev) => {
+                    if (!prev.loadingBasket) return null;
+                    return {
+                        loadingBasket: {
+                            ...prev.loadingBasket,
+                            sPhase:     entry.sPhase     ?? prev.loadingBasket.sPhase,
+                            nYear:      entry.nYear      ?? prev.loadingBasket.nYear,
+                            nYearDone:  entry.nYearDone  ?? prev.loadingBasket.nYearDone,
+                            nYearTotal: entry.nYearTotal ?? prev.loadingBasket.nYearTotal,
+                            sStatus:    entry.sStatus    ?? prev.loadingBasket.sStatus,
+                            sMessage:   entry.sMessage   ?? prev.loadingBasket.sMessage
+                        }
+                    };
+                });
+            };
             try {
-                await ensureStockData(symbol, null);
+                await ensureStockData(symbol, onProg);
             } catch (err) {
                 console.warn(`Failed to fetch data for ${symbol}:`, err.message);
             }
@@ -1065,21 +1095,65 @@ class App extends Component {
                 )}
 
                 {/* Basket loading overlay */}
-                {this.state.loadingBasket && (
-                    <div className="optimize-overlay">
-                        <div className="optimize-modal">
-                            <div className="optimize-spinner">{'\u{1F4BE}'}</div>
-                            <div className="optimize-title">
-                                Loading basket…
-                            </div>
-                            <div className="optimize-sub">
-                                {this.state.loadingBasket.sSymbol
-                                    ? `${this.state.loadingBasket.sSymbol} (${this.state.loadingBasket.nDone}/${this.state.loadingBasket.nTotal})`
-                                    : `Preparing (${this.state.loadingBasket.nTotal} stocks)`}
+                {this.state.loadingBasket && (() => {
+                    const lb = this.state.loadingBasket;
+                    const stockPct = lb.nTotal > 0
+                        ? Math.round((lb.nDone / lb.nTotal) * 100) : 0;
+                    const yearPct = lb.nYearTotal > 0
+                        ? Math.round((lb.nYearDone / lb.nYearTotal) * 100) : 0;
+                    let sub;
+                    if (!lb.sSymbol) {
+                        sub = `Preparing (${lb.nTotal} stocks)`;
+                    } else if (lb.sPhase === 'scanning') {
+                        sub = `${lb.sSymbol} \u2014 scanning cache\u2026`;
+                    } else if (lb.sPhase === 'cached') {
+                        sub = `${lb.sSymbol} \u2014 cached`;
+                    } else if (lb.sPhase === 'fetching') {
+                        const yr = lb.nYear ? ` ${lb.nYear}` : '';
+                        sub = `${lb.sSymbol} \u2014 fetching${yr} (${lb.nYearDone}/${lb.nYearTotal} years)`;
+                    } else {
+                        sub = lb.sSymbol;
+                    }
+                    return (
+                        <div className="optimize-overlay">
+                            <div className="optimize-modal" style={{ minWidth: 360 }}>
+                                <div className="optimize-spinner">{'\u{1F4BE}'}</div>
+                                <div className="optimize-title">
+                                    {`Loading basket\u2026 (${lb.nDone}/${lb.nTotal})`}
+                                </div>
+                                <div className="optimize-sub">{sub}</div>
+                                {/* Overall basket progress */}
+                                <div style={{
+                                    marginTop: 12, height: 6, width: '100%',
+                                    background: '#222', borderRadius: 3, overflow: 'hidden'
+                                }}>
+                                    <div style={{
+                                        height: '100%', width: `${stockPct}%`,
+                                        background: '#4a90e2', transition: 'width 0.2s'
+                                    }} />
+                                </div>
+                                {/* Per-stock year progress */}
+                                {lb.sPhase === 'fetching' && lb.nYearTotal > 0 && (
+                                    <div style={{
+                                        marginTop: 6, height: 4, width: '100%',
+                                        background: '#222', borderRadius: 2, overflow: 'hidden'
+                                    }}>
+                                        <div style={{
+                                            height: '100%', width: `${yearPct}%`,
+                                            background: '#7ab8ff', transition: 'width 0.2s'
+                                        }} />
+                                    </div>
+                                )}
+                                {lb.sMessage && (
+                                    <div style={{
+                                        marginTop: 8, fontSize: 11, color: '#888',
+                                        textAlign: 'center'
+                                    }}>{lb.sMessage}</div>
+                                )}
                             </div>
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
             </div>
         );
     }
