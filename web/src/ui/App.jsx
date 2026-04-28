@@ -16,7 +16,6 @@ import './styles.css';
 
 const ALLOC_MODES = [
     { value: 'equal', label: 'Equal' },
-    { value: 'mcap', label: 'Market Cap' },
     { value: 'avgret', label: 'Avg Return' },
     { value: 'custom', label: 'Custom' }
 ];
@@ -1010,19 +1009,6 @@ class App extends Component {
 
         return (
             <div className="app">
-                {/* Top bar */}
-                <div className="top-bar">
-                    <div className="top-bar-title">meguru</div>
-                    <div className="top-bar-actions">
-                        <button
-                            className="help-button"
-                            onClick={() => this.setState({ helpOpen: true })}
-                            title="Help & documentation"
-                            aria-label="Open help"
-                        >?</button>
-                    </div>
-                </div>
-
                 {/* Main area: basket list + graph */}
                 <div className="main-area">
                     <BasketList
@@ -1061,6 +1047,7 @@ class App extends Component {
                         onOptimizeAllocation={this.handleOptimizeAllocation}
                         onDisplayYearsChange={this.handleDisplayYearsChange}
                         displayYears={displayYears}
+                        onOpenHelp={() => this.setState({ helpOpen: true })}
                     />
                 </div>
 

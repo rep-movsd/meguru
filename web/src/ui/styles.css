@@ -105,6 +105,12 @@ body {
     cursor: default;
 }
 
+.alloc-select.y-range-select {
+    padding: 3px 2px;
+    min-width: 0;
+    width: 64px;
+}
+
 .stock-count {
     font-size: 11px;
     color: #888;
@@ -252,6 +258,42 @@ body {
 
 .basket-item.hidden {
     opacity: 0.5;
+}
+
+.basket-item.add-stock-tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 8px;
+    padding: 14px 8px;
+    border-style: dashed;
+    border-color: #444;
+    color: #aaa;
+    font-weight: 500;
+    user-select: none;
+}
+
+.basket-item.add-stock-tile:hover {
+    border-color: #2196F3;
+    color: #2196F3;
+    background: #1a2230;
+}
+
+.basket-item.add-stock-tile:focus {
+    outline: none;
+    border-color: #2196F3;
+    color: #2196F3;
+}
+
+.add-stock-plus {
+    font-size: 18px;
+    line-height: 1;
+    font-weight: 600;
+}
+
+.add-stock-label {
+    font-size: 13px;
 }
 
 .basket-item-row {

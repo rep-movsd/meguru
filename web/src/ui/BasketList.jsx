@@ -63,133 +63,144 @@ class BasketList extends Component {
                     </h2>
                 </div>
 
-                {stocks.length === 0 ? (
-                    <div className="empty-basket">
-                        <p>No stocks in basket</p>
-                        <p className="hint">Click "New" to add a stock</p>
+                <div className="basket-items">
+                    {/* Add Stock tile — always at top */}
+                    <div
+                        className="basket-item add-stock-tile"
+                        tabIndex="0"
+                        role="button"
+                        title="Add a new stock to the basket"
+                        onClick={onOpenModal}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                onOpenModal();
+                            }
+                        }}
+                    >
+                        <span className="add-stock-plus">{'\u002B'}</span>
+                        <span className="add-stock-label">Add Stock</span>
                     </div>
-                ) : (
-                    <div className="basket-items">
-                        {stocks.map(stock => {
-                            const data = stockData[stock];
-                            if (!data) return null;
-                            const isSelected = stock === selectedStock;
-                            const isExpanded = stock === expandedStock;
-                            const isHidden = !data.visible;
-                            const p = data.params;
 
-                            return (
+                    {stocks.map(stock => {
+                        const data = stockData[stock];
+                        if (!data) return null;
+                        const isSelected = stock === selectedStock;
+                        const isExpanded = stock === expandedStock;
+                        const isHidden = !data.visible;
+                        const p = data.params;
+
+                        return (
+                            <div
+                                className={`basket-item${isSelected ? ' selected' : ''}${isHidden ? ' hidden' : ''}`}
+                                key={stock}
+                            >
+                                {/* Main row: click to select */}
                                 <div
-                                    className={`basket-item${isSelected ? ' selected' : ''}${isHidden ? ' hidden' : ''}`}
-                                    key={stock}
-                                >
-                                    {/* Main row: click to select */}
-                                    <div
-                                        className="basket-item-row"
-                                        tabIndex="0"
-                                        role="button"
-                                        aria-pressed={isSelected}
-                                        title={isSelected
-                                            ? 'Click to deselect (show all stocks)'
-                                            : 'Click to solo this stock and view its trade windows'}
-                                        onClick={(e) => {
-                                            // Don't select if clicking action buttons
-                                            if (e.target.closest('.item-actions') || e.target.closest('.icon-button')) return;
+                                    className="basket-item-row"
+                                    tabIndex="0"
+                                    role="button"
+                                    aria-pressed={isSelected}
+                                    title={isSelected
+                                        ? 'Click to deselect (show all stocks)'
+                                        : 'Click to solo this stock and view its trade windows'}
+                                    onClick={(e) => {
+                                        // Don't select if clicking action buttons
+                                        if (e.target.closest('.item-actions') || e.target.closest('.icon-button')) return;
+                                        onSelect(isSelected ? null : stock);
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.target.closest('.item-actions') || e.target.closest('.icon-button')) return;
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
                                             onSelect(isSelected ? null : stock);
-                                        }}
-                                        onKeyDown={(e) => {
-                                            if (e.target.closest('.item-actions') || e.target.closest('.icon-button')) return;
-                                            if (e.key === 'Enter' || e.key === ' ') {
-                                                e.preventDefault();
-                                                onSelect(isSelected ? null : stock);
-                                            }
-                                        }}
+                                        }
+                                    }}
+                                >
+                                    <button
+                                        className={`icon-button expand${isExpanded ? ' open' : ''}`}
+                                        onClick={(e) => { e.stopPropagation(); onToggleExpand(stock); }}
+                                        title="Show/hide parameter sliders"
                                     >
+                                        &#9654;
+                                    </button>
+                                    <span
+                                        className="stock-color"
+                                        style={{ backgroundColor: data.color }}
+                                    />
+                                    <span className="stock-name">{stock}</span>
+                                    <div className="item-actions">
                                         <button
-                                            className={`icon-button expand${isExpanded ? ' open' : ''}`}
-                                            onClick={(e) => { e.stopPropagation(); onToggleExpand(stock); }}
-                                            title="Show/hide parameter sliders"
+                                            className="icon-button optimize"
+                                            onClick={(e) => { e.stopPropagation(); this.props.onOptimize && this.props.onOptimize(stock); }}
+                                            title="Auto-optimize this stock's window and win% parameters"
                                         >
-                                            &#9654;
+                                            {'\u{1F4A1}'}
                                         </button>
-                                        <span
-                                            className="stock-color"
-                                            style={{ backgroundColor: data.color }}
-                                        />
-                                        <span className="stock-name">{stock}</span>
-                                        <div className="item-actions">
-                                            <button
-                                                className="icon-button optimize"
-                                                onClick={(e) => { e.stopPropagation(); this.props.onOptimize && this.props.onOptimize(stock); }}
-                                                title="Auto-optimize this stock's window and win% parameters"
-                                            >
-                                                {'\u{1F4A1}'}
-                                            </button>
-                                            <button
-                                                className="icon-button toggle-vis"
-                                                onClick={(e) => { e.stopPropagation(); onToggleVisible(stock); }}
-                                                title={isHidden
-                                                    ? 'Show — include this stock in the basket'
-                                                    : 'Hide — exclude this stock from the basket'}
-                                            >
-                                                {isHidden ? '\u25CB' : '\u25CF'}
-                                            </button>
-                                            <button
-                                                className="icon-button delete"
-                                                onClick={(e) => { e.stopPropagation(); onRemove(stock); }}
-                                                title="Remove from basket"
-                                            >
-                                                {'\u2715'}
-                                            </button>
+                                        <button
+                                            className="icon-button toggle-vis"
+                                            onClick={(e) => { e.stopPropagation(); onToggleVisible(stock); }}
+                                            title={isHidden
+                                                ? 'Show — include this stock in the basket'
+                                                : 'Hide — exclude this stock from the basket'}
+                                        >
+                                            {isHidden ? '\u25CB' : '\u25CF'}
+                                        </button>
+                                        <button
+                                            className="icon-button delete"
+                                            onClick={(e) => { e.stopPropagation(); onRemove(stock); }}
+                                            title="Remove from basket"
+                                        >
+                                            {'\u2715'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Accordion: param sliders */}
+                                {isExpanded && (
+                                    <div className="basket-item-accordion">
+                                        <div className="slider-group" title="Years of historical data used to compute trade-window statistics">
+                                            <label>Sample years</label>
+                                            <input
+                                                type="range" min="1" max={data.nDataYears || 25} step="1"
+                                                value={p.nYears}
+                                                onInput={(e) => this.handleSliderChange(stock, 'nYears', parseInt(e.target.value))}
+                                            />
+                                            <span className="slider-value">{p.nYears}</span>
+                                        </div>
+                                        <div className="slider-group" title="Minimum trade-window length, in days">
+                                            <label>Min Window</label>
+                                            <input
+                                                type="range" min="3" max="120" step="1"
+                                                value={p.nWinMin}
+                                                onInput={(e) => this.handleSliderChange(stock, 'nWinMin', parseInt(e.target.value))}
+                                            />
+                                            <span className="slider-value">{p.nWinMin}</span>
+                                        </div>
+                                        <div className="slider-group" title="Minimum historical win-rate required to keep a trade window (floor 50%)">
+                                            <label>Win %</label>
+                                            {(() => {
+                                                const fStep = +(100 / p.nYears).toFixed(2);
+                                                // Floor min at 50% — snap up to nearest step >= 50.
+                                                const fMin = Math.ceil(50 / fStep) * fStep;
+                                                return (
+                                                    <>
+                                                        <input
+                                                            type="range" min={fMin} max="100" step={fStep}
+                                                            value={p.fPctWin}
+                                                            onInput={(e) => this.handleSliderChange(stock, 'fPctWin', parseFloat(e.target.value))}
+                                                        />
+                                                        <span className="slider-value">{p.fPctWin.toFixed(1)}%</span>
+                                                    </>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
-
-                                    {/* Accordion: param sliders */}
-                                    {isExpanded && (
-                                        <div className="basket-item-accordion">
-                                            <div className="slider-group" title="Years of historical data used to compute trade-window statistics">
-                                                <label>Sample years</label>
-                                                <input
-                                                    type="range" min="1" max={data.nDataYears || 25} step="1"
-                                                    value={p.nYears}
-                                                    onInput={(e) => this.handleSliderChange(stock, 'nYears', parseInt(e.target.value))}
-                                                />
-                                                <span className="slider-value">{p.nYears}</span>
-                                            </div>
-                                            <div className="slider-group" title="Minimum trade-window length, in days">
-                                                <label>Min Window</label>
-                                                <input
-                                                    type="range" min="3" max="120" step="1"
-                                                    value={p.nWinMin}
-                                                    onInput={(e) => this.handleSliderChange(stock, 'nWinMin', parseInt(e.target.value))}
-                                                />
-                                                <span className="slider-value">{p.nWinMin}</span>
-                                            </div>
-                                            <div className="slider-group" title="Minimum historical win-rate required to keep a trade window (floor 50%)">
-                                                <label>Win %</label>
-                                                {(() => {
-                                                    const fStep = +(100 / p.nYears).toFixed(2);
-                                                    // Floor min at 50% — snap up to nearest step >= 50.
-                                                    const fMin = Math.ceil(50 / fStep) * fStep;
-                                                    return (
-                                                        <>
-                                                            <input
-                                                                type="range" min={fMin} max="100" step={fStep}
-                                                                value={p.fPctWin}
-                                                                onInput={(e) => this.handleSliderChange(stock, 'fPctWin', parseFloat(e.target.value))}
-                                                            />
-                                                            <span className="slider-value">{p.fPctWin.toFixed(1)}%</span>
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
 
                 {/* Action footer */}
                 <div className="basket-footer">
@@ -207,13 +218,6 @@ class BasketList extends Component {
                         title="Load basket from JSON file"
                     >
                         Load
-                    </button>
-                    <button
-                        className="new-stock-btn"
-                        onClick={onOpenModal}
-                        title="Add a new stock to the basket"
-                    >
-                        + New
                     </button>
                     <input
                         type="file"

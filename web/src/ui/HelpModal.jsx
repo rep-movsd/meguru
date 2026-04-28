@@ -39,13 +39,24 @@ class HelpModal extends Component {
             <div className="help-section">
                 <h3>What is meguru?</h3>
                 <p>
-                    Meguru is a seasonal trading research tool. It scans years of
-                    historical price data for each stock and finds <em>trade
-                    windows</em> &mdash; recurring day-of-year ranges where the
-                    stock has been profitable a high enough fraction of the
-                    time. You build a basket of stocks, each with their own
-                    parameters, and the engine simulates a plan that buys/sells
-                    only inside those windows.
+                    Meguru is a seasonal trading research tool.
+                    The basic principle is to scan historical daily prices for a and find
+                    date ranges within each year where there is a high likelihood of positive returns.
+                    This provides a trading plan for when to be in or out of the market for that stock.
+
+                    A basket is a collection of stocks, each with its own trade windows.
+                    Each stock in a basket has its own parameters based on which the windows are chosen.
+                    Each stock also has an allocation percentage, which determines how much of the total capital to allocate when trading.
+                    By building a good basket, you can maximise returns while minimising time in the market.
+
+                    The engine simulates the trades for the basket and displays a graph comparing returns against buy-and-hold.
+                    Since the trade windows are affected by the parameters in the stock, you can tune them to find a good balance of risk and reward.
+
+                    Meguru allows you to automatically find the best parameters for each stock, as well as for the allocation percentages.
+
+                    For simplicity, each stock and its capital is considered independently;
+                    E.g. Buy stock X for 100000, Sell stock X for 105000, next buy again for 105000 etc.
+                    Capital is never mixed between stocks.
                 </p>
 
                 <h3>5-minute walkthrough</h3>
@@ -53,12 +64,19 @@ class HelpModal extends Component {
                     <li>
                         <strong>Add a stock.</strong> Click <code>+ New</code>,
                         type a symbol (NSE only for now), and pick parameters
-                        (defaults are sensible). The first time, the app
-                        downloads up to 25 years of daily data from Yahoo via a
-                        Cloudflare Worker proxy &mdash; subsequent loads use
-                        the local OPFS cache.
+                        (defaults are sensible). The first time you add a stock, the app
+                        downloads up to 25 years of daily price data from Yahoo Finance.
+                        The data is stored in the browser.
+                        Each stock in a basket get assigned a unique color.
                     </li>
                     <li>
+                        Once you have one or more stocks in the basket, you can click the Line or Bar graph buttons
+                        at the top-right to show the backtest results.
+                        The line graph shows how the trading strategy works for a single year (or averaged across years),
+                        while the bar graph shows the returns for each year.
+                        In the bar graph, the contributions of each individual stock is colored based on the stock's assigned color.
+                        The bars are shown in such a way that
+
                         <strong>Inspect the basket.</strong> The graph on the
                         right shows the basket&rsquo;s plan return vs
                         buy-and-hold. The stats panel below shows per-stock
@@ -126,9 +144,6 @@ class HelpModal extends Component {
                 <dl>
                     <dt>Equal</dt>
                     <dd>Every visible stock gets the same weight.</dd>
-
-                    <dt>Market Cap</dt>
-                    <dd>Weights proportional to market capitalisation.</dd>
 
                     <dt>Avg Return</dt>
                     <dd>

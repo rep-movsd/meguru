@@ -363,43 +363,122 @@ class BasketGraph extends Component {
             }
         };
 
-        // Total labels on top of stacked bars
+        // Total labels on top of stacked bars.
+        // Net total per year = top of plan stack (if any positive contributions)
+        // or totalLoss (loss-only year). totalLossPerYear is set in updateBarChart.
         const totalLabelPlugin = {
             id: 'totalLabel',
             afterDatasetsDraw: (chart) => {
                 const ctx = chart.ctx;
                 const datasets = chart.data.datasets;
                 if (!datasets.length) return;
+                const totalLossPerYear = this.totalLossPerYear || [];
                 ctx.save();
                 ctx.font = '11px "Courier New", Courier, monospace';
                 ctx.textAlign = 'center';
                 ctx.fillStyle = '#fff';
                 const numLabels = chart.data.labels.length;
-                const stacks = {};
+
+                // Index datasets by stack
+                const planIdx = [], lossIdx = [], bhIdx = [];
                 datasets.forEach((ds, idx) => {
-                    const stack = ds.stack || 'default';
-                    if (!stacks[stack]) stacks[stack] = [];
-                    stacks[stack].push(idx);
+                    if (ds.stack === 'plan') planIdx.push(idx);
+                    else if (ds.stack === 'loss') lossIdx.push(idx);
+                    else if (ds.stack === 'bh') bhIdx.push(idx);
                 });
+
                 for (let li = 0; li < numLabels; li++) {
-                    Object.entries(stacks).forEach(([, dsIndices]) => {
-                        let total = 0, topY = Infinity, x = null;
-                        dsIndices.forEach(idx => {
-                            total += datasets[idx].data[li] || 0;
-                            const meta = chart.getDatasetMeta(idx);
-                            if (meta.data[li]) {
-                                const bar = meta.data[li];
-                                if (bar.y < topY) topY = bar.y;
-                                x = bar.x;
-                            }
-                        });
-                        if (x !== null && Math.abs(total) > 0.5) {
-                            const sign = total >= 0 ? '+' : '';
-                            ctx.textBaseline = total >= 0 ? 'bottom' : 'top';
-                            const labelY = total >= 0 ? topY - 3 : topY + 3;
-                            ctx.fillText(sign + Math.round(total) + '%', x, labelY);
+                    // ----- Plan/Loss combined: net total ---------------------
+                    // Find max plan top (high) and its pixel y; find loss bottom too.
+                    let maxPlanTop = -Infinity, planTopPx = Infinity, planX = null;
+                    planIdx.forEach(idx => {
+                        const v = datasets[idx].data[li];
+                        if (Array.isArray(v) && v[1] > maxPlanTop) maxPlanTop = v[1];
+                        const meta = chart.getDatasetMeta(idx);
+                        const bar = meta.data[li];
+                        if (bar && bar.y < planTopPx) {
+                            planTopPx = bar.y;
+                            planX = bar.x;
                         }
                     });
+                    let minLossBottom = Infinity, lossBottomPx = -Infinity, lossX = null;
+                    lossIdx.forEach(idx => {
+                        const v = datasets[idx].data[li];
+                        if (Array.isArray(v) && v[0] < minLossBottom) minLossBottom = v[0];
+                        const meta = chart.getDatasetMeta(idx);
+                        const bar = meta.data[li];
+                        if (bar && bar.y > lossBottomPx) {
+                            lossBottomPx = bar.y;
+                            lossX = bar.x;
+                        }
+                    });
+
+                    const totalLoss = totalLossPerYear[li] || 0;
+                    const hasProfits = isFinite(maxPlanTop) && maxPlanTop > 0;
+                    const netTotal = hasProfits ? maxPlanTop : totalLoss;
+
+                    // Place label: above plan top if any profits, else below loss bottom.
+                    if (hasProfits && planX !== null && Math.abs(netTotal) > 0.5) {
+                        const sign = netTotal >= 0 ? '+' : '';
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillText(sign + Math.round(netTotal) + '%', planX, planTopPx - 3);
+                    } else if (!hasProfits && lossX !== null && Math.abs(netTotal) > 0.5) {
+                        ctx.textBaseline = 'top';
+                        ctx.fillText(Math.round(netTotal) + '%', lossX, lossBottomPx + 3);
+                    }
+
+                    // ----- B&H label ------------------------------------------
+                    bhIdx.forEach(idx => {
+                        const v = datasets[idx].data[li] || 0;
+                        const meta = chart.getDatasetMeta(idx);
+                        const bar = meta.data[li];
+                        if (bar && Math.abs(v) > 0.5) {
+                            const sign = v >= 0 ? '+' : '';
+                            ctx.textBaseline = v >= 0 ? 'bottom' : 'top';
+                            const labelY = v >= 0 ? bar.y - 3 : bar.y + 3;
+                            ctx.fillText(sign + Math.round(v) + '%', bar.x, labelY);
+                        }
+                    });
+                }
+                ctx.restore();
+            }
+        };
+
+        // Gray overlay on the "eaten" portion of the plan bar
+        // (the part below 0 representing profits consumed by losses).
+        const lossOverlayPlugin = {
+            id: 'lossOverlay',
+            afterDatasetsDraw: (chart) => {
+                const ctx = chart.ctx;
+                const datasets = chart.data.datasets;
+                const totalLossPerYear = this.totalLossPerYear || [];
+                if (!datasets.length || !totalLossPerYear.length) return;
+                const yScale = chart.scales.y;
+                if (!yScale) return;
+
+                // Find first plan dataset for bar geometry (x, width).
+                let planAnchor = -1;
+                for (let i = 0; i < datasets.length; i++) {
+                    if (datasets[i].stack === 'plan') { planAnchor = i; break; }
+                }
+                if (planAnchor < 0) return;
+                const meta = chart.getDatasetMeta(planAnchor);
+
+                ctx.save();
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+                const numLabels = chart.data.labels.length;
+                for (let li = 0; li < numLabels; li++) {
+                    const totalLoss = totalLossPerYear[li] || 0;
+                    if (totalLoss >= 0) continue;
+                    const bar = meta.data[li];
+                    if (!bar) continue;
+                    const w = bar.width;
+                    const x = bar.x - w / 2;
+                    const yZero = yScale.getPixelForValue(0);
+                    const yLoss = yScale.getPixelForValue(totalLoss);
+                    if (yLoss > yZero) {
+                        ctx.fillRect(x, yZero, w, yLoss - yZero);
+                    }
                 }
                 ctx.restore();
             }
@@ -426,7 +505,16 @@ class BasketGraph extends Component {
                         callbacks: {
                             title: (items) => items.length ? items[0].label : '',
                             label: (context) => {
-                                const value = context.parsed.y;
+                                // For floating bars the displayed magnitude is high - low.
+                                const raw = context.raw;
+                                let value;
+                                if (Array.isArray(raw)) {
+                                    value = raw[1] - raw[0];
+                                    if (context.dataset.stack === 'loss') value = -value;
+                                } else {
+                                    value = context.parsed.y;
+                                }
+                                if (Math.abs(value) < 0.01) return null;
                                 const sign = value >= 0 ? '+' : '';
                                 if (context.dataset.stack === 'bh') {
                                     return ` B&H (avg): ${sign}${value.toFixed(1)}%`;
@@ -443,7 +531,7 @@ class BasketGraph extends Component {
                         ticks: { color: '#888' }
                     },
                     y: {
-                        stacked: true,
+                        stacked: false,
                         position: 'left',
                         min: this.state.yMin, max: this.state.yMax,
                         afterFit: (axis) => { axis.width = 50; },
@@ -455,6 +543,7 @@ class BasketGraph extends Component {
                     },
                     yRight: {
                         position: 'right',
+                        stacked: false,
                         min: this.state.yMin, max: this.state.yMax,
                         afterFit: (axis) => { axis.width = 50; },
                         grid: { drawOnChartArea: false },
@@ -647,6 +736,7 @@ class BasketGraph extends Component {
         if (!basketResult || !basketResult.perStockPlan) {
             this.chart.data.labels = [];
             this.chart.data.datasets = [];
+            this.totalLossPerYear = [];
             this.chart.update();
             return;
         }
@@ -655,6 +745,7 @@ class BasketGraph extends Component {
         if (!years || years.length === 0) {
             this.chart.data.labels = [];
             this.chart.data.datasets = [];
+            this.totalLossPerYear = [];
             this.chart.update();
             return;
         }
@@ -665,8 +756,31 @@ class BasketGraph extends Component {
         const BH_COLOR = 'rgba(140, 140, 140, 0.7)';
         const fallbackColors = getBasketColors(stocks);
 
-        // B&H bar per year: equal-weight avg of per-stock B&H final returns (no fees, hodl).
-        // Uses last day of each year's B&H curve (fractional → %).
+        // ---- Per-year, per-stock contribution table -----------------------
+        // contrib[symIdx][yearIdx] = weighted final return in % (signed).
+        const contrib = stocks.map(sym => {
+            const planCurves = perStockPlan[sym] || {};
+            const weights    = weightsPerStock?.[sym] || {};
+            return years.map(year => {
+                const yKey = String(year);
+                const curve = planCurves[yKey];
+                const w     = weights[yKey] || 0;
+                if (!curve || curve.length <= 365) return 0;
+                return curve[365] * w * 100;
+            });
+        });
+
+        // totalLoss[y] = sum of negative contributions (≤ 0).
+        const totalLossPerYear = years.map((_, yi) => {
+            let s = 0;
+            for (let si = 0; si < stocks.length; si++) {
+                if (contrib[si][yi] < 0) s += contrib[si][yi];
+            }
+            return s;
+        });
+        this.totalLossPerYear = totalLossPerYear;
+
+        // ---- B&H (unchanged) ---------------------------------------------
         const bhData = years.map(year => {
             const yKey = String(year);
             let sum = 0, n = 0;
@@ -679,7 +793,6 @@ class BasketGraph extends Component {
             }
             return n > 0 ? (sum / n) * 100 : 0;
         });
-
         datasets.push({
             label: 'B&H',
             data: bhData,
@@ -690,30 +803,55 @@ class BasketGraph extends Component {
             categoryPercentage: 0.9
         });
 
-        // Per-stock plan bars: weighted contribution per year.
-        //   contribution[year] = perStockPlan[sym][year][365] * weightsPerStock[sym][year]
-        // Sum across stocks per year = basketAvg[year][365]. Stack sums → basket total.
-        stocks.forEach(sym => {
-            const color = stockData?.[sym]?.color || fallbackColors[sym] || 'rgb(128,128,128)';
-            const planCurves = perStockPlan[sym] || {};
-            const weights    = weightsPerStock?.[sym] || {};
+        // ---- Plan stack: profitable contributions, anchored at totalLoss --
+        // Cursor starts at totalLoss[y] and grows upward as profitable
+        // stocks claim slices. Top of stack = totalLoss + sumProfits = net.
+        const planCursor = totalLossPerYear.slice();
+        // ---- Loss stack: negative contributions, growing downward from 0 -
+        const lossCursor = years.map(() => 0);
 
-            const data = years.map(year => {
-                const yKey = String(year);
-                const curve = planCurves[yKey];
-                const w     = weights[yKey] || 0;
-                if (!curve || curve.length <= 365) return 0;
-                return curve[365] * w * 100;
+        stocks.forEach((sym, si) => {
+            const color = stockData?.[sym]?.color || fallbackColors[sym] || 'rgb(128,128,128)';
+
+            const planData = years.map((_, yi) => {
+                const c = contrib[si][yi];
+                if (c > 0) {
+                    const lo = planCursor[yi];
+                    const hi = lo + c;
+                    planCursor[yi] = hi;
+                    return [lo, hi];
+                }
+                return [0, 0];
+            });
+            const lossData = years.map((_, yi) => {
+                const c = contrib[si][yi];
+                if (c < 0) {
+                    const hi = lossCursor[yi];
+                    const lo = hi + c;       // c is negative
+                    lossCursor[yi] = lo;
+                    return [lo, hi];
+                }
+                return [0, 0];
             });
 
             datasets.push({
                 label: sym + ' (Plan)',
-                data,
+                data: planData,
                 backgroundColor: color,
                 borderColor: 'rgba(255,255,255,0.3)',
                 borderWidth: 1,
                 stack: 'plan',
-                barPercentage: 0.8,
+                barPercentage: 1.0,
+                categoryPercentage: 0.9
+            });
+            datasets.push({
+                label: sym + ' (Loss)',
+                data: lossData,
+                backgroundColor: color,
+                borderColor: 'rgba(255,255,255,0.3)',
+                borderWidth: 1,
+                stack: 'loss',
+                barPercentage: 1.0,
                 categoryPercentage: 0.9
             });
         });
@@ -867,7 +1005,8 @@ class BasketGraph extends Component {
         const { selectedStock, basketResult, stockDetail, stockData, stocks,
                 allocMode, allocModes, viewMode, selectedYear, displayYears,
                 onViewModeChange, onYearChange, onAllocModeChange, onUpdateAllocPct,
-                onCopyToCustom, onExportCsv, onExportCalendar, onOptimizeAllocation, onDisplayYearsChange } = this.props;
+                onCopyToCustom, onExportCsv, onExportCalendar, onOptimizeAllocation, onDisplayYearsChange,
+                onOpenHelp } = this.props;
 
         const hasData = !!basketResult;
         // basketResult.years is a flat int array [2024, 2023, ...] — normalize to objects.
@@ -938,7 +1077,7 @@ class BasketGraph extends Component {
                             of each stock's params.nYears (stats lookback). */}
                         {!selectedStock && viewMode === 'bar' && onDisplayYearsChange && stocks.length > 0 && (
                             <label className="alloc-label">
-                                Backtest years:
+                                Backtest:
                                 <select
                                     className="alloc-select"
                                     value={String(nDisplayYears)}
@@ -984,7 +1123,7 @@ class BasketGraph extends Component {
                         <label className="alloc-label" title="Minimum value on the Y-axis">
                             Y min:
                             <select
-                                className="alloc-select"
+                                className="alloc-select y-range-select"
                                 value={String(this.state.yMin)}
                                 onChange={(e) => this.setRange('yMin', e.target.value)}
                             >
@@ -996,7 +1135,7 @@ class BasketGraph extends Component {
                         <label className="alloc-label" title="Maximum value on the Y-axis">
                             Y max:
                             <select
-                                className="alloc-select"
+                                className="alloc-select y-range-select"
                                 value={String(this.state.yMax)}
                                 onChange={(e) => this.setRange('yMax', e.target.value)}
                             >
@@ -1049,6 +1188,16 @@ class BasketGraph extends Component {
                                 </button>
                             </div>
                         )}
+
+                        {/* Help button */}
+                        <button
+                            className="toggle-btn help-btn"
+                            onClick={() => onOpenHelp && onOpenHelp()}
+                            title="Open help & documentation"
+                            aria-label="Help"
+                        >
+                            ?
+                        </button>
                     </div>
                 </div>
 
