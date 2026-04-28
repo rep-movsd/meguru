@@ -32,6 +32,30 @@ class BasketGraph extends Component {
         this.chartRef = createRef();
         this.chart = null;
         this._createRaf = 0;
+
+        // Y-axis range — persisted in localStorage
+        let yMin = -50, yMax = 200;
+        try {
+            const saved = JSON.parse(localStorage.getItem('meguru.graphRange') || 'null');
+            if (saved && Number.isFinite(saved.yMin) && Number.isFinite(saved.yMax)) {
+                yMin = saved.yMin; yMax = saved.yMax;
+            }
+        } catch (e) { /* ignore */ }
+        this.state = { yMin, yMax };
+    }
+
+    setRange = (key, value) => {
+        const v = parseInt(value, 10);
+        if (!Number.isFinite(v)) return;
+        this.setState({ [key]: v }, () => {
+            try {
+                localStorage.setItem('meguru.graphRange', JSON.stringify({
+                    yMin: this.state.yMin, yMax: this.state.yMax
+                }));
+            } catch (e) { /* ignore */ }
+            // Recreate chart so new scales take effect cleanly
+            this.createChart();
+        });
     }
 
     componentDidMount() {
@@ -417,7 +441,7 @@ class BasketGraph extends Component {
                     y: {
                         stacked: true,
                         position: 'left',
-                        min: -50, max: 200,
+                        min: this.state.yMin, max: this.state.yMax,
                         afterFit: (axis) => { axis.width = 50; },
                         grid: { color: '#333' },
                         ticks: {
@@ -427,7 +451,7 @@ class BasketGraph extends Component {
                     },
                     yRight: {
                         position: 'right',
-                        min: -50, max: 200,
+                        min: this.state.yMin, max: this.state.yMax,
                         afterFit: (axis) => { axis.width = 50; },
                         grid: { drawOnChartArea: false },
                         ticks: {
@@ -462,7 +486,7 @@ class BasketGraph extends Component {
         },
         y: {
             position: 'left',
-            min: -50, max: 200,
+            min: this.state.yMin, max: this.state.yMax,
             beginAtZero: false,
             afterFit: (axis) => { axis.width = 50; },
             grid: { color: '#333' },
@@ -474,7 +498,7 @@ class BasketGraph extends Component {
         },
         yRight: {
             position: 'right',
-            min: -50, max: 200,
+            min: this.state.yMin, max: this.state.yMax,
             beginAtZero: false,
             afterFit: (axis) => { axis.width = 50; },
             grid: { drawOnChartArea: false },
@@ -952,6 +976,32 @@ class BasketGraph extends Component {
                     </div>
 
                     <div className="graph-controls-right">
+                        {/* Y-axis range selectors */}
+                        <label className="alloc-label" title="Minimum value on the Y-axis">
+                            Y min:
+                            <select
+                                className="alloc-select"
+                                value={String(this.state.yMin)}
+                                onChange={(e) => this.setRange('yMin', e.target.value)}
+                            >
+                                {[-500, -300, -200, -150, -100, -50, 0].map(v => (
+                                    <option key={v} value={String(v)}>{v}%</option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="alloc-label" title="Maximum value on the Y-axis">
+                            Y max:
+                            <select
+                                className="alloc-select"
+                                value={String(this.state.yMax)}
+                                onChange={(e) => this.setRange('yMax', e.target.value)}
+                            >
+                                {[100, 200, 300, 500, 750, 1000, 2000].map(v => (
+                                    <option key={v} value={String(v)}>{v}%</option>
+                                ))}
+                            </select>
+                        </label>
+
                         {/* Export verification CSV — basket mode only */}
                         {!selectedStock && (
                             <button
