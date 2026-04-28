@@ -1010,13 +1010,18 @@ class App extends Component {
 
         return (
             <div className="app">
-                {/* Help button — top-right corner */}
-                <button
-                    className="help-button"
-                    onClick={() => this.setState({ helpOpen: true })}
-                    title="Help & documentation"
-                    aria-label="Open help"
-                >?</button>
+                {/* Top bar */}
+                <div className="top-bar">
+                    <div className="top-bar-title">meguru</div>
+                    <div className="top-bar-actions">
+                        <button
+                            className="help-button"
+                            onClick={() => this.setState({ helpOpen: true })}
+                            title="Help & documentation"
+                            aria-label="Open help"
+                        >?</button>
+                    </div>
+                </div>
 
                 {/* Main area: basket list + graph */}
                 <div className="main-area">

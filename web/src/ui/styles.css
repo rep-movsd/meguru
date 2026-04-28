@@ -32,7 +32,28 @@ body {
     background: #1a1a1a;
 }
 
-/* Top Bar - removed, controls distributed to basket header and graph controls */
+/* Top Bar */
+.top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 36px;
+    padding: 0 16px;
+    background: #1f1f1f;
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+}
+.top-bar-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #ddd;
+    letter-spacing: 0.5px;
+}
+.top-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
 
 .new-stock-btn {
     padding: 3px 10px;
@@ -1121,23 +1142,20 @@ body {
 /* ----------------------------------------------------------------- */
 
 .help-button {
-    position: fixed;
-    top: 12px;
-    right: 16px;
-    z-index: 100;
-    width: 32px;
-    height: 32px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     border: 1px solid #555;
     background: #2a2a2a;
     color: #ccc;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: bold;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.15s;
+    padding: 0;
 }
 .help-button:hover {
     background: #3a3a3a;
