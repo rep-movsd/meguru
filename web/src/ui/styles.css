@@ -140,12 +140,24 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
 }
 
 .basket-header h2 {
-    font-size: 13px;
+    font-size: 14px;
     margin: 0;
     color: #ddd;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    letter-spacing: 0.5px;
+}
+
+.basket-kanji {
+    font-size: 18px;
+    color: #4a90e2;
+    font-weight: normal;
+    line-height: 1;
 }
 
 .basket-header-actions {
@@ -156,32 +168,57 @@ body {
 
 .basket-items {
     flex: 1;
-    overflow-y: auto;
+    overflow-y: scroll;
+    overflow-x: hidden;
     padding: 6px;
+    min-height: 0;
+    scrollbar-gutter: stable;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar — Webkit */
 .basket-items::-webkit-scrollbar {
-    width: 6px;
+    width: 8px;
 }
-
 .basket-items::-webkit-scrollbar-track {
-    background: #1a1a1a;
+    background: #141414;
+    border-left: 1px solid #2a2a2a;
 }
-
 .basket-items::-webkit-scrollbar-thumb {
-    background: #444;
-    border-radius: 3px;
+    background: #3a3a3a;
+    border-radius: 4px;
+    border: 2px solid #141414;
+}
+.basket-items::-webkit-scrollbar-thumb:hover {
+    background: #4a90e2;
+}
+/* Firefox */
+.basket-items {
+    scrollbar-width: thin;
+    scrollbar-color: #3a3a3a #141414;
 }
 
-.basket-items::-webkit-scrollbar-thumb:hover {
-    background: #555;
+/* Action footer at the bottom of the basket */
+.basket-footer {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 8px 12px;
+    border-top: 1px solid #333;
+    background: #1f1f1f;
+    flex-shrink: 0;
+}
+.basket-footer .new-stock-btn {
+    flex: 1;
 }
 
 .empty-basket {
+    flex: 1;
     padding: 30px 15px;
     text-align: center;
     color: #666;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .empty-basket p {

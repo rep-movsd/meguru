@@ -57,38 +57,10 @@ class BasketList extends Component {
         return (
             <div className="basket-list">
                 <div className="basket-header">
-                    <h2>Basket</h2>
-                    <div className="basket-header-actions">
-                        <button
-                            className="new-stock-btn"
-                            onClick={onSaveBasket}
-                            disabled={stocks.length === 0}
-                            title="Save basket to JSON file"
-                        >
-                            Save
-                        </button>
-                        <button
-                            className="new-stock-btn"
-                            onClick={this.handleLoadClick}
-                            title="Load basket from JSON file"
-                        >
-                            Load
-                        </button>
-                        <button
-                            className="new-stock-btn"
-                            onClick={onOpenModal}
-                            title="Add a new stock to the basket"
-                        >
-                            + New
-                        </button>
-                        <input
-                            type="file"
-                            accept="application/json,.json"
-                            ref={(el) => { this._fileInput = el; }}
-                            style={{ display: 'none' }}
-                            onChange={this.handleFileChange}
-                        />
-                    </div>
+                    <h2>
+                        <span className="basket-kanji" aria-hidden="true">{'\u5DE1'}</span>
+                        Meguru
+                    </h2>
                 </div>
 
                 {stocks.length === 0 ? (
@@ -218,6 +190,39 @@ class BasketList extends Component {
                         })}
                     </div>
                 )}
+
+                {/* Action footer */}
+                <div className="basket-footer">
+                    <button
+                        className="new-stock-btn"
+                        onClick={onSaveBasket}
+                        disabled={stocks.length === 0}
+                        title="Save basket to JSON file"
+                    >
+                        Save
+                    </button>
+                    <button
+                        className="new-stock-btn"
+                        onClick={this.handleLoadClick}
+                        title="Load basket from JSON file"
+                    >
+                        Load
+                    </button>
+                    <button
+                        className="new-stock-btn"
+                        onClick={onOpenModal}
+                        title="Add a new stock to the basket"
+                    >
+                        + New
+                    </button>
+                    <input
+                        type="file"
+                        accept="application/json,.json"
+                        ref={(el) => { this._fileInput = el; }}
+                        style={{ display: 'none' }}
+                        onChange={this.handleFileChange}
+                    />
+                </div>
             </div>
         );
     }
