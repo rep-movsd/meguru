@@ -78,7 +78,8 @@ class App extends Component {
     componentDidUpdate(_, prevState) {
         // Debounce localStorage writes — only save when persisted fields change
         const dominated = ['stocks', 'stockData', 'selectedStock', 'expandedStock',
-                           'allocMode', 'viewMode', 'selectedYear', 'displayYears'];
+                           'allocMode', 'viewMode', 'selectedYear', 'displayYears',
+                           'basketName'];
         const changed = dominated.some(k => prevState[k] !== this.state[k]);
         if (changed) {
             clearTimeout(this._saveTimer);
@@ -101,7 +102,7 @@ class App extends Component {
 
     _saveState = () => {
         const { stocks, stockData, selectedStock, expandedStock,
-                allocMode, viewMode, selectedYear, displayYears } = this.state;
+                allocMode, viewMode, selectedYear, displayYears, basketName } = this.state;
 
         // Strip color from stockData (recomputed on restore) and engine results
         const savedStockData = {};
@@ -120,7 +121,8 @@ class App extends Component {
                 allocMode,
                 viewMode,
                 selectedYear,
-                displayYears
+                displayYears,
+                basketName
             }));
         } catch (err) {
             console.warn('Failed to save state to localStorage:', err.message);
@@ -183,7 +185,8 @@ class App extends Component {
             allocMode,
             viewMode: saved.viewMode || 'line',
             selectedYear: saved.selectedYear || 'Average',
-            displayYears: Number.isFinite(saved.displayYears) ? saved.displayYears : 10
+            displayYears: Number.isFinite(saved.displayYears) ? saved.displayYears : 10,
+            basketName: (typeof saved.basketName === 'string' && saved.basketName) ? saved.basketName : 'basket'
         }, () => {
             if (allocMode === 'custom') this.pushCustomWeightsToEngine();
             this.refreshAll(selectedStock);
@@ -315,6 +318,8 @@ class App extends Component {
             fetchModalData: null
         }, () => {
             this.refreshAll(this.state.selectedStock);
+            // Auto-optimize newly added stock's window/win% params.
+            this.handleOptimize(symbol);
         });
     }
 
@@ -379,7 +384,7 @@ class App extends Component {
     }
 
     handleToggleVisible = (symbol) => {
-        const { stockData } = this.state;
+        const { stockData, allocMode } = this.state;
         if (!stockData[symbol]) return;
 
         const newVisible = !stockData[symbol].visible;
@@ -391,7 +396,10 @@ class App extends Component {
                 [symbol]: { ...stockData[symbol], visible: newVisible }
             }
         }, () => {
-            this.refreshBasket();
+            // In custom mode, re-push weights so engine renormalizes
+            // across the new visible set.
+            if (allocMode === 'custom') this.pushCustomWeightsToEngine();
+            this.refreshAll(this.state.selectedStock);
         });
     }
 
@@ -749,12 +757,26 @@ class App extends Component {
             return;
         }
 
-        const sCsv = engine.exportTradeCalendarCsv();
-        console.log('[calendar] csv length:', sCsv?.length, 'preview:', sCsv?.slice(0, 200));
-        if (!sCsv) {
+        const sCsvRaw = engine.exportTradeCalendarCsv();
+        console.log('[calendar] csv length:', sCsvRaw?.length, 'preview:', sCsvRaw?.slice(0, 200));
+        if (!sCsvRaw) {
             alert('Engine returned empty CSV.');
             return;
         }
+
+        // Rewrite engine "MM-DD" date column to "D/MMM" (e.g. 03-01 -> 1/Mar).
+        // Only the first column of event rows matches; other rows pass through.
+        const arrMon = ['Jan','Feb','Mar','Apr','May','Jun',
+                        'Jul','Aug','Sep','Oct','Nov','Dec'];
+        const sCsv = sCsvRaw.split('\n').map(line => {
+            const m = /^(\d{2})-(\d{2})(,.*)?$/.exec(line);
+            if (!m) return line;
+            const nMonth = parseInt(m[1], 10);
+            const nDay   = parseInt(m[2], 10);
+            if (nMonth < 1 || nMonth > 12) return line;
+            return `${nDay}/${arrMon[nMonth - 1]}${m[3] || ''}`;
+        }).join('\n');
+
         const arrLines = sCsv.split('\n').filter(l => l.length > 0);
         if (arrLines.length <= 1) {
             alert('No trade windows found.');
@@ -856,16 +878,22 @@ class App extends Component {
 
     // Load a basket from a JSON file. Replaces current basket entirely.
     // Triggered by BasketList; receives a File object from the hidden input.
-    handleLoadBasket = async (file) => {
-        if (!file) return;
+    handleLoadBasket = async (fileOrPayload) => {
+        if (!fileOrPayload) return;
 
         let payload;
-        try {
-            const sText = await file.text();
-            payload = JSON.parse(sText);
-        } catch (err) {
-            alert('Failed to read basket file: ' + err.message);
-            return;
+        if (typeof fileOrPayload.text === 'function') {
+            // File / Blob from <input type="file">
+            try {
+                const sText = await fileOrPayload.text();
+                payload = JSON.parse(sText);
+            } catch (err) {
+                alert('Failed to read basket file: ' + err.message);
+                return;
+            }
+        } else {
+            // Already-parsed JSON object (used by example presets)
+            payload = fileOrPayload;
         }
 
         if (!payload || payload.version !== 1 || !Array.isArray(payload.stocks)) {
@@ -1000,7 +1028,7 @@ class App extends Component {
         const {
             stocks, stockData, selectedStock, expandedStock, modalOpen,
             fetchModalData, allocMode, viewMode, selectedYear, displayYears,
-            basketResult, stockDetail
+            basketResult, stockDetail, basketName
         } = this.state;
 
         return (
@@ -1021,6 +1049,8 @@ class App extends Component {
                         onSaveBasket={this.handleSaveBasket}
                         onLoadBasket={this.handleLoadBasket}
                         onOptimize={this.handleOptimize}
+                        basketName={basketName}
+                        onBasketNameChange={(name) => this.setState({ basketName: name })}
                     />
 
                     <BasketGraph

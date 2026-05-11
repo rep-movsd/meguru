@@ -89,6 +89,9 @@ class SearchableDropdown extends Component {
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 this.setState({ isOpen: true });
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (this.props.onSubmit) this.props.onSubmit();
             }
             return;
         }
@@ -120,8 +123,9 @@ class SearchableDropdown extends Component {
                 e.preventDefault();
                 if (highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
                     this.handleOptionSelect(filteredOptions[highlightedIndex]);
-                } else if (this.props.onSubmit) {
-                    this.props.onSubmit();
+                } else {
+                    this.setState({ isOpen: false, highlightedIndex: -1 });
+                    if (this.props.onSubmit) this.props.onSubmit();
                 }
                 break;
 

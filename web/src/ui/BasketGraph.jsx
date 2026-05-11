@@ -311,7 +311,7 @@ class BasketGraph extends Component {
                 const xc = (x1 + x2) / 2;
                 const pct = w.pctExpected ?? 0;
                 const sign = pct >= 0 ? '+' : '';
-                ctx.fillStyle = pct >= 0 ? '#4CAF50' : '#f44336';
+                ctx.fillStyle = pct >= 0 ? '#3a8f3e' : '#f44336';
                 ctx.fillText(sign + pct.toFixed(1) + '%', xc, yScale.top + 6);
             }
             ctx.restore();
@@ -335,7 +335,7 @@ class BasketGraph extends Component {
                 const x1 = xScale.getPixelForValue(win.iBeg);
                 const x2 = xScale.getPixelForValue(win.iEnd);
                 const isUp = win.priceEnd > win.priceBeg;
-                ctx.fillStyle = isUp ? 'rgba(76, 175, 80, 0.15)' : 'rgba(244, 67, 54, 0.15)';
+                ctx.fillStyle = isUp ? 'rgba(58, 143, 62, 0.15)' : 'rgba(244, 67, 54, 0.15)';
                 ctx.fillRect(x1, yScale.top, x2 - x1, yScale.bottom - yScale.top);
             }
 
@@ -368,10 +368,10 @@ class BasketGraph extends Component {
                 ctx.shadowOffsetX = 0;
                 ctx.shadowOffsetY = 0;
 
-                ctx.fillStyle = isLoss ? '#f44336' : '#4CAF50';
+                ctx.fillStyle = isLoss ? '#f44336' : '#3a8f3e';
                 ctx.fillText(priceLabel, xCenter, yTop);
 
-                ctx.fillStyle = windowMultiplier >= 1.0 ? '#4CAF50' : '#f44336';
+                ctx.fillStyle = windowMultiplier >= 1.0 ? '#3a8f3e' : '#f44336';
                 ctx.fillText(gainsLabel, xCenter, yTop + 14);
             }
 
@@ -682,9 +682,10 @@ class BasketGraph extends Component {
             }
         };
 
-        // Legend drawn in the top padding area: gray "B&H" swatch on the
-        // left and a multi-color "Plan" swatch (segmented with basket colors)
-        // on the right of it.
+        // Legend drawn in the top-right corner inside the chart area:
+        // gray "B&H" swatch followed by a multi-color "Plan" swatch
+        // (segmented with basket colors). Anchored top-right with a
+        // small inset so the chart itself can use the full top padding.
         const legendPlugin = {
             id: 'barLegend',
             afterDraw: (chart) => {
@@ -698,8 +699,7 @@ class BasketGraph extends Component {
                 const swatchH = 12;
                 const gap     = 6;     // swatch ↔ label
                 const itemGap = 18;    // between B&H and Plan items
-                const cy      = chartArea.top - 18;     // vertical center
-                const swatchY = cy - swatchH / 2;
+                const inset   = 8;     // distance from chart edges
 
                 ctx.save();
                 ctx.font = '11px "Courier New", Courier, monospace';
@@ -712,7 +712,14 @@ class BasketGraph extends Component {
                 const planTextW = ctx.measureText(planLabel).width;
                 const totalW = swatchW + gap + bhTextW + itemGap +
                                swatchW + gap + planTextW;
-                let x = (chartArea.left + chartArea.right) / 2 - totalW / 2;
+                // Anchor top-right inside chart area
+                let x = chartArea.right - inset - totalW;
+                const cy = chartArea.top + inset + swatchH / 2;
+                const swatchY = cy - swatchH / 2;
+
+                // Faint background plate for readability over chart content
+                ctx.fillStyle = 'rgba(30,30,30,0.7)';
+                ctx.fillRect(x - 6, swatchY - 4, totalW + 12, swatchH + 8);
 
                 // B&H swatch
                 ctx.fillStyle = 'rgba(140,140,140,0.7)';
@@ -750,7 +757,7 @@ class BasketGraph extends Component {
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: false,
-                layout: { padding: { top: 44, bottom: 10 } },
+                layout: { padding: { top: 8, bottom: 10 } },
                 plugins: {
                     legend: { display: false },
                     tooltip: { enabled: false }
@@ -926,7 +933,7 @@ class BasketGraph extends Component {
         datasets.push({
             label: 'Plan',
             data: Array.from(planCurve, v => v * 100),
-            borderColor: 'rgb(76, 175, 80)',
+            borderColor: 'rgb(58, 143, 62)',
             tension: 0,
             borderWidth: 2,
             pointRadius: 0,
@@ -999,16 +1006,35 @@ class BasketGraph extends Component {
             colorsPerStock[sym] = stockData?.[sym]?.color || fallbackColors[sym] || 'rgb(128,128,128)';
         }
 
+        // Per-year active mask & weight-renorm scale: stocks that didn't yet
+        // exist for a given calendar year get backfilled with flat data by
+        // the engine — exclude them so their slot doesn't dilute the basket.
+        const maxYear = Math.max(...years);
+        const activeMask = stocks.map(sym => {
+            const nData = stockData?.[sym]?.nDataYears || 0;
+            return years.map(year => nData === 0 || year >= maxYear - nData + 1);
+        });
+        const activeScale = years.map((year, yi) => {
+            let wActive = 0;
+            for (let si = 0; si < stocks.length; si++) {
+                if (!activeMask[si][yi]) continue;
+                const yKey = String(year);
+                wActive += (weightsPerStock?.[stocks[si]] || {})[yKey] || 0;
+            }
+            return wActive > 0 ? 1 / wActive : 0;
+        });
+
         // contrib[symIdx][yearIdx] = weighted final return in % (signed).
-        const contrib = stocks.map(sym => {
+        const contrib = stocks.map((sym, si) => {
             const planCurves = perStockPlan[sym] || {};
             const weights    = weightsPerStock?.[sym] || {};
-            return years.map(year => {
+            return years.map((year, yi) => {
+                if (!activeMask[si][yi]) return 0;
                 const yKey = String(year);
                 const curve = planCurves[yKey];
                 const w     = weights[yKey] || 0;
                 if (!curve || curve.length <= 365) return 0;
-                return curve[365] * w * 100;
+                return curve[365] * w * activeScale[yi] * 100;
             });
         });
 
@@ -1029,12 +1055,14 @@ class BasketGraph extends Component {
         const netPerYear = years.map((_, yi) =>
             totalProfitPerYear[yi] + totalLossPerYear[yi]);
 
-        // B&H per-year: equal-weighted average of held returns (matches prior).
-        const bhPerYear = years.map(year => {
+        // B&H per-year: equal-weighted average of held returns across
+        // stocks active that year (skip backfilled flat data).
+        const bhPerYear = years.map((year, yi) => {
             const yKey = String(year);
             let sum = 0, n = 0;
-            for (const sym of stocks) {
-                const curve = perStockHold[sym]?.[yKey];
+            for (let si = 0; si < stocks.length; si++) {
+                if (!activeMask[si][yi]) continue;
+                const curve = perStockHold[stocks[si]]?.[yKey];
                 if (curve && curve.length > 365) {
                     sum += curve[365];
                     n++;
@@ -1043,24 +1071,36 @@ class BasketGraph extends Component {
             return n > 0 ? (sum / n) * 100 : 0;
         });
 
+        // Drop years in which no stock existed (all backfilled). Keeps
+        // the chart from showing empty/zero columns for pre-basket history.
+        const keepIdx = years
+            .map((_, yi) => activeMask.some(mask => mask[yi]) ? yi : -1)
+            .filter(i => i >= 0);
+        const fYears              = keepIdx.map(i => years[i]);
+        const fContrib            = contrib.map(arr => keepIdx.map(i => arr[i]));
+        const fTotalLossPerYear   = keepIdx.map(i => totalLossPerYear[i]);
+        const fTotalProfitPerYear = keepIdx.map(i => totalProfitPerYear[i]);
+        const fNetPerYear         = keepIdx.map(i => netPerYear[i]);
+        const fBhPerYear          = keepIdx.map(i => bhPerYear[i]);
+
         // Cache for plugin.
-        this.years              = years.slice();
+        this.years              = fYears;
         this.stocksOrdered      = stocks;
-        this.contribPerStock    = contrib;
+        this.contribPerStock    = fContrib;
         this.colorsPerStock     = colorsPerStock;
-        this.totalLossPerYear   = totalLossPerYear;
-        this.totalProfitPerYear = totalProfitPerYear;
-        this.netPerYear         = netPerYear;
-        this.bhPerYear          = bhPerYear;
+        this.totalLossPerYear   = fTotalLossPerYear;
+        this.totalProfitPerYear = fTotalProfitPerYear;
+        this.netPerYear         = fNetPerYear;
+        this.bhPerYear          = fBhPerYear;
         this.barRects           = [];
 
         // Provide labels for axis ticks. Datasets stay empty — custom plugin
         // paints all bars. A transparent dummy dataset forces Chart.js to
         // build the category scale ticks reliably.
-        this.chart.data.labels = years.map(y => y.toString());
+        this.chart.data.labels = fYears.map(y => y.toString());
         this.chart.data.datasets = [{
             type: 'bar',
-            data: years.map(() => 0),
+            data: fYears.map(() => 0),
             backgroundColor: 'transparent',
             borderWidth: 0,
             barPercentage: 0.0001,
@@ -1114,19 +1154,33 @@ class BasketGraph extends Component {
         const { years, perStockPlan, perStockHold, weightsPerStock, daysInMarket } = basketResult;
         if (!years || !perStockPlan) return null;
 
+        const { stockData } = this.props;
         const stocks = Object.keys(perStockPlan);
+        // Most-recent year defines the "active" cutoff for each stock —
+        // any year older than (maxYear - nDataYears + 1) is engine-backfilled
+        // flat data and should not contribute to the basket return.
+        const maxYear = Math.max(...years);
+
         const planReturns = [];
         const bhReturns = [];
         for (const y of years) {
             const k = String(y);
-            let rPlan = 0, rBh = 0;
+            let rPlan = 0, rBh = 0, wTotal = 0;
             for (const sym of stocks) {
+                const nData = stockData?.[sym]?.nDataYears || 0;
+                // Skip stocks not yet existing this year (backfilled flat line)
+                if (nData > 0 && y < maxYear - nData + 1) continue;
                 const w = (weightsPerStock?.[sym] || {})[k] || 0;
                 const planCurve = perStockPlan[sym]?.[k];
                 const bhCurve   = perStockHold?.[sym]?.[k];
                 if (planCurve && planCurve.length > 365) rPlan += planCurve[365] * w;
                 if (bhCurve   && bhCurve.length   > 365) rBh   += bhCurve[365]   * w;
+                wTotal += w;
             }
+            // Renormalize across stocks active this year so a year with
+            // fewer active stocks isn't artificially diluted.
+            if (wTotal > 0) { rPlan /= wTotal; rBh /= wTotal; }
+            else continue;  // no active stocks this year — skip entirely
             planReturns.push(rPlan);
             bhReturns.push(rBh);
         }
@@ -1144,7 +1198,8 @@ class BasketGraph extends Component {
         if (wSum > 0) daysFrac /= wSum;
 
         const quality = calcQuality(planReturns, bhReturns, daysFrac);
-        return { quality, nYrs: planReturns.length };
+        const planMean = planReturns.reduce((a, b) => a + b, 0) / planReturns.length;
+        return { quality, nYrs: planReturns.length, planReturn: (planMean * 100).toFixed(2) };
     }
 
     // -----------------------------------------------------------------------
@@ -1228,10 +1283,8 @@ class BasketGraph extends Component {
         const allocBarData = this.getAllocBarData();
         const isCustom = allocMode === 'custom';
 
-        const showLineControls = selectedStock || viewMode === 'line';
-        // Year combo is shown only in stock-detail view. In basket view we use
-        // a global "show last N years" dropdown instead.
-        const showYearCombo = !!selectedStock || viewMode === 'line';
+        // Year combo shown in line mode only — bar chart doesn't use it.
+        const showYearCombo = viewMode === 'line';
 
         // Highest data-years across stocks — caps the global dropdown options.
         let nMaxDataYears = 0;
@@ -1251,25 +1304,23 @@ class BasketGraph extends Component {
                 <div className="graph-controls">
                     <div className="graph-controls-left">
                         {/* Allocation dropdown */}
-                        {!selectedStock && (
-                            <label className="alloc-label" title="How each stock is weighted in the basket">
-                                Alloc:
-                                <select
-                                    className="alloc-select"
-                                    value={allocMode}
-                                    onChange={(e) => onAllocModeChange(e.target.value)}
-                                    disabled={stocks.length < 2}
-                                    title="How each stock is weighted in the basket"
-                                >
-                                    {allocModes.map(m => (
-                                        <option key={m.value} value={m.value}>{m.label}</option>
-                                    ))}
-                                </select>
-                            </label>
-                        )}
+                        <label className="alloc-label" title="How each stock is weighted in the basket">
+                            Alloc:
+                            <select
+                                className="alloc-select"
+                                value={allocMode}
+                                onChange={(e) => onAllocModeChange(e.target.value)}
+                                disabled={stocks.length < 2}
+                                title="How each stock is weighted in the basket"
+                            >
+                                {allocModes.map(m => (
+                                    <option key={m.value} value={m.value}>{m.label}</option>
+                                ))}
+                            </select>
+                        </label>
 
-                        {/* Copy current weights to custom — basket mode only, hidden when already custom */}
-                        {!selectedStock && !isCustom && (
+                        {/* Copy current weights to custom — hidden when already custom */}
+                        {!isCustom && (
                             <button
                                 className="toggle-btn"
                                 onClick={() => onCopyToCustom && onCopyToCustom()}
@@ -1280,10 +1331,10 @@ class BasketGraph extends Component {
                             </button>
                         )}
 
-                        {/* Sample years dropdown — basket mode only. Sets the
+                        {/* Sample years dropdown — bar mode only. Sets the
                             chart display window via getGraphData(N). Independent
                             of each stock's params.nYears (stats lookback). */}
-                        {!selectedStock && viewMode === 'bar' && onDisplayYearsChange && stocks.length > 0 && (
+                        {viewMode === 'bar' && onDisplayYearsChange && stocks.length > 0 && (
                             <label className="alloc-label">
                                 Backtest:
                                 <select
@@ -1353,9 +1404,7 @@ class BasketGraph extends Component {
                             </select>
                         </label>
 
-                        {/* Export verification CSV — basket mode only */}
-                        {!selectedStock && (
-                            <button
+                        <button
                                 className="toggle-btn"
                                 onClick={() => onExportCsv && onExportCsv()}
                                 disabled={!hasData || stocks.length === 0}
@@ -1363,11 +1412,8 @@ class BasketGraph extends Component {
                             >
                                 Export backtest
                             </button>
-                        )}
 
-                        {/* Export trade calendar — basket mode only */}
-                        {!selectedStock && (
-                            <button
+                        <button
                                 className="toggle-btn"
                                 onClick={() => onExportCalendar && onExportCalendar()}
                                 disabled={!hasData || stocks.length === 0}
@@ -1375,27 +1421,23 @@ class BasketGraph extends Component {
                             >
                                 Export calendar
                             </button>
-                        )}
 
-                        {/* View toggle — only in basket mode */}
-                        {!selectedStock && (
-                            <div className="view-toggle">
-                                <button
-                                    className={`toggle-btn ${viewMode === 'line' ? 'active' : ''}`}
-                                    onClick={() => onViewModeChange('line')}
-                                    title="Show daily plan vs buy-and-hold line chart"
-                                >
-                                    Line
-                                </button>
-                                <button
-                                    className={`toggle-btn ${viewMode === 'bar' ? 'active' : ''}`}
-                                    onClick={() => onViewModeChange('bar')}
-                                    title="Show stacked yearly returns by stock"
-                                >
-                                    Bar
-                                </button>
-                            </div>
-                        )}
+                        <div className="view-toggle">
+                            <button
+                                className={`toggle-btn ${viewMode === 'line' ? 'active' : ''}`}
+                                onClick={() => onViewModeChange('line')}
+                                title="Show daily plan vs buy-and-hold line chart"
+                            >
+                                Line
+                            </button>
+                            <button
+                                className={`toggle-btn ${viewMode === 'bar' ? 'active' : ''}`}
+                                onClick={() => onViewModeChange('bar')}
+                                title="Show stacked yearly returns by stock"
+                            >
+                                Bar
+                            </button>
+                        </div>
 
                         {/* Help button */}
                         <button
@@ -1479,6 +1521,10 @@ class BasketGraph extends Component {
                                 <span className="summary-label">Quality:</span>
                                 <span className={`summary-value ${overlayStats.quality > 0 ? 'positive' : 'negative'}`}>
                                     {formatQuality(overlayStats.quality)}
+                                </span>
+                                <span className="summary-label">Plan:</span>
+                                <span className={`summary-value ${parseFloat(overlayStats.planReturn) >= 0 ? 'positive' : 'negative'}`}>
+                                    {parseFloat(overlayStats.planReturn) >= 0 ? '+' : ''}{overlayStats.planReturn}%
                                 </span>
                                 <span className="summary-label">over</span>
                                 <span className="summary-value">{overlayStats.nYrs}y</span>

@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "name": "basket",
+  "allocMode": "avgret",
+  "stocks": [
+    {
+      "symbol": "SUZLON",
+      "nYears": 15,
+      "nWinMin": 86,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 12.101201391200373,
+      "visible": true
+    },
+    {
+      "symbol": "ADANIPOWER",
+      "nYears": 10,
+      "nWinMin": 29,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 9.46686951037026,
+      "visible": true
+    },
+    {
+      "symbol": "ADANIGREEN",
+      "nYears": 9,
+      "nWinMin": 88,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 7.9129096647307815,
+      "visible": true
+    },
+    {
+      "symbol": "BLUESTONE",
+      "nYears": 2,
+      "nWinMin": 20,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 58.03927782362035,
+      "visible": true
+    },
+    {
+      "symbol": "SKYGOLD",
+      "nYears": 4,
+      "nWinMin": 30,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 4.4656814216968295,
+      "visible": true
+    },
+    {
+      "symbol": "SENCO",
+      "nYears": 4,
+      "nWinMin": 67,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 8.0140601883814,
+      "visible": true
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "examples": [
+    {
+      "label": "Jewelery",
+      "description": "Gold Jewelry and Gemstone portfolio",
+      "file": "jewelery.json"
+    },
+
+    {
+      "label": "Energy",
+      "description": "Power and energy related stocks",
+      "file": "power.json"
+    },
+
+    {
+      "label": "Mixed",
+      "description": "Mixed bag stocks",
+      "file": "mixed.json"
+    }
+  ]
+}

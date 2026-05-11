@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "name": "Mixed bag",
+  "allocMode": "avgret",
+  "stocks": [
+    {
+      "symbol": "SUZLON",
+      "nYears": 15,
+      "nWinMin": 86,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 17.663697694718156,
+      "visible": true
+    },
+    {
+      "symbol": "RPOWER",
+      "nYears": 10,
+      "nWinMin": 38,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 19.519705543159287,
+      "visible": true
+    },
+    {
+      "symbol": "SENCO",
+      "nYears": 4,
+      "nWinMin": 67,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 39.36181471717612,
+      "visible": true
+    },
+    {
+      "symbol": "MAHABANK",
+      "nYears": 10,
+      "nWinMin": 74,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 23.454782044946445,
+      "visible": true
+    }
+  ]
+}

@@ -23,52 +23,15 @@ function loadStockList() {
     return _stockListPromise;
 }
 
-// Default stock parameters matching TStockParams defaults
+// Default stock parameters — will be auto-optimized after add.
 const DEFAULT_PARAMS = {
     nYears: 10,
     nWinMin: 10,
-    nWinMax: 31,
+    nWinMax: 180,
     fPctWin: 60
 };
 
-const PARAM_LIMITS = {
-    nYears: { min: 1, max: 25 },
-    nWinMin: { min: 3, max: 120 },
-    nWinMax: { min: 5, max: 180 }
-};
-
-const PCT_WIN_OPTIONS = Array.from({ length: 11 }, (_, i) => 50 + i * 5);
-
 const FOCUSABLE_SELECTOR = 'input, select, button, [tabindex]:not([tabindex="-1"])';
-
-function validateForm(state) {
-    const { stock, nYears, nWinMin, nWinMax, fPctWin, stockList, bLoadingList } = state;
-    const bHasStock = stock.length > 0;
-    const bIsValidStock = bHasStock && stockList.some(item => item.symbol === stock);
-    const arrParamErrors = [];
-
-    if (!Number.isInteger(nYears) || nYears < PARAM_LIMITS.nYears.min || nYears > PARAM_LIMITS.nYears.max) {
-        arrParamErrors.push(`Years must be between ${PARAM_LIMITS.nYears.min} and ${PARAM_LIMITS.nYears.max}`);
-    }
-    if (!Number.isInteger(nWinMin) || nWinMin < PARAM_LIMITS.nWinMin.min || nWinMin > PARAM_LIMITS.nWinMin.max) {
-        arrParamErrors.push(`Min Window must be between ${PARAM_LIMITS.nWinMin.min} and ${PARAM_LIMITS.nWinMin.max} days`);
-    }
-    if (!Number.isInteger(nWinMax) || nWinMax < PARAM_LIMITS.nWinMax.min || nWinMax > PARAM_LIMITS.nWinMax.max) {
-        arrParamErrors.push(`Max Window must be between ${PARAM_LIMITS.nWinMax.min} and ${PARAM_LIMITS.nWinMax.max} days`);
-    }
-    if (Number.isInteger(nWinMin) && Number.isInteger(nWinMax) && nWinMin > nWinMax) {
-        arrParamErrors.push('Min Window must be less than or equal to Max Window');
-    }
-    if (!PCT_WIN_OPTIONS.includes(fPctWin)) {
-        arrParamErrors.push('Win % Threshold must be between 50% and 100%');
-    }
-
-    return {
-        bIsValidStock,
-        arrParamErrors,
-        canAdd: !bLoadingList && bIsValidStock && arrParamErrors.length === 0
-    };
-}
 
 // Modal for searching and adding a new stock to the basket.
 // Props:
@@ -81,10 +44,6 @@ class NewStockModal extends Component {
         super(props);
         this.state = {
             stock: '',
-            nYears: DEFAULT_PARAMS.nYears,
-            nWinMin: DEFAULT_PARAMS.nWinMin,
-            nWinMax: DEFAULT_PARAMS.nWinMax,
-            fPctWin: DEFAULT_PARAMS.fPctWin,
             stockList: _cachedStockList || [],
             bLoadingList: !_cachedStockList,
             bAttempted: false
@@ -98,12 +57,11 @@ class NewStockModal extends Component {
     }
 
     handleAdd = () => {
-        const { stock, nYears, nWinMin, nWinMax, fPctWin } = this.state;
+        const { stock, stockList, bLoadingList } = this.state;
         this.setState({ bAttempted: true });
-        const validation = validateForm(this.state);
-        if (!validation.canAdd) return;
+        if (bLoadingList || !stockList.some(item => item.symbol === stock)) return;
         if (this.props.onAdd) {
-            this.props.onAdd(stock, { nYears, nWinMin, nWinMax, fPctWin });
+            this.props.onAdd(stock, { ...DEFAULT_PARAMS });
         }
     }
 
@@ -157,12 +115,12 @@ class NewStockModal extends Component {
 
     render() {
         const { onClose, existingStocks } = this.props;
-        const { stock, nYears, nWinMin, nWinMax, fPctWin, stockList, bLoadingList, bAttempted } = this.state;
+        const { stock, stockList, bLoadingList, bAttempted } = this.state;
 
-        const isExisting = existingStocks && existingStocks.includes(stock);
-        const { bIsValidStock, arrParamErrors, canAdd } = validateForm(this.state);
+        const bIsValidStock = stockList.some(item => item.symbol === stock);
         const bShowStockError = bAttempted && !bLoadingList && stock && !bIsValidStock;
-        const bShowParamErrors = bAttempted && arrParamErrors.length > 0;
+        const canAdd = !bLoadingList && bIsValidStock;
+        const isExisting = existingStocks && existingStocks.includes(stock);
 
         return (
             <div className="modal-overlay" onClick={this.handleOverlayClick}>
@@ -173,7 +131,7 @@ class NewStockModal extends Component {
                     aria-modal="true"
                     aria-labelledby="new-stock-modal-title"
                 >
-                    <h2 id="new-stock-modal-title">Add Stock</h2>
+                    <h2 id="new-stock-modal-title">Add</h2>
 
                     <div className="modal-field">
                         <label>Stock Symbol</label>
@@ -182,56 +140,11 @@ class NewStockModal extends Component {
                             options={stockList}
                             onChange={this.handleStockChange}
                             onSubmit={this.handleAdd}
-                            placeholder="Search stock..."
+                            placeholder="Search..."
                         />
                         <div className="error-message" style={{ visibility: bShowStockError ? 'visible' : 'hidden' }}>
                             Select a valid stock symbol from the list
                         </div>
-                    </div>
-
-                    <div className="modal-row">
-                        <div className="modal-field" title="Years of price history to analyze for trade-window statistics">
-                            <label>Years</label>
-                            <input
-                                type="number"
-                                value={nYears}
-                                onInput={(e) => this.setState({ nYears: parseInt(e.target.value, 10) || 0 })}
-                                min={PARAM_LIMITS.nYears.min}
-                                max={PARAM_LIMITS.nYears.max}
-                            />
-                        </div>
-                        <div className="modal-field" title="Minimum historical win-rate required to keep a trade window">
-                            <label>Win % Threshold</label>
-                            <select
-                                value={fPctWin}
-                                onChange={(e) => this.setState({ fPctWin: parseFloat(e.target.value) })}
-                            >
-                                {PCT_WIN_OPTIONS.map(v => (
-                                    <option key={v} value={v}>{v}%</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
-
-                    <div className="modal-row">
-                        <div className="modal-field" title="Shortest trade window length, in days">
-                            <label>Min Window (days)</label>
-                            <input
-                                type="number"
-                                value={nWinMin}
-                                onInput={(e) => this.setState({ nWinMin: parseInt(e.target.value, 10) || 0 })}
-                                min={PARAM_LIMITS.nWinMin.min}
-                                max={PARAM_LIMITS.nWinMin.max}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="error-message modal-validation-errors"
-                         style={{ visibility: bShowParamErrors ? 'visible' : 'hidden' }}>
-                        {bShowParamErrors
-                            ? arrParamErrors.map((sMessage, i) => <div key={i}>{sMessage}</div>)
-                            : <div>&nbsp;</div>
-                        }
                     </div>
 
                     <div className="modal-actions">
@@ -247,10 +160,10 @@ class NewStockModal extends Component {
                             onClick={this.handleAdd}
                             disabled={!canAdd}
                             title={isExisting
-                                ? 'Replace this stock with new parameters'
+                                ? 'Re-add this stock (parameters will be re-optimized)'
                                 : 'Fetch data and add this stock to the basket'}
                         >
-                            {isExisting ? 'Replace' : 'Add'}
+                            {isExisting ? 'Re-add' : 'Add'}
                         </button>
                     </div>
                 </div>

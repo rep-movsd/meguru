@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "name": "basket",
+  "allocMode": "custom",
+  "stocks": [
+    {
+      "symbol": "SUZLON",
+      "nYears": 15,
+      "nWinMin": 86,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 17.160195204611185,
+      "visible": true
+    },
+    {
+      "symbol": "ADANIPOWER",
+      "nYears": 10,
+      "nWinMin": 29,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 13.424562035027924,
+      "visible": true
+    },
+    {
+      "symbol": "RPOWER",
+      "nYears": 10,
+      "nWinMin": 38,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 18.963297676754596,
+      "visible": true
+    },
+    {
+      "symbol": "WAAREEENER",
+      "nYears": 3,
+      "nWinMin": 83,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 39.23098692469369,
+      "visible": true
+    },
+    {
+      "symbol": "ADANIGREEN",
+      "nYears": 9,
+      "nWinMin": 88,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 11.220958158912627,
+      "visible": true
+    }
+  ]
+}

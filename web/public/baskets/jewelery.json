@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "name": "Jewerly stocks",
+  "allocMode": "avgret",
+  "stocks": [
+    {
+      "symbol": "BLUESTONE",
+      "nYears": 2,
+      "nWinMin": 20,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 82.30301312993782,
+      "visible": true
+    },
+    {
+      "symbol": "SKYGOLD",
+      "nYears": 4,
+      "nWinMin": 30,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 6.332591487457405,
+      "visible": true
+    },
+    {
+      "symbol": "SENCO",
+      "nYears": 4,
+      "nWinMin": 67,
+      "nWinMax": 31,
+      "fPctWin": 50,
+      "allocPct": 11.36439538260477,
+      "visible": true
+    }
+  ]
+}
