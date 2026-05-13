@@ -174,7 +174,7 @@ class HelpModal extends Component {
                     <dd>Stocks that earned more in past get bigger slice.</dd>
 
                     <dt>Custom</dt>
-                    <dd>+/− adjuster on alloc bar (5% steps). Use <em>Copy to custom</em> to start from current split.</dd>
+                    <dd>+/− adjuster on alloc bar (5% steps). To edit, first click <em>Copy to custom</em> — this snapshot current split into Custom mode so you can adjust from there. Cannot edit bars in Equal or Avg Return mode.</dd>
                 </dl>
                 <p>
                     Hidden stock (<span className="help-icon">&#9679;</span>/<span className="help-icon">&#9675;</span> dot,
