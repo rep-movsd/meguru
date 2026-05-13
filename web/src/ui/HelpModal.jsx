@@ -188,6 +188,11 @@ class HelpModal extends Component {
                     <dt>Custom</dt>
                     <dd>+/− adjuster on alloc bar (5% steps). To edit, first click <em>Copy to custom</em> — this snapshot current split into Custom mode so you can adjust from there. Cannot edit bars in Equal or Avg Return mode.</dd>
                 </dl>
+                <p className="help-note">
+                    ⚠️ Stock not fractional in real market. Allocation percentage never perfectly match reality —
+                    you can only buy whole shares. For expensive stocks, one share may already be bigger than intended slice.
+                    Use allocation as guide, not exact rule.
+                </p>
             </div>
         );
     }
@@ -253,6 +258,15 @@ class HelpModal extends Component {
 
                 <h3>Sharp dip at end</h3>
                 <p>Line drop hard at year end = 20% tax eaten from profit. Normal. Trade fees already swallowed inside each window.</p>
+
+                <h3>Close windows</h3>
+                <p>
+                    Sometimes Meguru brain find two windows for same stock very close together — few days apart.
+                    Selling and buying again in between cost fees for small gain.
+                    In future release, Meguru will merge close windows automatically.
+                    For now: when see near windows in stats table, can skip the sell and buy in between — just hold through the gap.
+                    Save fees, keep position.
+                </p>
             </div>
         );
     }
@@ -272,6 +286,12 @@ class HelpModal extends Component {
 
                 <h3>Trade Calendar</h3>
                 <p>BUY/SELL dates for whole basket. Use as checklist or drop in calendar app.</p>
+                <p className="help-note">
+                    ⚠️ Backtest and Calendar assume fractional stock — real world cannot buy half a share.
+                    Meguru brain use very high capital for calculation so rounding effect negligible there.
+                    But some stock cost 30,000+ Rs per share — for small investor, one share already big chunk of capital.
+                    Result will differ from shown. Be aware, adjust position size with own brain.
+                </p>
 
                 <h3>Save / Load</h3>
                 <p>
