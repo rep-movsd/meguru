@@ -40,35 +40,17 @@ class HelpModal extends Component {
             <div className="help-section">
                 <h3>What is Meguru?</h3>
                 <p>
-                    Meguru is a seasonal trading research tool for NSE-listed stocks.
-                    The core idea is to identify date ranges within each year, where positive returns have
-                    occurred with high consistency in a give stock. Those recurring windows form a
-                    trading plan - specific periods each year when it makes sense to buy and sell that stock.
+                    Meguru look at NSE stock price history. Find time of year when stock go up many times before.
+                    Those good times become plan — buy here, sell there, repeat each year.
                 </p>
                 <p>
-                    A <strong>basket</strong> is a collection of stocks, each with its
-                    own set of trade windows and its own capital allocation percentage.
-                    By combining stocks with different trade windows, you can create a portfolio
-                    that captures seasonal patterns while smoothing out volatility and reducing time in the market.
+                    <strong>Basket</strong> = group of stocks. Each stock have own windows and own money slice.
+                    Mix stocks with different seasons → smoother ride, less time holding risky thing.
                 </p>
                 <p>
-                    The engine simulates the full trade history for the basket and plots
-                    the result against a simple buy-and-hold benchmark. Each stock's
-                    contribution is shown separately in the bar chart so you can see
-                    exactly where returns are coming from.
-                </p>
-                <p>
-                    Parameters control how the engine searches for trade windows.
-                    A tighter win-rate threshold keeps only the most reliable signals;
-                    a wider window length allows longer seasonal swings to be captured.
-                    Meguru will optimise the parameters for a stock when added, for maximum average return,
-                    but you can adjust them manually if needed.
-                </p>
-                <p>
-                    Capital is tracked independently per stock - gains in one position
-                    are never mixed with another. This keeps the accounting clean and
-                    makes it straightforward to compare each stock's contribution to
-                    total basket performance.
+                    Brain run fake trades on all past years. Draw chart. Compare to just holding all year.
+                    Each stock shown separate so you see who help, who hurt.
+                    Money never mix between stocks — easy to compare.
                 </p>
             </div>
         );
@@ -79,75 +61,41 @@ class HelpModal extends Component {
             <div className="help-section">
                 <h3>Quick Start</h3>
 
-                <h4>1 - Build your basket</h4>
+                <h4>1 — Add stocks</h4>
                 <p>
-                    Click <strong>Add Stock</strong> at the top of the basket panel and type
-                    an NSE symbol (e.g. <code>RELIANCE</code>, <code>TCS</code>).
-                    The first time a stock is added, Meguru downloads up to 25 years of
-                    daily price data from Yahoo Finance and stores it in your browser cache for future use.
-                    This may take a few seconds, but subsequent loads are instant.
-                    Once added, the engine optimizes the window search params to find the best trade windows
-                </p>
-                <p>
-                    Add as many stocks as you need. Each is assigned a unique colour for the bar graph.
-                    You can also click <strong>Examples</strong> in the footer to load curated baskets instantly.
+                    Click <strong>Add Stock</strong>. Type NSE symbol (<code>RELIANCE</code>, <code>TCS</code>…).
+                    First time: downloads 25 years from Yahoo, stores in browser. Takes few seconds. Next time instant.
+                    Auto-tunes settings after add. Or click <strong>Examples</strong> to load ready basket.
                 </p>
 
-                <h4>2 - Tune parameters</h4>
+                <h4>2 — Poke sliders</h4>
                 <p>
-                    Click the <span className="help-icon">&#9654;</span> chevron on any
-                    stock tile to reveal three sliders: <em>Sample years</em>,{' '}
-                    <em>Min Window</em>, and <em>Win %</em>. These control how the engine
-                    searches for seasonal trade windows — see the <strong>Parameters</strong>{' '}
-                    tab for details.
+                    Click <span className="help-icon">&#9654;</span> on stock tile → three sliders appear.
+                    Control how brain searches for windows. See <strong>Parameters</strong> tab.
                 </p>
 
-                <h4>3 - Review basket returns</h4>
+                <h4>3 — Read chart</h4>
                 <p>
-                    Switch to <strong>Bar</strong> view using the buttons at the top of
-                    the graph. Each column shows one year: the left bar is the
-                    average buy-and-hold return; the right bar is the plan return,
-                    broken down by stock. White labels show the net result for each.
-                    Since we need to show both profits and losses, the top of the bar is aligned with the net return.
-                    The part of the bar below zero has two vertical halves - the right half shows the losses that
-                    brought the bar down, and the left half shows the gains that were nullified by the losses.
-
+                    <strong>Bar</strong>: one column per year. Left = hold-all-year. Right = plan, colored by stock.
+                    Bar below zero: right half = losses, left half = gains eaten by those losses.
                 </p>
                 <p>
-                    Use <strong>Line</strong> view to see a single year's daily equity
-                    curve — plan vs buy-and-hold — with trade-window shading overlaid
-                    for the selected stock. In line mode, you can select a specific year or the average of all years.
-                </p>
-                <p>
-                    To focus on one stock, click its tile to <em>solo</em> it. The graph
-                    and stats panel update to reflect that stock only. Click again to
-                    return to the full basket view. To temporarily hide a stock without removing it from the basket,
-                  click the green dot.
+                    <strong>Line</strong>: daily money curve for one year (or average). Colored boxes = when holding.
+                    Click stock tile to solo it. Click green dot to hide without removing.
                 </p>
 
-                <h4>4 — Adjust allocation</h4>
+                <h4>4 — Split money</h4>
                 <p>
-                    The vertical bar to the left of the chart shows how capital is split
-                    across stocks. Choose <strong>Equal</strong>, <strong>Avg Return</strong>,
-                    or <strong>Custom</strong> from the dropdown. In Custom mode,
-                    hover-handles let you nudge each stock's weight in 5% steps.
-                    You can also copy the current mode's weights as a starting point for Custom using the <em>Copy to custom</em> button.
-                    The <span className="help-icon">&#128161;</span> bulb next to the bar
-                    auto-optimises the weights to maximise basket return.
-                   This optimiser does not consider only profits, but a quality factor that represents consistency of returns.
+                    Vertical bar left of chart = money split. Pick <strong>Equal</strong>, <strong>Avg Return</strong>,
+                    or <strong>Custom</strong> (drag handles, 5% steps).
+                    <span className="help-icon"> &#128161;</span> bulb = auto-find best split.
                 </p>
 
-                <h4>5 — Export and save</h4>
+                <h4>5 — Save / export</h4>
                 <p>
-                    Use <strong>Save</strong> in the footer to export the basket as a
-                    JSON file — stocks, parameters, allocation mode, and custom weights
-                    are all included. <strong>Load</strong> restores it later and
-                    auto-downloads any missing price data.
-                </p>
-                <p>
-                    The <strong>Backtest CSV</strong> and <strong>Trade Calendar</strong>{' '}
-                    buttons in the graph toolbar export trade-level detail for
-                    verification in a spreadsheet or for use as a trading plan.
+                    <strong>Save</strong> → JSON file with everything. <strong>Load</strong> → put basket back.
+                    <strong>Backtest CSV</strong> → trade math for spreadsheet.
+                    <strong>Trade Calendar</strong> → BUY/SELL dates checklist.
                 </p>
             </div>
         );
@@ -156,34 +104,20 @@ class HelpModal extends Component {
     renderParameters() {
         return (
             <div className="help-section">
-                <h3>Per-stock parameters</h3>
+                <h3>Sliders</h3>
                 <dl>
-                    <dt>Sample years (<code>nYears</code>)</dt>
-                    <dd>
-                        How many years of historical data to look at when
-                        searching for trade windows. More years &rarr; more
-                        statistical confidence but slower adaptation to recent
-                        regime changes.
-                    </dd>
+                    <dt>Sample years</dt>
+                    <dd>How many past years brain study. More = more sure, slower to notice market changed.</dd>
 
-                    <dt>Min Window (<code>nWinMin</code>)</dt>
-                    <dd>
-                        Shortest acceptable window length, in days. Very short
-                        windows can fit noise; very long windows dilute signal.
-                    </dd>
+                    <dt>Min Window</dt>
+                    <dd>Shortest buy-hold time allowed (days). Too short = catch noise. Too long = blur signal.</dd>
 
-                    <dt>Win % Threshold (<code>fPctWin</code>)</dt>
+                    <dt>Win %</dt>
                     <dd>
-                        Minimum historical hit-rate a candidate window must
-                        clear. <strong>Floor is 50%</strong> &mdash; below
-                        chance, it&rsquo;s not a signal. The slider snaps to
-                        valid steps based on Sample years.
+                        Window must win at least this many years. <strong>Floor 50%</strong> — losing window not signal.
                     </dd>
                 </dl>
-                <p className="help-note">
-                    The <code>nWinMax</code> upper bound is fixed internally
-                    (180 days) and not exposed in the UI.
-                </p>
+                <p className="help-note">Max window fixed at 180 days. Cannot change.</p>
             </div>
         );
     }
@@ -191,32 +125,20 @@ class HelpModal extends Component {
     renderAllocation() {
         return (
             <div className="help-section">
-                <h3>How basket weights are decided</h3>
+                <h3>How to split money</h3>
                 <dl>
                     <dt>Equal</dt>
-                    <dd>Every visible stock gets the same weight.</dd>
+                    <dd>Same slice for all visible stocks.</dd>
 
                     <dt>Avg Return</dt>
-                    <dd>
-                        Weights proportional to each stock&rsquo;s average
-                        plan return. Bigger historical winners get more capital.
-                    </dd>
+                    <dd>Stocks that earned more in past get bigger slice.</dd>
 
                     <dt>Custom</dt>
-                    <dd>
-                        You set the weights manually using the
-                        <code>+</code>/<code>&minus;</code> handles on the
-                        allocation bar (5% steps). Use <em>Copy to custom</em>
-                        to start from the current mode&rsquo;s weights.
-                    </dd>
+                    <dd>Drag handles on alloc bar (5% steps). Use <em>Copy to custom</em> to start from current split.</dd>
                 </dl>
-
-                <h3>Hidden stocks</h3>
                 <p>
-                    Hiding a stock (the <span className="help-icon">&#9679;</span>
-                    /<span className="help-icon">&#9675;</span> toggle, or
-                    soloing another) keeps it in the basket but assigns it
-                    weight 0. The remaining visible stocks are re-normalised.
+                    Hidden stock (<span className="help-icon">&#9679;</span>/<span className="help-icon">&#9675;</span> dot,
+                    or soloing another) = stays in basket but gets weight 0. Other stocks fill the gap.
                 </p>
             </div>
         );
@@ -225,26 +147,20 @@ class HelpModal extends Component {
     renderOptimizers() {
         return (
             <div className="help-section">
-                <h3>Per-stock optimiser <span className="help-icon">&#128161;</span></h3>
+                <h3>&#128161; Stock bulb</h3>
                 <p>
-                    Click the lightbulb on a stock tile. The engine runs a
-                    grid search over (<code>nWinMin</code>, <code>fPctWin</code>)
-                    and picks the combination that maximises <em>plan return</em>
-                    for that stock alone, subject to the 50% win-rate floor.
+                    On stock tile. Try all combos of Min Window + Win% sliders.
+                    Pick best average plan return for that stock.
                 </p>
 
-                <h3>Allocation optimiser <span className="help-icon">&#128161;</span></h3>
+                <h3>&#128161; Allocation bulb</h3>
                 <p>
-                    The lightbulb next to the allocation bar searches custom
-                    weight compositions to maximise basket plan return,
-                    weighted by per-stock <em>quality</em> (a risk-adjusted
-                    score). It only operates over currently visible stocks.
+                    Next to alloc bar. Try all money splits. Pick best basket return,
+                    weighted by quality score (not just raw return — penalises bad years).
+                    Only visible stocks count.
                 </p>
 
-                <p className="help-note">
-                    Both optimisers are blocking &mdash; the UI shows an
-                    overlay while they run.
-                </p>
+                <p className="help-note">Both bulbs freeze screen while thinking. Overlay shows during.</p>
             </div>
         );
     }
@@ -252,37 +168,20 @@ class HelpModal extends Component {
     renderGraph() {
         return (
             <div className="help-section">
-                <h3>View modes</h3>
+                <h3>Views</h3>
                 <dl>
                     <dt>Line</dt>
-                    <dd>
-                        Daily plan-equity vs buy-and-hold curve, normalised to
-                        100% on day 1. The selected year (or the per-day
-                        average across years) is shown. Trade-window
-                        rectangles overlay the chart for the selected stock.
-                    </dd>
+                    <dd>Daily money curve for one year (or average of all years). Colored boxes = when holding stock.</dd>
 
                     <dt>Bar</dt>
-                    <dd>
-                        Stacked yearly returns, one bar per year, contributions
-                        coloured per stock. The <em>Backtest years</em>
-                        dropdown controls how many years are shown.
-                    </dd>
+                    <dd>One column per year. Stacked by stock color. <em>Backtest years</em> dropdown sets how many years show.</dd>
                 </dl>
 
-                <h3>Y-axis range</h3>
-                <p>
-                    The <strong>Y min</strong> and <strong>Y max</strong>
-                    dropdowns at the top-right of the graph let you fix the
-                    vertical range. Choices persist across reloads.
-                </p>
+                <h3>Y range</h3>
+                <p><strong>Y min</strong> / <strong>Y max</strong> dropdowns top-right. Saved across reloads.</p>
 
-                <h3>Allocation bar</h3>
-                <p>
-                    The vertical bar to the left of the chart shows the basket
-                    composition. In Custom mode, hover-handles appear for
-                    incrementing/decrementing each stock&rsquo;s weight.
-                </p>
+                <h3>Alloc bar</h3>
+                <p>Vertical bar left of chart = money split. Hover for +/− handles in Custom mode.</p>
             </div>
         );
     }
@@ -290,26 +189,16 @@ class HelpModal extends Component {
     renderExports() {
         return (
             <div className="help-section">
-                <h3>Export backtest</h3>
-                <p>
-                    Downloads a CSV that reproduces the engine&rsquo;s plan
-                    math day-by-day for the selected year. Useful for
-                    hand-verifying numbers in Google Sheets / Excel.
-                </p>
+                <h3>Backtest CSV</h3>
+                <p>Day-by-day plan math for one year. Check numbers in Google Sheets / Excel.</p>
 
-                <h3>Export calendar</h3>
-                <p>
-                    Downloads a date-keyed CSV listing every BUY/SELL action
-                    across the basket. Drop it into a calendar app or use it
-                    as a checklist.
-                </p>
+                <h3>Trade Calendar</h3>
+                <p>BUY/SELL dates for whole basket. Use as checklist or drop in calendar app.</p>
 
-                <h3>Save / Load basket</h3>
+                <h3>Save / Load</h3>
                 <p>
-                    A JSON file with stocks, parameters, allocation mode, and
-                    custom weights. <strong>Loading replaces the current
-                    basket entirely.</strong> Any per-stock data not in the
-                    local cache is downloaded automatically.
+                    JSON file with stocks, params, alloc mode, weights.
+                    <strong> Load replaces whole basket.</strong> Missing price data auto-downloaded.
                 </p>
             </div>
         );
@@ -318,40 +207,30 @@ class HelpModal extends Component {
     renderGlossary() {
         return (
             <div className="help-section">
-                <h3>Trade-window stats</h3>
+                <h3>Window numbers</h3>
                 <dl>
                     <dt>Day Range</dt>
-                    <dd>Day-of-year range (1&ndash;366) when this window is active.</dd>
-
+                    <dd>Which days of year window open (1–366).</dd>
                     <dt>Win %</dt>
-                    <dd>Fraction of years this window ended positive.</dd>
-
+                    <dd>How many years this window made money.</dd>
                     <dt>Expected %</dt>
-                    <dd>Average return across all sample years for this window.</dd>
-
+                    <dd>Average return across all years.</dd>
                     <dt>%/day</dt>
-                    <dd>Expected % divided by window length in days.</dd>
-
+                    <dd>Expected % ÷ days open.</dd>
                     <dt>Profit Ratio</dt>
-                    <dd>Average gain on winning years / average loss on losing years.</dd>
+                    <dd>Average win size ÷ average loss size.</dd>
                 </dl>
 
-                <h3>Summary stats</h3>
+                <h3>Summary numbers</h3>
                 <dl>
                     <dt>Plan Return</dt>
-                    <dd>Average yearly return when following the trade-window plan.</dd>
-
+                    <dd>Average yearly return following plan.</dd>
                     <dt>B&amp;H Return</dt>
-                    <dd>Average yearly return for buy-and-hold (full-year exposure).</dd>
-
+                    <dd>Average yearly return holding all year.</dd>
                     <dt>Days In Market</dt>
-                    <dd>Fraction of the year capital is actively held under the plan.</dd>
-
+                    <dd>Fraction of year money actually working.</dd>
                     <dt>Plan Quality</dt>
-                    <dd>
-                        Risk-adjusted score: plan return relative to B&amp;H,
-                        penalised by downside volatility. Higher is better.
-                    </dd>
+                    <dd>Smart score — plan return vs time held, minus pain from bad years. Higher = better.</dd>
                 </dl>
             </div>
         );
@@ -360,30 +239,24 @@ class HelpModal extends Component {
     renderMethodology() {
         return (
             <div className="help-section">
-                <h3>Pipeline</h3>
+                <h3>How brain work</h3>
                 <ol>
-                    <li>Daily OHLC data downloaded from Yahoo Finance via a Cloudflare Worker proxy and cached per (symbol, year) in OPFS.</li>
-                    <li>For each stock, the engine builds returns for every day-of-year window in <code>[nWinMin, 180]</code>.</li>
-                    <li>Windows are kept only if they pass <code>fPctWin</code> over the last <code>nYears</code>.</li>
-                    <li>Surviving windows merge into a single trade plan: BUY at the start of an active window, SELL at the end, flat otherwise.</li>
-                    <li>The basket simulator runs each stock&rsquo;s plan, weighted by allocation, and aggregates daily equity.</li>
+                    <li>Grab daily prices from Yahoo, save per year in browser cave (OPFS).</li>
+                    <li>Try every window size from <code>nWinMin</code> to 180 days.</li>
+                    <li>Keep windows that won at least <code>fPctWin</code>% of last <code>nYears</code>.</li>
+                    <li>Surviving windows → plan: BUY at start, SELL at end, sit flat otherwise.</li>
+                    <li>Run all stocks' plans, weight by allocation, add up daily money.</li>
                 </ol>
 
-                <h3>Notes & caveats</h3>
+                <h3>Warnings</h3>
                 <ul>
-                    <li>This is curve-fitted historical analysis; past performance does not guarantee future results.</li>
-                    <li>The engine ignores transaction costs and tax.</li>
-                    <li>Yahoo data is end-of-day, adjusted for splits but not always for dividends.</li>
-                    <li>Win% floor is 50% &mdash; the optimiser never picks losing windows.</li>
+                    <li>History fitting. Past good time not promise future good time.</li>
+                    <li>Brain not count fees or tax.</li>
+                    <li>Yahoo price = end of day, split-fixed, maybe not dividend-fixed.</li>
                 </ul>
 
-                <h3>Tech stack</h3>
-                <p>
-                    C++23 engine compiled to WebAssembly via Emscripten;
-                    Preact UI; Chart.js; OPFS for client-side data cache;
-                    Cloudflare Workers + Pages for the proxy and static
-                    hosting.
-                </p>
+                <h3>Built with</h3>
+                <p>C++23 → WebAssembly (Emscripten) · Preact · Chart.js · OPFS · Cloudflare Workers &amp; Pages</p>
             </div>
         );
     }
