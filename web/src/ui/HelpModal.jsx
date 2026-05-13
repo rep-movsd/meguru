@@ -65,6 +65,12 @@ class HelpModal extends Component {
                     Good plan = same money do work again and again, compound across many stocks one by one.
                     Bad plan = money stuck sideways in one stock for many months earning nothing.
                 </p>
+                <p>
+                    Think like traveller at station. Each stock is train going somewhere fast, but only for short time.
+                    Catch right train at right station, ride fast part, get off. Catch next fast train.
+                    Stay on same train whole day = sit still many hours waiting.
+                    Hop fastest train each station = travel furthest same time.
+                </p>
 
                 <h3>Why India have seasons?</h3>
                 <p>Many event repeat same time each year and move prices:</p>
