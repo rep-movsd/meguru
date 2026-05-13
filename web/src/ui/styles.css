@@ -1366,7 +1366,7 @@ body {
 .help-modal {
     width: 900px;
     max-width: 95vw;
-    height: 540px;
+    height: 90vh;
     max-height: 90vh;
     padding: 0;
     display: flex;
