@@ -158,15 +158,32 @@ class HelpModal extends Component {
                 <h3>&#128161; Stock bulb</h3>
                 <p>
                     On stock tile. Try all combos of Min Window + Win% sliders.
-                    Pick best average plan return for that stock.
+                    Pick combo with best <em>quality score</em> (not just biggest return).
                 </p>
 
                 <h3>&#128161; Allocation bulb</h3>
                 <p>
-                    Next to alloc bar. Try all money splits. Pick best basket return,
-                    weighted by quality score (not just raw return — penalises bad years).
+                    Next to alloc bar. Try all money splits. Pick best basket quality score.
                     Only visible stocks count.
                 </p>
+
+                <h3>Quality score</h3>
+                <p>Both bulbs use same scoring brain:</p>
+                <dl>
+                    <dt>Efficiency</dt>
+                    <dd>
+                        Plan return &divide; (hold-all-year return &times; fraction of year held).
+                        Score &gt; 1 = plan earn more than expected for time in market.
+                    </dd>
+                    <dt>Downside penalty</dt>
+                    <dd>
+                        Bad years hurt score. Good years do not. Formula:
+                        {' '}<code>1 / (1 + 3 &times; rms-of-losses)</code>.
+                        Consistent plan = small penalty. Wild lossy plan = big penalty.
+                    </dd>
+                    <dt>Quality</dt>
+                    <dd><code>efficiency &times; downside penalty</code>. Higher = better.</dd>
+                </dl>
 
                 <p className="help-note">Both bulbs freeze screen while thinking. Overlay shows during.</p>
             </div>
