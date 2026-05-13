@@ -70,6 +70,8 @@ class HelpModal extends Component {
                     Catch right train at right station, ride fast part, get off. Catch next fast train.
                     Stay on same train whole day = sit still many hours waiting.
                     Hop fastest train each station = travel furthest same time.
+                    Waiting at station with cash = OK. Very fast train coming soon.
+                    Better wait in station than ride slow train, or worse, train going backward.
                 </p>
 
                 <h3>Why India have seasons?</h3>
