@@ -20,6 +20,10 @@ const ALLOC_MODES = [
     { value: 'custom', label: 'Custom' }
 ];
 
+// Bump this string whenever help content changes significantly.
+// Any user who saw an older version will see help again automatically.
+const HELP_VERSION = '1.1';
+
 const LS_KEY = 'meguru_state';
 
 class App extends Component {
@@ -74,8 +78,8 @@ class App extends Component {
                 this._restoreState();
             });
 
-        // Open help on first ever visit
-        if (!localStorage.getItem('meguru_help_seen')) {
+        // Open help if never seen, or seen on older version
+        if (localStorage.getItem('meguru_help_seen') !== HELP_VERSION) {
             this.setState({ helpOpen: true });
         }
     }
@@ -1205,7 +1209,7 @@ class App extends Component {
                 {/* Help modal */}
                 {this.state.helpOpen && (
                     <HelpModal onClose={() => {
-                        localStorage.setItem('meguru_help_seen', '1');
+                        localStorage.setItem('meguru_help_seen', HELP_VERSION);
                         this.setState({ helpOpen: false });
                     }} />
                 )}
