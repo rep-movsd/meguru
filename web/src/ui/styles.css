@@ -1368,10 +1368,10 @@ body {
 }
 
 .help-modal {
-    width: 900px;
-    max-width: 95vw;
-    height: 90vh;
-    max-height: 90vh;
+    width: 75vw;
+    max-width: 75vw;
+    height: 95vh;
+    max-height: 95vh;
     padding: 0;
     display: flex;
     flex-direction: column;
