@@ -73,6 +73,11 @@ class App extends Component {
                 // Still restore UI state (engine calls will be no-ops)
                 this._restoreState();
             });
+
+        // Open help on first ever visit
+        if (!localStorage.getItem('meguru_help_seen')) {
+            this.setState({ helpOpen: true });
+        }
     }
 
     componentDidUpdate(_, prevState) {
@@ -1200,7 +1205,10 @@ class App extends Component {
 
                 {/* Help modal */}
                 {this.state.helpOpen && (
-                    <HelpModal onClose={() => this.setState({ helpOpen: false })} />
+                    <HelpModal onClose={() => {
+                        localStorage.setItem('meguru_help_seen', '1');
+                        this.setState({ helpOpen: false });
+                    }} />
                 )}
             </div>
         );
