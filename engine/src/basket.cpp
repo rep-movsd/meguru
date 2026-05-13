@@ -228,9 +228,11 @@ TPlanParams CBasket::optimizeStockParams(cstr& sSymbol) {
     auto& plan = it->second;
     const TPlanParams basePrm = plan.m_params;
 
-    // Grid: nWinMin in [3, 90] step 1; pctThreshold in [10, 100] step 1.
-    // ≈ 88 × 91 = 8008 combos. updatePlan is cheap (no I/O).
-    f64 fBestReturn = -1e30;
+    // Grid: nWinMin in [3, 90] step 1; pctThreshold in [50, 100] step 1.
+    // ≈ 88 × 51 = 4488 combos. updatePlan is cheap (no I/O).
+    // Score = calcQuality (same as allocation optimizer) — accounts for both
+    // average return AND consistency (downside penalty + capital efficiency).
+    f64 fBestScore = -1e30;
     TPlanParams bestPrm = basePrm;
 
     FOR(iWin, 3, 91) {
@@ -243,13 +245,27 @@ TPlanParams CBasket::optimizeStockParams(cstr& sSymbol) {
             plan.m_params = trialPrm;
             updatePlan(plan);
 
-            // Plan return = last day of avg plan curve across plan.m_arrYears.
-            CAUTO arrAvg = computeAvgPlanCurve(plan, plan.m_arrYears);
-            CAUTO fAvg   = arrAvg[DAYS - 1];
+            // Days-in-market fraction for this trial's windows
+            i32 nDaysIn = 0;
+            for(CAUTOREF stat : plan.m_arrWindowStats) nDaysIn += (stat.iEnd - stat.iBeg);
+            CAUTO fDaysFrac = static_cast<f64>(nDaysIn) / static_cast<f64>(DAYS - 1);
 
-            if(fAvg > fBestReturn) {
-                fBestReturn = fAvg;
-                bestPrm     = trialPrm;
+            // Per-year plan + B&H last-day returns
+            vf64 arrPlan, arrBh;
+            for(CAUTO iYear : plan.m_arrYears) {
+                CAUTO itY = plan.m_mapYearData.find(iYear);
+                if(itY == plan.m_mapYearData.end()) continue;
+                CAUTOREF arrPrices = itY->second.arrPrices;
+                if(arrPrices[0] == 0.0) continue;
+                CAUTO arrPlanCurve = calcPlanGains(plan.m_arrWindowStats, arrPrices);
+                arrPlan.push_back(arrPlanCurve[DAYS - 1]);
+                arrBh  .push_back((arrPrices[DAYS - 1] / arrPrices[0]) - 1.0);
+            }
+
+            CAUTO fScore = calcQuality(arrPlan, arrBh, fDaysFrac);
+            if(fScore > fBestScore) {
+                fBestScore = fScore;
+                bestPrm    = trialPrm;
             }
         }
     }
@@ -257,8 +273,8 @@ TPlanParams CBasket::optimizeStockParams(cstr& sSymbol) {
     // Apply best
     plan.m_params = bestPrm;
     updatePlan(plan);
-    DEBUG_LOG("optimizeStockParams: %s best nWinMin=%d pct=%.1f return=%.4f",
-              sSymbol.c_str(), bestPrm.nWinMin, bestPrm.pctThreshold, fBestReturn);
+    DEBUG_LOG("optimizeStockParams: %s best nWinMin=%d pct=%.1f quality=%.4f",
+              sSymbol.c_str(), bestPrm.nWinMin, bestPrm.pctThreshold, fBestScore);
     return bestPrm;
 }
 
