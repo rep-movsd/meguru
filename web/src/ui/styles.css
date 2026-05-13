@@ -254,6 +254,10 @@ body {
 .examples-wrapper .new-stock-btn {
     flex: 1;
     width: 100%;
+    background: #1a4a7a;
+}
+.examples-wrapper .new-stock-btn:hover {
+    background: #2563a8;
 }
 .examples-menu {
     position: fixed;

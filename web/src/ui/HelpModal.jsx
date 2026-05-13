@@ -84,7 +84,7 @@ class HelpModal extends Component {
                 <p>
                     Click <strong>Add Stock</strong>. Type NSE symbol (<code>RELIANCE</code>, <code>TCS</code>…).
                     First time: downloads 25 years from Yahoo, stores in browser. Takes few seconds. Next time instant.
-                    Auto-tunes settings after add. Or click <strong>Examples</strong> to load ready basket.
+                    Auto-tunes settings after add. Or click <strong>Curated baskets</strong> to load ready basket.
                 </p>
 
                 <h4>2 — Poke sliders</h4>

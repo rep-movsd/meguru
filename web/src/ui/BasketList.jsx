@@ -329,7 +329,7 @@ class BasketList extends Component {
                             aria-haspopup="menu"
                             aria-expanded={this.state.examplesOpen}
                         >
-                            Examples {'\u25BE'}
+                            Curated baskets {'\u25BE'}
                         </button>
                         {this.state.examplesOpen && this.state.menuPos && (
                             <div
