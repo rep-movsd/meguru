@@ -380,7 +380,9 @@ class HelpModal extends Component {
                 <p>
                     Add stock. Switch to <strong>Bar</strong> view. Look across many years.
                     Good stock show mostly positive bars. If many red years, stock too wild or not seasonal.
-                    Check Plan Return vs B&amp;H — plan should beat or match hold.
+                    Check plan return and quality score in stats panel — both should look good.
+                    If plan return below ~12% a year (rough index return), not much point —
+                    boring index fund beat you with less effort. Mid quality with weak return = not worth shiny rock.
                 </p>
 
                 <h4>3 — Check quality score</h4>
