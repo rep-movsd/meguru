@@ -52,6 +52,25 @@ class HelpModal extends Component {
                     Each stock shown separate so you see who help, who hurt.
                     Money never mix between stocks — easy to compare.
                 </p>
+
+                <h3>Why not just hold all year?</h3>
+                <p>
+                    Staying in market all time = full crash risk. 40% profit in 6 months better than 100%
+                    profit in 12 months — because crash can eat 50% in weeks and you lose everything gained.
+                    Less time in market = less time for bad thing to happen.
+                </p>
+
+                <h3>Why India have seasons?</h3>
+                <p>Many event repeat same time each year and move prices:</p>
+                <ul>
+                    <li><strong>Festival buying</strong> — Diwali, Navratri, Dussehra push consumer and jewellery stocks up</li>
+                    <li><strong>Tax year end/start</strong> — March–April see selling for loss-booking, then fresh buying</li>
+                    <li><strong>Monsoon</strong> — good rain = rural income = FMCG, tractor, fertiliser stocks rise</li>
+                    <li><strong>Marriage season</strong> — Nov–Feb big demand for gold, jewellery, consumer goods</li>
+                    <li><strong>Dividends</strong> — many companies pay same date each year, stock dip after ex-date, recover after</li>
+                    <li><strong>Astrology &amp; muhurat trading</strong> — Diwali muhurat session, auspicious dates cause real volume spikes</li>
+                </ul>
+                <p>These pattern repeat enough that brain can find and trade them.</p>
             </div>
         );
     }
