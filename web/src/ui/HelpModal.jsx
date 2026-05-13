@@ -14,7 +14,8 @@ const TABS = [
     { id: 'graph',        label: 'Graph' },
     { id: 'exports',      label: 'Exports' },
     { id: 'glossary',     label: 'Glossary' },
-    { id: 'methodology',  label: 'Methodology' }
+    { id: 'methodology',  label: 'Methodology' },
+    { id: 'makerway',     label: 'Maker Way' }
 ];
 
 class HelpModal extends Component {
@@ -338,6 +339,82 @@ class HelpModal extends Component {
         );
     }
 
+    renderMakerWay() {
+        return (
+            <div className="help-section">
+                <h3>How maker use Meguru</h3>
+                <p>
+                    Maker build plan careful, not rush. Here how:
+                </p>
+
+                <h4>1 — Find solid stock first</h4>
+                <p>
+                    Go to stock screener site. Look for stocks with strong consistent performance —
+                    good revenue growth, not too much debt, not baby company.
+                    Meguru brain cannot fix bad stock. Garbage in, garbage out.
+                </p>
+
+                <h4>2 — Add to basket, check bar chart</h4>
+                <p>
+                    Add stock. Switch to <strong>Bar</strong> view. Look across many years.
+                    Good stock show mostly positive bars. If many red years, stock too wild or not seasonal.
+                    Check Plan Return vs B&amp;H — plan should beat or match hold.
+                </p>
+
+                <h4>3 — Check quality score</h4>
+                <p>
+                    Quality score in stats panel tell truth:
+                </p>
+                <ul>
+                    <li><strong>&gt; 1.5</strong> — decent. Worth using.</li>
+                    <li><strong>&gt; 3.0</strong> — exceptional. Rare. Keep this stock.</li>
+                    <li><strong>Below 1.0</strong> — plan not good enough. Try different params or drop stock.</li>
+                </ul>
+
+                <h4>4 — Young stock = less trust</h4>
+                <p>
+                    Stock born only few years ago = not enough history for Meguru brain to study.
+                    Pattern may be noise, not real season. Need at least 8–10 years for brain to be confident.
+                    Short history stock can still be in basket but give less weight.
+                </p>
+
+                <h4>5 — Test basket addition carefully</h4>
+                <p>
+                    When adding stock to basket, watch two things:
+                </p>
+                <ul>
+                    <li>Either plan return or quality should go up.</li>
+                    <li>The other should not go down too much.</li>
+                </ul>
+                <p>
+                    If both go down after adding — that stock making basket worse. Better to remove.
+                    Good basket stock add value. Dead weight drag whole basket.
+                </p>
+
+                <h4>6 — Building good plan need effort</h4>
+                <p>
+                    Not easy to build very good plan. Need patient study, try many stocks, compare, remove weak ones.
+                    But effort reward well — even decent plan beat random holding over many years.
+                </p>
+
+                <h4>B&amp;H data also useful</h4>
+                <p>
+                    Even if Grug not want to follow Meguru plan, B&amp;H return data in chart useful.
+                    Shows which stock historically grow well over long time.
+                    Good for HODL style investor who just want to buy solid stock and forget.
+                </p>
+
+                <h3>Disclaimer</h3>
+                <p>
+                    Meguru maker put own money where mouth is. Trust Meguru system with own shiny rocks.
+                    If other Grug follow and lose many shiny rock — blame market, blame karma, blame the stars.
+                    Not blame Meguru. Not blame maker. Meguru is research tool, not financial advisor.
+                    Past seasons not guarantee future seasons. Grug must think for self.
+                </p>
+            </div>
+        );
+    }
+
     renderTabContent() {
         switch (this.state.activeTab) {
             case 'intro':        return this.renderIntro();
@@ -349,6 +426,7 @@ class HelpModal extends Component {
             case 'exports':      return this.renderExports();
             case 'glossary':     return this.renderGlossary();
             case 'methodology':  return this.renderMethodology();
+            case 'makerway':     return this.renderMakerWay();
             default:             return null;
         }
     }
