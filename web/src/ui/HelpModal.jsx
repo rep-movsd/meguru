@@ -161,6 +161,10 @@ class HelpModal extends Component {
                 </dl>
                 <p className="help-note">Max window fixed at 180 days. Cannot change.</p>
                 <p className="help-note">
+                    Tip: click green dot next to stock name to hide it from calculation — useful to see effect of removing one stock.
+                    Works by setting that stock alloc to 0 so Meguru brain ignore it. Click again to bring back.
+                </p>
+                <p className="help-note">
                     ⚠️ <strong>2020</strong> (COVID crash) and <strong>2008</strong> (global crash) weird years — big wild moves not normal.
                     Indian market changed a lot from 2020 onward. Including too many pre-2020 years may teach Meguru brain wrong lesson.
                     10 years good start. Try fewer if plan look strange.
@@ -183,10 +187,6 @@ class HelpModal extends Component {
                     <dt>Custom</dt>
                     <dd>+/− adjuster on alloc bar (5% steps). To edit, first click <em>Copy to custom</em> — this snapshot current split into Custom mode so you can adjust from there. Cannot edit bars in Equal or Avg Return mode.</dd>
                 </dl>
-                <p>
-                    Hidden stock (<span className="help-icon">&#9679;</span>/<span className="help-icon">&#9675;</span> dot,
-                    or soloing another) = stays in basket but gets weight 0. Other stocks fill the gap.
-                </p>
             </div>
         );
     }
