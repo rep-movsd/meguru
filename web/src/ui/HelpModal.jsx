@@ -259,7 +259,8 @@ class HelpModal extends Component {
                 <h3>Warnings</h3>
                 <ul>
                     <li>History fitting. Past good time not promise future good time.</li>
-                    <li>Brain not count fees or tax.</li>
+                    <li>Fee = 0.04% of trade value, charged on each BUY and each SELL.</li>
+                    <li>Tax = 20% STCG applied on net profit at end of each year.</li>
                     <li>Yahoo price = end of day, split-fixed, maybe not dividend-fixed.</li>
                 </ul>
 
