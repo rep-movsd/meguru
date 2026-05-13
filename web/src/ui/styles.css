@@ -1341,9 +1341,10 @@ body {
 }
 
 .help-modal {
-    width: 760px;
+    width: 900px;
     max-width: 95vw;
-    max-height: 85vh;
+    height: 540px;
+    max-height: 90vh;
     padding: 0;
     display: flex;
     flex-direction: column;
