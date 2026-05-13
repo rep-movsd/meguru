@@ -104,7 +104,8 @@ class HelpModal extends Component {
                 <h4>2 — Poke sliders</h4>
                 <p>
                     Click <span className="help-icon">&#9654;</span> on stock tile → three sliders appear.
-                    Control how brain searches for windows. See <strong>Parameters</strong> tab.
+                    Meguru brain already optimise these when stock added — no need to touch unless experimenting.
+                    See <strong>Parameters</strong> tab for what each slider do.
                 </p>
 
                 <h4>3 — Read chart</h4>
@@ -118,11 +119,13 @@ class HelpModal extends Component {
                 </p>
 
                 <h4>4 — Split money</h4>
-                <p>
-                    Vertical bar left of chart = money split. Pick <strong>Equal</strong>, <strong>Avg Return</strong>,
-                    or <strong>Custom</strong> (drag handles, 5% steps).
-                    <span className="help-icon"> &#128161;</span> bulb = auto-find best split.
-                </p>
+                <p>Vertical bar left of chart = money split. Pick from dropdown:</p>
+                <ul>
+                    <li><strong>Equal</strong> — same amount of money to every stock.</li>
+                    <li><strong>Avg Return</strong> — more money to stocks with higher average profit. Winners get bigger slice.</li>
+                    <li><strong>Custom</strong> — +/− adjuster on bar, 5% steps. First copy from current mode with <em>Copy to custom</em>.</li>
+                </ul>
+                <p><span className="help-icon">&#128161;</span> bulb = Meguru brain auto-find best split.</p>
 
                 <h4>5 — Save / export</h4>
                 <ul>
