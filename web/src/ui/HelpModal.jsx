@@ -114,7 +114,7 @@ class HelpModal extends Component {
                     Bar below zero: right half = losses, left half = gains eaten by those losses.
                 </p>
                 <p>
-                    <strong>Line</strong>: daily money curve for one year (or average). Colored boxes = when holding.
+                    <strong>Line</strong>: daily money curve for one year (or average). Shaded bands show when holding — green band = window was profitable, red band = window lost money.
                     Click stock tile to solo it. Click green dot to hide without removing.
                 </p>
 
@@ -155,6 +155,8 @@ class HelpModal extends Component {
                     <dt>Win %</dt>
                     <dd>
                         Window must win at least this many years. <strong>Floor 50%</strong> — losing window not signal.
+                        But 50% can still work — most stocks gain more than they lose each year when look at many years,
+                        so even a 50% window may have positive average return if good years bigger than bad years.
                     </dd>
                 </dl>
                 <p className="help-note">Max window fixed at 180 days. Cannot change.</p>
@@ -233,7 +235,7 @@ class HelpModal extends Component {
                 <h3>Views</h3>
                 <dl>
                     <dt>Line</dt>
-                    <dd>Daily money curve for one year (or average of all years). Colored boxes = when holding stock.</dd>
+                    <dd>Daily money curve for one year (or average of all years). Shaded bands show when holding — green = profitable window, red = losing window.</dd>
 
                     <dt>Bar</dt>
                     <dd>One column per year. Stacked by stock color.</dd>
