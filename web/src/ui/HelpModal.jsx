@@ -364,7 +364,7 @@ class HelpModal extends Component {
             >
                 <div className="modal help-modal">
                     <div className="help-header">
-                        <h2 id="help-modal-title">Help</h2>
+                        <h2 id="help-modal-title">How Grug learn Meguru</h2>
                         <button
                             className="icon-button delete"
                             onClick={this.props.onClose}
