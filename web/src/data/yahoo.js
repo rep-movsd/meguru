@@ -128,9 +128,9 @@ export async function fetchYears(sSymbol, arrYears, onProgress, signal) {
             // Don't break on error — try remaining years
         }
 
-        // 500ms delay between requests to avoid rate limiting (abort-aware)
+        // 100ms delay between requests to avoid rate limiting (abort-aware)
         if (i < arrYears.length - 1) {
-            await abortableDelay(500, signal);
+            await abortableDelay(100, signal);
         }
     }
 

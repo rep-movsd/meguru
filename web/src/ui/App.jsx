@@ -354,6 +354,19 @@ class App extends Component {
         });
     }
 
+    handleClearBasket = () => {
+        const { stocks } = this.state;
+        for (const s of stocks) engine.removeStock(s);
+        this.setState({
+            stocks: [],
+            stockData: {},
+            selectedStock: null,
+            expandedStock: null,
+            basketResult: null,
+            stockDetail: null
+        });
+    }
+
     handleSelectStock = (symbol) => {
         // symbol = stock name -> "solo": only this stock visible (others hidden),
         //                        same as if user clicked green dots manually.
@@ -1048,6 +1061,7 @@ class App extends Component {
                         onOpenModal={this.handleOpenModal}
                         onSaveBasket={this.handleSaveBasket}
                         onLoadBasket={this.handleLoadBasket}
+                        onClear={this.handleClearBasket}
                         onOptimize={this.handleOptimize}
                         basketName={basketName}
                         onBasketNameChange={(name) => this.setState({ basketName: name })}

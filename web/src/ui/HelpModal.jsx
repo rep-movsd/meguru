@@ -6,6 +6,7 @@ import { Component } from 'preact';
 //   onClose: () => void
 
 const TABS = [
+    { id: 'intro',        label: 'Intro' },
     { id: 'quickstart',   label: 'Quick Start' },
     { id: 'parameters',   label: 'Parameters' },
     { id: 'allocation',   label: 'Allocation' },
@@ -17,7 +18,7 @@ const TABS = [
 ];
 
 class HelpModal extends Component {
-    state = { activeTab: 'quickstart' };
+    state = { activeTab: 'intro' };
 
     handleBackdrop = (e) => {
         if (e.target === e.currentTarget) this.props.onClose && this.props.onClose();
@@ -34,70 +35,120 @@ class HelpModal extends Component {
         window.removeEventListener('keydown', this.handleKey);
     }
 
+    renderIntro() {
+        return (
+            <div className="help-section">
+                <h3>What is Meguru?</h3>
+                <p>
+                    Meguru is a seasonal trading research tool for NSE-listed stocks.
+                    The core idea is to identify date ranges within each year, where positive returns have
+                    occurred with high consistency in a give stock. Those recurring windows form a
+                    trading plan - specific periods each year when it makes sense to buy and sell that stock.
+                </p>
+                <p>
+                    A <strong>basket</strong> is a collection of stocks, each with its
+                    own set of trade windows and its own capital allocation percentage.
+                    By combining stocks with different trade windows, you can create a portfolio
+                    that captures seasonal patterns while smoothing out volatility and reducing time in the market.
+                </p>
+                <p>
+                    The engine simulates the full trade history for the basket and plots
+                    the result against a simple buy-and-hold benchmark. Each stock's
+                    contribution is shown separately in the bar chart so you can see
+                    exactly where returns are coming from.
+                </p>
+                <p>
+                    Parameters control how the engine searches for trade windows.
+                    A tighter win-rate threshold keeps only the most reliable signals;
+                    a wider window length allows longer seasonal swings to be captured.
+                    Meguru will optimise the parameters for a stock when added, for maximum average return,
+                    but you can adjust them manually if needed.
+                </p>
+                <p>
+                    Capital is tracked independently per stock - gains in one position
+                    are never mixed with another. This keeps the accounting clean and
+                    makes it straightforward to compare each stock's contribution to
+                    total basket performance.
+                </p>
+            </div>
+        );
+    }
+
     renderQuickstart() {
         return (
             <div className="help-section">
-                <h3>What is meguru?</h3>
+                <h3>Quick Start</h3>
+
+                <h4>1 - Build your basket</h4>
                 <p>
-                    Meguru is a seasonal trading research tool.
-                    The basic principle is to scan historical daily prices for a and find
-                    date ranges within each year where there is a high likelihood of positive returns.
-                    This provides a trading plan for when to be in or out of the market for that stock.
-
-                    A basket is a collection of stocks, each with its own trade windows.
-                    Each stock in a basket has its own parameters based on which the windows are chosen.
-                    Each stock also has an allocation percentage, which determines how much of the total capital to allocate when trading.
-                    By building a good basket, you can maximise returns while minimising time in the market.
-
-                    The engine simulates the trades for the basket and displays a graph comparing returns against buy-and-hold.
-                    Since the trade windows are affected by the parameters in the stock, you can tune them to find a good balance of risk and reward.
-
-                    Meguru allows you to automatically find the best parameters for each stock, as well as for the allocation percentages.
-
-                    For simplicity, each stock and its capital is considered independently;
-                    E.g. Buy stock X for 100000, Sell stock X for 105000, next buy again for 105000 etc.
-                    Capital is never mixed between stocks.
+                    Click <strong>Add Stock</strong> at the top of the basket panel and type
+                    an NSE symbol (e.g. <code>RELIANCE</code>, <code>TCS</code>).
+                    The first time a stock is added, Meguru downloads up to 25 years of
+                    daily price data from Yahoo Finance and stores it in your browser cache for future use.
+                    This may take a few seconds, but subsequent loads are instant.
+                    Once added, the engine optimizes the window search params to find the best trade windows
+                </p>
+                <p>
+                    Add as many stocks as you need. Each is assigned a unique colour for the bar graph.
+                    You can also click <strong>Examples</strong> in the footer to load curated baskets instantly.
                 </p>
 
-                <h3>5-minute walkthrough</h3>
-                <ol>
-                    <li>
-                        <strong>Add a stock.</strong> Click <code>+ New</code>,
-                        type a symbol (NSE only for now), and pick parameters
-                        (defaults are sensible). The first time you add a stock, the app
-                        downloads up to 25 years of daily price data from Yahoo Finance.
-                        The data is stored in the browser.
-                        Each stock in a basket get assigned a unique color.
-                    </li>
-                    <li>
-                        Once you have one or more stocks in the basket, you can click the Line or Bar graph buttons
-                        at the top-right to show the backtest results.
-                        The line graph shows how the trading strategy works for a single year (or averaged across years),
-                        while the bar graph shows the returns for each year.
-                        In the bar graph, the contributions of each individual stock is colored based on the stock's assigned color.
-                        The bars are shown in such a way that
+                <h4>2 - Tune parameters</h4>
+                <p>
+                    Click the <span className="help-icon">&#9654;</span> chevron on any
+                    stock tile to reveal three sliders: <em>Sample years</em>,{' '}
+                    <em>Min Window</em>, and <em>Win %</em>. These control how the engine
+                    searches for seasonal trade windows — see the <strong>Parameters</strong>{' '}
+                    tab for details.
+                </p>
 
-                        <strong>Inspect the basket.</strong> The graph on the
-                        right shows the basket&rsquo;s plan return vs
-                        buy-and-hold. The stats panel below shows per-stock
-                        summary numbers.
-                    </li>
-                    <li>
-                        <strong>Click a stock tile</strong> to <em>solo</em> it
-                        &mdash; this hides every other stock from the basket
-                        and shows that stock&rsquo;s trade-window table.
-                    </li>
-                    <li>
-                        <strong>Tune parameters</strong> by clicking the
-                        chevron <span className="help-icon">&#9654;</span> on a
-                        tile. Three sliders control how the engine searches
-                        for windows.
-                    </li>
-                    <li>
-                        <strong>Save the basket</strong> as JSON. Loading it
-                        later auto-downloads any missing data.
-                    </li>
-                </ol>
+                <h4>3 - Review basket returns</h4>
+                <p>
+                    Switch to <strong>Bar</strong> view using the buttons at the top of
+                    the graph. Each column shows one year: the left bar is the
+                    average buy-and-hold return; the right bar is the plan return,
+                    broken down by stock. White labels show the net result for each.
+                    Since we need to show both profits and losses, the top of the bar is aligned with the net return.
+                    The part of the bar below zero has two vertical halves - the right half shows the losses that
+                    brought the bar down, and the left half shows the gains that were nullified by the losses.
+
+                </p>
+                <p>
+                    Use <strong>Line</strong> view to see a single year's daily equity
+                    curve — plan vs buy-and-hold — with trade-window shading overlaid
+                    for the selected stock. In line mode, you can select a specific year or the average of all years.
+                </p>
+                <p>
+                    To focus on one stock, click its tile to <em>solo</em> it. The graph
+                    and stats panel update to reflect that stock only. Click again to
+                    return to the full basket view. To temporarily hide a stock without removing it from the basket,
+                  click the green dot.
+                </p>
+
+                <h4>4 — Adjust allocation</h4>
+                <p>
+                    The vertical bar to the left of the chart shows how capital is split
+                    across stocks. Choose <strong>Equal</strong>, <strong>Avg Return</strong>,
+                    or <strong>Custom</strong> from the dropdown. In Custom mode,
+                    hover-handles let you nudge each stock's weight in 5% steps.
+                    You can also copy the current mode's weights as a starting point for Custom using the <em>Copy to custom</em> button.
+                    The <span className="help-icon">&#128161;</span> bulb next to the bar
+                    auto-optimises the weights to maximise basket return.
+                   This optimiser does not consider only profits, but a quality factor that represents consistency of returns.
+                </p>
+
+                <h4>5 — Export and save</h4>
+                <p>
+                    Use <strong>Save</strong> in the footer to export the basket as a
+                    JSON file — stocks, parameters, allocation mode, and custom weights
+                    are all included. <strong>Load</strong> restores it later and
+                    auto-downloads any missing price data.
+                </p>
+                <p>
+                    The <strong>Backtest CSV</strong> and <strong>Trade Calendar</strong>{' '}
+                    buttons in the graph toolbar export trade-level detail for
+                    verification in a spreadsheet or for use as a trading plan.
+                </p>
             </div>
         );
     }
@@ -339,6 +390,7 @@ class HelpModal extends Component {
 
     renderTabContent() {
         switch (this.state.activeTab) {
+            case 'intro':        return this.renderIntro();
             case 'quickstart':   return this.renderQuickstart();
             case 'parameters':   return this.renderParameters();
             case 'allocation':   return this.renderAllocation();

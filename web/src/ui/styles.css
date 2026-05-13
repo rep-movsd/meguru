@@ -57,7 +57,7 @@ body {
 
 .new-stock-btn {
     padding: 3px 10px;
-    background: #4CAF50;
+    background: #3a8f3e;
     color: white;
     border: none;
     border-radius: 3px;
@@ -216,6 +216,63 @@ body {
 .basket-footer .new-stock-btn {
     flex: 1;
 }
+.basket-footer .footer-narrow {
+    flex: 0 0 auto;
+    padding-left: 10px;
+    padding-right: 10px;
+}
+
+/* Examples dropdown */
+.examples-wrapper {
+    position: relative;
+    flex: 1;
+    display: flex;
+}
+.examples-wrapper .new-stock-btn {
+    flex: 1;
+    width: 100%;
+}
+.examples-menu {
+    position: fixed;
+    max-height: 320px;
+    overflow-y: auto;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+    z-index: 10000;
+    padding: 4px 0;
+}
+.examples-status {
+    padding: 8px 12px;
+    color: #888;
+    font-size: 12px;
+}
+.examples-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: 0;
+    color: #ddd;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+}
+.examples-item:hover {
+    background: #3a3a3a;
+}
+.examples-label {
+    font-size: 13px;
+    font-weight: 600;
+}
+.examples-desc {
+    font-size: 11px;
+    color: #999;
+    margin-top: 2px;
+}
 
 .empty-basket {
     flex: 1;
@@ -262,38 +319,49 @@ body {
 
 .basket-item.add-stock-tile {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    gap: 8px;
-    padding: 14px 8px;
+    align-items: stretch;
+    padding: 0;
     border-style: dashed;
     border-color: #444;
+    overflow: hidden;
+}
+
+.add-stock-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex: 1;
+    padding: 6px 8px;
+    background: none;
+    border: none;
     color: #aaa;
+    font-size: 13px;
     font-weight: 500;
+    cursor: pointer;
     user-select: none;
 }
 
-.basket-item.add-stock-tile:hover {
-    border-color: #2196F3;
+.add-stock-btn:hover {
     color: #2196F3;
     background: #1a2230;
 }
 
-.basket-item.add-stock-tile:focus {
-    outline: none;
-    border-color: #2196F3;
-    color: #2196F3;
+.add-stock-btn.clear-btn {
+    border-left: 1px dashed #444;
+    flex: 1;
+    padding: 6px 8px;
 }
 
-.add-stock-plus {
-    font-size: 18px;
-    line-height: 1;
-    font-weight: 600;
+.add-stock-btn.clear-btn:hover {
+    color: #e57373;
+    background: #1a2230;
 }
 
-.add-stock-label {
-    font-size: 13px;
+.add-stock-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
 }
 
 .basket-item-row {
@@ -647,7 +715,7 @@ body {
 /* Chart overlay stats */
 .chart-overlay-stats {
     position: absolute;
-    top: 30px;
+    top: 8px;
     left: 55px;
     display: grid;
     grid-template-columns: auto 72px;
@@ -659,6 +727,36 @@ body {
     border: 1px solid #444;
     z-index: 5;
     pointer-events: none;
+}
+
+/* Basket name row — sits below header at top of basket list */
+.basket-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px 8px;
+    border-bottom: 1px solid #333;
+}
+.basket-name-label {
+    font-size: 12px;
+    color: #aaa;
+    flex-shrink: 0;
+}
+.basket-name-input {
+    flex: 1;
+    min-width: 0;
+    background: #1e1e1e;
+    color: #fff;
+    border: 1px solid #444;
+    border-radius: 0;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.basket-name-input:focus {
+    outline: none;
+    border-color: #6aa9ff;
+    background: #262626;
 }
 
 /* ====================================================================
@@ -772,7 +870,7 @@ body {
 }
 
 .trade-table .positive {
-    color: #4CAF50;
+    color: #3a8f3e;
 }
 
 .trade-table .negative {
@@ -879,7 +977,7 @@ body {
 }
 
 .modal-btn.primary {
-    background: #4CAF50;
+    background: #3a8f3e;
     color: white;
 }
 
@@ -1115,7 +1213,7 @@ body {
 }
 
 .positive {
-    color: #4CAF50;
+    color: #3a8f3e;
 }
 
 .negative {
@@ -1296,6 +1394,15 @@ body {
     font-size: 15px;
 }
 .help-section h3:first-child { margin-top: 0; }
+.help-section h4 {
+    color: #ccc;
+    margin-top: 16px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.help-section h4:first-child { margin-top: 0; }
 .help-section p { margin: 6px 0 10px; }
 .help-section dl { margin: 6px 0 12px; }
 .help-section dt {

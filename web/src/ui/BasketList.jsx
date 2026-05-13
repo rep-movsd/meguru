@@ -19,6 +19,84 @@ import { Component } from 'preact';
 
 class BasketList extends Component {
 
+    constructor(props) {
+        super(props);
+        this.state = {
+            examplesOpen: false,
+            examples: null,        // null = not yet fetched, [] = empty, [{label, description, file}]
+            examplesError: null,
+            menuPos: null          // { left, bottom, minWidth } in viewport px
+        };
+    }
+
+    componentDidMount() {
+        this._onDocClick = (e) => {
+            if (!this.state.examplesOpen) return;
+            if (this._examplesRoot && this._examplesRoot.contains(e.target)) return;
+            if (this._menuEl && this._menuEl.contains(e.target)) return;
+            this.setState({ examplesOpen: false });
+        };
+        this._onResize = () => {
+            if (this.state.examplesOpen) this.setState({ examplesOpen: false });
+        };
+        document.addEventListener('mousedown', this._onDocClick);
+        window.addEventListener('resize', this._onResize);
+        window.addEventListener('scroll', this._onResize, true);
+    }
+
+    componentWillUnmount() {
+        document.removeEventListener('mousedown', this._onDocClick);
+        window.removeEventListener('resize', this._onResize);
+        window.removeEventListener('scroll', this._onResize, true);
+    }
+
+    fetchExamples = async () => {
+        if (this.state.examples) return;
+        try {
+            const r = await fetch('baskets/index.json', { cache: 'no-store' });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const j = await r.json();
+            this.setState({ examples: j.examples || [], examplesError: null });
+        } catch (err) {
+            this.setState({ examples: [], examplesError: err.message });
+        }
+    }
+
+    handleExamplesClick = () => {
+        const open = !this.state.examplesOpen;
+        if (!open) {
+            this.setState({ examplesOpen: false });
+            return;
+        }
+        // Compute menu position from button's viewport rect so the menu can
+        // escape the basket-list's overflow:hidden clipping using fixed pos.
+        let menuPos = null;
+        if (this._examplesRoot) {
+            const r = this._examplesRoot.getBoundingClientRect();
+            menuPos = {
+                left: r.left,
+                bottom: window.innerHeight - r.top + 4,    // 4px gap above button
+                minWidth: r.width
+            };
+        }
+        this.setState({ examplesOpen: true, menuPos });
+        this.fetchExamples();
+    }
+
+    handleExamplePick = async (file) => {
+        this.setState({ examplesOpen: false });
+        const { onLoadBasket } = this.props;
+        if (!onLoadBasket) return;
+        try {
+            const r = await fetch('baskets/' + file, { cache: 'no-store' });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const payload = await r.json();
+            onLoadBasket(payload);
+        } catch (err) {
+            alert('Failed to load example basket: ' + err.message);
+        }
+    }
+
     handleSliderChange = (stock, field, value) => {
         const { stockData, onParamChange } = this.props;
         if (!stockData[stock] || !onParamChange) return;
@@ -52,7 +130,7 @@ class BasketList extends Component {
     render() {
         const { stocks, stockData, selectedStock, expandedStock,
                 onSelect, onToggleVisible, onRemove, onToggleExpand, onOpenModal,
-                onSaveBasket } = this.props;
+                onSaveBasket, basketName, onBasketNameChange } = this.props;
 
         return (
             <div className="basket-list">
@@ -63,23 +141,38 @@ class BasketList extends Component {
                     </h2>
                 </div>
 
+                <div className="basket-name-row">
+                    <label className="basket-name-label" htmlFor="basket-name-input">Basket name:</label>
+                    <input
+                        id="basket-name-input"
+                        type="text"
+                        className="basket-name-input"
+                        value={basketName || ''}
+                        placeholder="basket name"
+                        onChange={(e) => onBasketNameChange && onBasketNameChange(e.target.value)}
+                        title="Basket name (saved with basket JSON)"
+                    />
+                </div>
+
                 <div className="basket-items">
-                    {/* Add Stock tile — always at top */}
-                    <div
-                        className="basket-item add-stock-tile"
-                        tabIndex="0"
-                        role="button"
-                        title="Add a new stock to the basket"
-                        onClick={onOpenModal}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                onOpenModal();
-                            }
-                        }}
-                    >
-                        <span className="add-stock-plus">{'\u002B'}</span>
-                        <span className="add-stock-label">Add Stock</span>
+                    {/* Add / Clear row — always at top */}
+                    <div className="basket-item add-stock-tile">
+                        <button
+                            className="add-stock-btn"
+                            onClick={onOpenModal}
+                            title="Add a new stock to the basket"
+                        >
+                            <span className="add-stock-plus">+</span>
+                            <span className="add-stock-label">Add</span>
+                        </button>
+                        <button
+                            className="add-stock-btn clear-btn"
+                            onClick={this.props.onClear}
+                            disabled={stocks.length === 0}
+                            title="Remove all stocks from the basket"
+                        >
+                            Clear
+                        </button>
                     </div>
 
                     {stocks.map(stock => {
@@ -205,7 +298,7 @@ class BasketList extends Component {
                 {/* Action footer */}
                 <div className="basket-footer">
                     <button
-                        className="new-stock-btn"
+                        className="new-stock-btn footer-narrow"
                         onClick={onSaveBasket}
                         disabled={stocks.length === 0}
                         title="Save basket to JSON file"
@@ -213,12 +306,63 @@ class BasketList extends Component {
                         Save
                     </button>
                     <button
-                        className="new-stock-btn"
+                        className="new-stock-btn footer-narrow"
                         onClick={this.handleLoadClick}
                         title="Load basket from JSON file"
                     >
                         Load
                     </button>
+                    <div
+                        className="examples-wrapper"
+                        ref={(el) => { this._examplesRoot = el; }}
+                    >
+                        <button
+                            className="new-stock-btn"
+                            onClick={this.handleExamplesClick}
+                            title="Load a curated example basket"
+                            aria-haspopup="menu"
+                            aria-expanded={this.state.examplesOpen}
+                        >
+                            Examples {'\u25BE'}
+                        </button>
+                        {this.state.examplesOpen && this.state.menuPos && (
+                            <div
+                                className="examples-menu"
+                                role="menu"
+                                ref={(el) => { this._menuEl = el; }}
+                                style={{
+                                    left:     this.state.menuPos.left + 'px',
+                                    bottom:   this.state.menuPos.bottom + 'px',
+                                    minWidth: this.state.menuPos.minWidth + 'px'
+                                }}
+                            >
+                                {this.state.examples === null && (
+                                    <div className="examples-status">Loading…</div>
+                                )}
+                                {this.state.examples && this.state.examples.length === 0 && (
+                                    <div className="examples-status">
+                                        {this.state.examplesError
+                                            ? 'Failed: ' + this.state.examplesError
+                                            : 'No examples available'}
+                                    </div>
+                                )}
+                                {this.state.examples && this.state.examples.map((ex) => (
+                                    <button
+                                        key={ex.file}
+                                        className="examples-item"
+                                        role="menuitem"
+                                        onClick={() => this.handleExamplePick(ex.file)}
+                                        title={ex.description || ''}
+                                    >
+                                        <span className="examples-label">{ex.label}</span>
+                                        {ex.description && (
+                                            <span className="examples-desc">{ex.description}</span>
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     <input
                         type="file"
                         accept="application/json,.json"
