@@ -190,6 +190,9 @@ class HelpModal extends Component {
 
                 <h3>Alloc bar</h3>
                 <p>Vertical bar left of chart = money split. Hover for +/− handles in Custom mode.</p>
+
+                <h3>Sharp dip at end</h3>
+                <p>Line drop hard at year end = 20% tax eaten from profit. Normal. Trade fees already swallowed inside each window.</p>
             </div>
         );
     }
