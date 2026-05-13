@@ -123,11 +123,12 @@ class HelpModal extends Component {
                 </p>
 
                 <h4>5 — Save / export</h4>
-                <p>
-                    <strong>Save</strong> → JSON file with everything. <strong>Load</strong> → put basket back.
-                    <strong>Backtest CSV</strong> → trade math for spreadsheet.
-                    <strong>Trade Calendar</strong> → BUY/SELL dates checklist.
-                </p>
+                <ul>
+                    <li><strong>Save</strong> — JSON file with everything.</li>
+                    <li><strong>Load</strong> — put basket back, missing data auto-downloaded.</li>
+                    <li><strong>Backtest CSV</strong> — trade math for spreadsheet. Check Meguru brain not making error.</li>
+                    <li><strong>Trade Calendar</strong> — BUY/SELL dates checklist.</li>
+                </ul>
             </div>
         );
     }
