@@ -1331,44 +1331,45 @@ class BasketGraph extends Component {
                             </button>
                         )}
 
-                        {/* Sample years dropdown — bar mode only. Sets the
-                            chart display window via getGraphData(N). Independent
-                            of each stock's params.nYears (stats lookback). */}
-                        <label
-                            className="alloc-label"
-                            style={{ visibility: viewMode === 'bar' && onDisplayYearsChange && stocks.length > 0 ? 'visible' : 'hidden' }}
-                        >
-                            Backtest:
-                            <select
-                                className="alloc-select"
-                                value={String(nDisplayYears)}
-                                onChange={(e) => onDisplayYearsChange && onDisplayYearsChange(e.target.value)}
-                                disabled={!hasData}
-                                title="How many recent years to chart (out-of-sample backtest beyond per-stock stats lookback)"
+                        {/* Backtest / Year selector — same slot, one visible at a time */}
+                        <div style={{ position: 'relative' }}>
+                            <label
+                                className="alloc-label"
+                                style={{ visibility: viewMode === 'bar' ? 'visible' : 'hidden' }}
                             >
-                                {!arrYearOptions.includes(nDisplayYears) && nDisplayYears > 0 && (
-                                    <option value={String(nDisplayYears)}>{nDisplayYears}y</option>
-                                )}
-                                {arrYearOptions.map(n => (
-                                    <option key={n} value={String(n)}>{n}y</option>
+                                Backtest:
+                                <select
+                                    className="alloc-select"
+                                    value={String(nDisplayYears)}
+                                    onChange={(e) => onDisplayYearsChange && onDisplayYearsChange(e.target.value)}
+                                    disabled={!hasData}
+                                    title="How many recent years to chart"
+                                >
+                                    {!arrYearOptions.includes(nDisplayYears) && nDisplayYears > 0 && (
+                                        <option value={String(nDisplayYears)}>{nDisplayYears}y</option>
+                                    )}
+                                    {arrYearOptions.map(n => (
+                                        <option key={n} value={String(n)}>{n}y</option>
+                                    ))}
+                                    <option value="max">Max</option>
+                                </select>
+                            </label>
+                            <select
+                                style={{
+                                    position: 'absolute', top: 0, left: 0,
+                                    visibility: viewMode === 'line' ? 'visible' : 'hidden'
+                                }}
+                                value={selectedYear}
+                                onChange={(e) => onYearChange(e.target.value)}
+                                disabled={!hasData}
+                                title="Select year or average"
+                            >
+                                <option value="Average">Average</option>
+                                {sortedYearsList.map(y => (
+                                    <option key={y.year} value={y.year}>{y.year}</option>
                                 ))}
-                                <option value="max">Max</option>
                             </select>
-                        </label>
-
-                        {/* Year selector — line mode only */}
-                        <select
-                            style={{ visibility: showYearCombo ? 'visible' : 'hidden' }}
-                            value={selectedYear}
-                            onChange={(e) => onYearChange(e.target.value)}
-                            disabled={!hasData}
-                            title="Select a year to display, or average across all years"
-                        >
-                            <option value="Average">Average</option>
-                            {sortedYearsList.map(y => (
-                                <option key={y.year} value={y.year}>{y.year}</option>
-                            ))}
-                        </select>
+                        </div>
 
                         {selectedStock && (
                             <span className="stock-count" style={{ color: '#2196F3' }}>
@@ -1439,15 +1440,6 @@ class BasketGraph extends Component {
                             </button>
                         </div>
 
-                        {/* Help button */}
-                        <button
-                            className="toggle-btn help-btn"
-                            onClick={() => onOpenHelp && onOpenHelp()}
-                            title="Open help & documentation"
-                            aria-label="Help"
-                        >
-                            ?
-                        </button>
                     </div>
                 </div>
 

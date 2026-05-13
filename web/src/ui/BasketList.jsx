@@ -130,7 +130,7 @@ class BasketList extends Component {
     render() {
         const { stocks, stockData, selectedStock, expandedStock,
                 onSelect, onToggleVisible, onRemove, onToggleExpand, onOpenModal,
-                onSaveBasket, basketName, onBasketNameChange } = this.props;
+                onSaveBasket, basketName, onBasketNameChange, onOpenHelp } = this.props;
 
         return (
             <div className="basket-list">
@@ -139,6 +139,12 @@ class BasketList extends Component {
                         <span className="basket-kanji" aria-hidden="true">{'\u5DE1'}</span>
                         Meguru
                     </h2>
+                    <button
+                        className="help-circle-btn"
+                        onClick={onOpenHelp}
+                        title="Help"
+                        aria-label="Help"
+                    >?</button>
                 </div>
 
                 <div className="basket-name-row">

@@ -1069,6 +1069,7 @@ class App extends Component {
                         onOptimize={this.handleOptimize}
                         basketName={basketName}
                         onBasketNameChange={(name) => this.setState({ basketName: name })}
+                        onOpenHelp={() => this.setState({ helpOpen: true })}
                     />
 
                     <BasketGraph
@@ -1091,7 +1092,6 @@ class App extends Component {
                         onOptimizeAllocation={this.handleOptimizeAllocation}
                         onDisplayYearsChange={this.handleDisplayYearsChange}
                         displayYears={displayYears}
-                        onOpenHelp={() => this.setState({ helpOpen: true })}
                     />
                 </div>
 
