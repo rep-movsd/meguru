@@ -241,7 +241,9 @@ class HelpModal extends Component {
                     <dt>Bar</dt>
                     <dd>One column per year. Stacked by stock color.</dd>
                 </dl>
-                <p><strong>Backtest years</strong> dropdown applies to <em>both</em> Line and Bar — controls how many years Meguru brain show.</p>
+                <p><strong>Backtest years</strong> dropdown applies to <em>both</em> Line and Bar — controls how many years Meguru brain show.
+                    Changing this number also change stats in bottom panel — different years = different average. Normal.
+                </p>
 
                 <h3>Y range</h3>
                 <p><strong>Y min</strong> / <strong>Y max</strong> dropdowns top-right. Saved across reloads.</p>
@@ -402,6 +404,20 @@ class HelpModal extends Component {
                     Even if Grug not want to follow Meguru plan, B&amp;H return data in chart useful.
                     Shows which stock historically grow well over long time.
                     Good for HODL style investor who just want to buy solid stock and forget.
+                </p>
+
+                <h3>GTT stoploss and real trading</h3>
+                <p>
+                    When following Meguru plan in real market, wise Grug set GTT stoploss on each position.
+                    Stoploss protect from big crash eating whole window profit.
+                    But stoploss also miss sometimes — false dip happen, price fall and trigger stop, then big rise after.
+                    Grug get out too early, miss the rocket.
+                    No magic spell make shiny rock every time. Market is chaos beast.
+                </p>
+                <p>
+                    Trade Calendar is guide, not oracle. Buy/sell dates show when season usually happen —
+                    not exact day market will move. Use own brain, watch price action, adjust.
+                    Meguru show the door. Grug must walk through it wisely.
                 </p>
 
                 <h3>Disclaimer</h3>
