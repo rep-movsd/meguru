@@ -59,6 +59,12 @@ class HelpModal extends Component {
                     profit in 12 months — because crash can eat 50% in weeks and you lose everything gained.
                     Less time in market = less time for bad thing to happen.
                 </p>
+                <p>
+                    When stock sold, money free again. Can sit as cash ready to buy next dip.
+                    Or same capital move to next stock in basket that just starting its season.
+                    Good plan = same money do work again and again, compound across many stocks one by one.
+                    Bad plan = money stuck sideways in one stock for many months earning nothing.
+                </p>
 
                 <h3>Why India have seasons?</h3>
                 <p>Many event repeat same time each year and move prices:</p>
