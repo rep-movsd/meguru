@@ -70,7 +70,7 @@ class HelpModal extends Component {
                     <li><strong>Dividends</strong> — many companies pay same date each year, stock dip after ex-date, recover after</li>
                     <li><strong>Astrology &amp; muhurat trading</strong> — Diwali muhurat session, auspicious dates cause real volume spikes</li>
                 </ul>
-                <p>These pattern repeat enough that brain can find and trade them.</p>
+                <p>These pattern repeat enough that Meguru brain can find and trade them.</p>
             </div>
         );
     }
@@ -127,7 +127,7 @@ class HelpModal extends Component {
                 <dl>
                     <dt>Sample years</dt>
                     <dd>
-                        How many past years brain study. Default 10.
+                        How many past years Meguru brain study. Default 10.
                         More = more sure, slower to notice market changed.
                     </dd>
 
@@ -142,7 +142,7 @@ class HelpModal extends Component {
                 <p className="help-note">Max window fixed at 180 days. Cannot change.</p>
                 <p className="help-note">
                     ⚠️ <strong>2020</strong> (COVID crash) and <strong>2008</strong> (global crash) weird years — big wild moves not normal.
-                    Indian market changed a lot from 2020 onward. Including too many pre-2020 years may teach brain wrong lesson.
+                    Indian market changed a lot from 2020 onward. Including too many pre-2020 years may teach Meguru brain wrong lesson.
                     10 years good start. Try fewer if plan look strange.
                 </p>
             </div>
@@ -161,7 +161,7 @@ class HelpModal extends Component {
                     <dd>Stocks that earned more in past get bigger slice.</dd>
 
                     <dt>Custom</dt>
-                    <dd>Drag handles on alloc bar (5% steps). Use <em>Copy to custom</em> to start from current split.</dd>
+                    <dd>+/− adjuster on alloc bar (5% steps). Use <em>Copy to custom</em> to start from current split.</dd>
                 </dl>
                 <p>
                     Hidden stock (<span className="help-icon">&#9679;</span>/<span className="help-icon">&#9675;</span> dot,
@@ -187,7 +187,7 @@ class HelpModal extends Component {
                 </p>
 
                 <h3>Quality score</h3>
-                <p>Both bulbs use same scoring brain:</p>
+                <p>Both bulbs use same Meguru brain scoring:</p>
                 <dl>
                     <dt>Efficiency</dt>
                     <dd>
@@ -218,14 +218,15 @@ class HelpModal extends Component {
                     <dd>Daily money curve for one year (or average of all years). Colored boxes = when holding stock.</dd>
 
                     <dt>Bar</dt>
-                    <dd>One column per year. Stacked by stock color. <em>Backtest years</em> dropdown sets how many years show.</dd>
+                    <dd>One column per year. Stacked by stock color.</dd>
                 </dl>
+                <p><strong>Backtest years</strong> dropdown applies to <em>both</em> Line and Bar — controls how many years Meguru brain show.</p>
 
                 <h3>Y range</h3>
                 <p><strong>Y min</strong> / <strong>Y max</strong> dropdowns top-right. Saved across reloads.</p>
 
                 <h3>Alloc bar</h3>
-                <p>Vertical bar left of chart = money split. Hover for +/− handles in Custom mode.</p>
+                <p>Vertical bar left of chart = money split. Hover for +/− adjusters in Custom mode.</p>
 
                 <h3>Sharp dip at end</h3>
                 <p>Line drop hard at year end = 20% tax eaten from profit. Normal. Trade fees already swallowed inside each window.</p>
@@ -237,7 +238,14 @@ class HelpModal extends Component {
         return (
             <div className="help-section">
                 <h3>Backtest CSV</h3>
-                <p>Day-by-day plan math for one year. Check numbers in Google Sheets / Excel.</p>
+                <p>
+                    Day-by-day trade log for one year. Shows exactly what happen when buy and sell on Meguru plan.
+                    Open in Google Sheets / Excel to verify Meguru brain not making error — see each window, each price, each gain.
+                </p>
+                <p className="help-note">
+                    ⚠️ All numbers depend on Yahoo Finance price data. Yahoo price <strong>not adjusted for dividends</strong>.
+                    If stock pay big dividend, price show fake drop on ex-date. Real return may be higher than shown.
+                </p>
 
                 <h3>Trade Calendar</h3>
                 <p>BUY/SELL dates for whole basket. Use as checklist or drop in calendar app.</p>
@@ -286,7 +294,7 @@ class HelpModal extends Component {
     renderMethodology() {
         return (
             <div className="help-section">
-                <h3>How brain work</h3>
+                <h3>How Meguru brain work</h3>
                 <ol>
                     <li>Grab daily prices from Yahoo, save per year in browser cave (OPFS).</li>
                     <li>Try every window size from <code>nWinMin</code> to 180 days.</li>
@@ -297,7 +305,8 @@ class HelpModal extends Component {
 
                 <h3>Warnings</h3>
                 <ul>
-                    <li>History fitting. Past good time not promise future good time.</li>
+                    <li>History fitting. Past good time not promise future good time.
+                        Meguru brain learn from past, cannot see future.</li>
                     <li>Fee = 0.04% of trade value, charged on each BUY and each SELL.</li>
                     <li>Tax = 20% STCG applied on net profit at end of each year.</li>
                     <li>Yahoo price = end of day, split-fixed, maybe not dividend-fixed.</li>
