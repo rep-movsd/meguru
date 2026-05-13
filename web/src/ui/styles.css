@@ -176,9 +176,9 @@ body {
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    border: 1.5px solid #555;
+    border: 1.5px solid #4a90e2;
     background: none;
-    color: #888;
+    color: #4a90e2;
     font-size: 12px;
     font-weight: 700;
     line-height: 1;
@@ -188,11 +188,12 @@ body {
     justify-content: center;
     padding: 0;
     flex-shrink: 0;
-    transition: border-color 0.15s, color 0.15s;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .help-circle-btn:hover {
-    border-color: #4a90e2;
-    color: #4a90e2;
+    border-color: #7ab8ff;
+    color: #fff;
+    background: #2563a8;
 }
 
 .basket-items {
