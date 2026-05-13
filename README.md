@@ -1,212 +1,186 @@
-# Meguru — Seasonal Stock Trading Research Tool
+# Meguru — Stock Season Finder
 
-Meguru is a browser-based seasonal trading research tool for NSE-listed stocks.
-It identifies date ranges within each year where positive returns have occurred
-with high consistency, turning those recurring windows into a concrete trading
-plan — specific periods each year when it makes sense to buy and hold a stock.
+Meguru look at stock price history. Find time of year when stock go up many times before.
+Make plan: buy here, sell there, do again next year.
 
-> **All computation runs in your browser.** There is no backend server.
-> Price data is fetched from Yahoo Finance via a lightweight CORS proxy and
-> stored locally in your browser's private file system (OPFS).
+> **All thinking happen in browser. No server. No cloud brain.**
+> Price numbers come from Yahoo Finance through small helper, saved in browser cave (OPFS).
 
 ---
 
-## What It Does
+## What Meguru Do
 
-### Baskets
+### Basket
 
-A **basket** is a collection of stocks, each with its own set of trade windows
-and its own capital-allocation percentage. By combining stocks with different
-seasonal windows you can create a portfolio that captures recurring patterns
-while smoothing out volatility and reducing total time in market.
+**Basket** = group of stocks. Each stock have own buy/sell times. Each stock get own pile of money.
 
-The engine simulates the full trade history for the basket and plots the result
-against a simple buy-and-hold benchmark. Each stock's contribution is shown
-separately in the bar chart so you can see exactly where returns are coming from.
+Put many stocks together → catch different seasons → less bumpy ride → less time holding risky thing.
 
-Capital is tracked independently per stock — gains in one position are never
-mixed with another, keeping accounting clean and per-stock comparisons honest.
+Meguru run fake trade on all past years. Draw picture. Show how plan do vs just hold forever.
+Each stock shown with own color bar so you see who help, who hurt.
+
+Money stay separate per stock. No mixing. Easy to see who earn what.
 
 ---
 
-## Quick Start
+## How To Use
 
-### 1 — Build your basket
+### Step 1 — Fill basket
 
-Click **Add Stock** at the top of the basket panel and type the NSE symbol or company name to search for the stcok.
-Meguru downloads up to 25 years of daily price data from Yahoo Finance and stores it in your
-browser cache for future use. This may take a few seconds; subsequent loads
-are instant.
+Click **Add Stock**. Type NSE name (`RELIANCE`, `TCS`, etc).
+Meguru go grab up to 25 years of price from Yahoo. Store in browser. Wait few seconds.
+Next time: instant — already in cave.
 
-Once added, the engine automatically optimises the search parameters to find
-the best trade windows for that stock.
+After add, Meguru auto-tune settings to find best windows. No manual work needed.
 
-You can also click **Examples** in the footer to load curated baskets instantly.
+Click **Examples** at bottom to load ready baskets.
 
-### 2 — Tune parameters
+### Step 2 — Poke sliders
 
-Click the **▶** chevron on any stock tile to reveal three sliders:
+Click **▶** arrow on stock tile. Three sliders appear:
 
-| Slider | Parameter | Effect |
+| Slider | Code name | What do |
 |---|---|---|
-| Sample years | `nYears` | How many historical years to analyse. More years = more statistical confidence but slower adaptation to recent market regime changes. |
-| Min Window | `nWinMin` | Shortest acceptable window length in days. Very short windows can fit noise; very long windows dilute signal. |
-| Win % | `fPctWin` | Minimum historical hit-rate a candidate window must clear. Floor is 50% — below chance is not a signal. |
+| Sample years | `nYears` | How many past years to study. More years = more sure, but slow to notice market changed. |
+| Min Window | `nWinMin` | Shortest buy-hold time allowed (days). Too short = catch noise. Too long = blur signal. |
+| Win % | `fPctWin` | How many years window must win to count. Never below 50% — losing window not signal. |
 
-The `nWinMax` upper bound is fixed at 180 days and not exposed in the UI.
+Max window always 180 days. Hidden. Cannot touch.
 
-### 3 — Review basket returns
+### Step 3 — Look at chart
 
-**Bar view** — each column shows one year. The left bar is the average
-buy-and-hold return; the right bar is the plan return, broken down by stock.
-White labels show the net result. The top of the bar is aligned with the net
-return; the section below zero shows losses (right half) and gains nullified
-by losses (left half).
+**Bar view** — one column per year. Left bar = hold all year return. Right bar = plan return, colored by stock.
+White number = final result. Bar below zero: right half = loss, left half = gains eaten by loss.
 
-**Line view** — shows a single year's daily equity curve — plan vs
-buy-and-hold — with trade-window shading overlaid for the selected stock.
-You can select a specific year or the per-day average across all years.
+**Line view** — squiggly line of money over days. Plan vs hold-all-year. Pick one year or see average of all years.
+Colored boxes show when stock held.
 
-To focus on one stock, click its tile to **solo** it. The graph and stats
-panel update to show that stock only. Click again to return to the full
-basket view. To temporarily hide a stock without removing it, click the green
-dot next to its name.
+Click stock tile → **solo mode**: see only that stock. Click again → back to full basket.
+Click green dot → hide stock (stay in basket but weight = zero).
 
-### 4 — Adjust allocation
+### Step 4 — Split money
 
-The vertical bar to the left of the chart shows how capital is split across
-stocks. Choose from the dropdown:
+Vertical bar left of chart show how money split. Pick from dropdown:
 
-- **Equal** — every visible stock gets the same weight.
-- **Avg Return** — weights are proportional to each stock's average plan return.
-- **Custom** — hover-handles on the bar let you nudge each stock's weight in
-  5% steps. Use *Copy to custom* to start from the current mode's weights.
+- **Equal** — everyone same slice.
+- **Avg Return** — winners get bigger slice.
+- **Custom** — drag handles on bar, change in 5% steps. Click *Copy to custom* to start from current split.
 
-The 💡 bulb next to the allocation bar runs an automatic brute-force search
-over weight compositions to maximise basket return, weighted by a
-risk-adjusted quality score.
+💡 bulb button = let Meguru try all splits, pick best one. Use quality score (not just raw return).
 
-### 5 — Export and save
+### Step 5 — Save stuff
 
-| Action | Description |
+| Button | What happen |
 |---|---|
-| **Save** | Exports the basket as a JSON file — stocks, parameters, allocation mode, and custom weights all included. |
-| **Load** | Restores a saved basket and auto-downloads any missing price data. |
-| **Backtest CSV** | Day-by-day trade detail for a chosen year — useful for verifying numbers in a spreadsheet. |
-| **Trade Calendar** | Date-keyed CSV with every BUY/SELL action across the basket. Drop it into a calendar app or use it as a checklist. |
+| **Save** | Download basket as JSON file. Has everything. |
+| **Load** | Put basket back. Downloads missing price data auto. |
+| **Backtest CSV** | One year of trade math. Check in spreadsheet. |
+| **Trade Calendar** | BUY/SELL dates for whole basket. Put in calendar app. |
 
 ---
 
-## Stats Glossary
+## Numbers Explained
 
-### Trade-window stats
+### Window numbers
 
-| Term | Meaning |
+| Word | Meaning |
 |---|---|
-| Day Range | Day-of-year range (1–366) when this window is active. |
-| Win % | Fraction of years this window ended positive. |
-| Expected % | Average return across all sample years for this window. |
-| %/day | Expected % divided by window length in days. |
-| Profit Ratio | Average gain on winning years / average loss on losing years. |
+| Day Range | Which days of year window is open (1–366). |
+| Win % | How many years this window made money. |
+| Expected % | Average return across all years for this window. |
+| %/day | Expected % divided by days open. |
+| Profit Ratio | Average win size ÷ average loss size. |
 
-### Summary stats
+### Summary numbers
 
-| Term | Meaning |
+| Word | Meaning |
 |---|---|
-| Plan Return | Average yearly return when following the trade-window plan. |
-| B&H Return | Average yearly return for a simple buy-and-hold. |
-| Days In Market | Fraction of the year capital is actively held under the plan. |
-| Plan Quality | Risk-adjusted score: plan return relative to B&H, penalised by downside volatility. Higher is better. |
+| Plan Return | Average yearly return following plan. |
+| B&H Return | Average yearly return holding all year. |
+| Days In Market | Fraction of year when money actually working. |
+| Plan Quality | Smart score. Plan return vs how long held, minus pain from bad years. Higher = better. |
 
 ---
 
-## Methodology
+## How Brain Work Inside
 
-1. Daily OHLC data is downloaded from Yahoo Finance via a Cloudflare Worker
-   CORS proxy and cached per `(symbol, year)` in OPFS.
-2. For each stock the engine builds returns for every day-of-year window in
-   `[nWinMin, 180]`.
-3. Windows are kept only if they pass `fPctWin` over the last `nYears`.
-4. Surviving windows are merged into a single trade plan: BUY at the start of
-   an active window, SELL at the end, flat otherwise.
-5. The basket simulator runs each stock's plan, weighted by allocation, and
-   aggregates daily equity.
+1. Grab daily price from Yahoo, save per year in browser cave.
+2. For each stock, try every window size from `nWinMin` to 180 days.
+3. Keep windows that won at least `fPctWin`% of years.
+4. Surviving windows become plan: BUY when window open, SELL when close, sit flat otherwise.
+5. Run plan on each stock, weight by allocation, add up daily money curve.
 
-### Caveats
+### Danger warnings
 
-- This is curve-fitted historical analysis. Past performance does not
-  guarantee future results.
-- The engine ignores transaction costs and tax.
-- Yahoo data is end-of-day, adjusted for splits but not always for dividends.
-- The win-rate floor is 50% — the optimiser never selects windows with a
-  losing track record.
+- This history fitting. Past good time not promise future good time.
+- Engine not count fees or tax.
+- Yahoo price = end of day, split-fixed, maybe not dividend-fixed.
+- Engine never pick window that lose more than win.
 
 ---
 
-## Running Locally
+## Run On Own Computer
 
 ```bash
-# Terminal 1 — Cloudflare Worker CORS proxy (Yahoo Finance relay)
+# Cave 1 — small helper that talk to Yahoo (browser cannot talk direct)
 cd web/worker
 npx wrangler dev
-# Listening on http://localhost:8787
+# Sit on http://localhost:8787
 
-# Terminal 2 — Vite dev server
+# Cave 2 — actual app
 cd web
 npm install
 npm run dev
-# Running on http://localhost:3000
+# Sit on http://localhost:3000
 ```
 
-The app reads `VITE_WORKER_URL` from `web/.env` (see `web/.env.example`).
-By default it points to `http://localhost:8787`.
+App read `VITE_WORKER_URL` from `web/.env`. Default = `http://localhost:8787`.
 
-### Deploying the worker
+### Put helper on internet
 
 ```bash
-npx wrangler login                    # sign in to a free Cloudflare account
+npx wrangler login                    # make free Cloudflare account
 cd web/worker
 npx wrangler deploy                   # → https://meguru-proxy.xxx.workers.dev
 ```
 
-Set `VITE_WORKER_URL` to the deployed URL in `web/.env` and rebuild with
-`npm run build`.
+Put that URL in `web/.env` as `VITE_WORKER_URL`. Build again with `npm run build`.
 
-### Building the WASM engine
+### Build C++ brain into WASM blob
 
-Requires [Emscripten](https://emscripten.org/) (`emcc` on `$PATH`).
+Need [Emscripten](https://emscripten.org/) (`emcc` must be findable).
 
 ```bash
 cd engine
 mkdir build-wasm && cd build-wasm
 emcmake cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
-# Outputs: meguru.js  meguru.wasm
+# Makes: meguru.js  meguru.wasm
 cp meguru.js meguru.wasm ../../web/public/wasm/
 ```
 
-For a native debug build:
+For native debug (no WASM, just run on computer):
 
 ```bash
 cd engine
 mkdir build && cd build
 cmake .. -DMEGURU_DEBUG=ON
 make -j$(nproc)
-./meguru                              # standalone test harness
+./meguru
 ```
 
 ---
 
-## Tech Stack
+## Ingredients
 
-| Layer | Technology |
+| Part | Tool |
 |---|---|
-| UI framework | Preact (class components) |
-| Charting | Chart.js |
-| Engine | C++23 compiled to WebAssembly via Emscripten |
-| JS–WASM bridge | Emscripten embind |
-| Client-side cache | OPFS (Origin Private File System) |
-| Data source | Yahoo Finance v8 chart API |
-| CORS proxy | Cloudflare Workers |
-| Static hosting | Cloudflare Pages |
+| Buttons and screen | Preact (class style, no hooks) |
+| Chart drawing | Chart.js |
+| Thinking brain | C++23 → WebAssembly via Emscripten |
+| Brain↔Browser talk | Emscripten embind |
+| Price file cave | OPFS (browser private file system) |
+| Price source | Yahoo Finance v8 API |
+| Yahoo helper proxy | Cloudflare Workers |
+| Put app on web | Cloudflare Pages |
 | Build tool | Vite 6 |
