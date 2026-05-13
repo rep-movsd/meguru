@@ -716,10 +716,9 @@ class App extends Component {
 
         const sortedDesc = [...arrYears].sort((a, b) => b - a);
         const sDefault = String(sortedDesc[0]);
-        const sPrompt =
-            `Export backtest for which year?\n\n` +
-            `Available: ${sortedDesc.join(', ')}\n` +
-            `Enter a year, or leave blank to use ${sDefault}.`;
+        const nFirst = sortedDesc[sortedDesc.length - 1];
+        const nLast  = sortedDesc[0];
+        const sPrompt = `Which year to backtest? Choose from ${nFirst} – ${nLast}`;
         const sInput = window.prompt(sPrompt, sDefault);
         if (sInput === null) return;  // cancelled
 
