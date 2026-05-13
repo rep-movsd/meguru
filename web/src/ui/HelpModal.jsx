@@ -107,7 +107,10 @@ class HelpModal extends Component {
                 <h3>Sliders</h3>
                 <dl>
                     <dt>Sample years</dt>
-                    <dd>How many past years brain study. More = more sure, slower to notice market changed.</dd>
+                    <dd>
+                        How many past years brain study. Default 10.
+                        More = more sure, slower to notice market changed.
+                    </dd>
 
                     <dt>Min Window</dt>
                     <dd>Shortest buy-hold time allowed (days). Too short = catch noise. Too long = blur signal.</dd>
@@ -118,6 +121,11 @@ class HelpModal extends Component {
                     </dd>
                 </dl>
                 <p className="help-note">Max window fixed at 180 days. Cannot change.</p>
+                <p className="help-note">
+                    ⚠️ <strong>2020</strong> (COVID crash) and <strong>2008</strong> (global crash) weird years — big wild moves not normal.
+                    Indian market changed a lot from 2020 onward. Including too many pre-2020 years may teach brain wrong lesson.
+                    10 years good start. Try fewer if plan look strange.
+                </p>
             </div>
         );
     }
