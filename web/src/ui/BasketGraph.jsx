@@ -1334,41 +1334,41 @@ class BasketGraph extends Component {
                         {/* Sample years dropdown — bar mode only. Sets the
                             chart display window via getGraphData(N). Independent
                             of each stock's params.nYears (stats lookback). */}
-                        {viewMode === 'bar' && onDisplayYearsChange && stocks.length > 0 && (
-                            <label className="alloc-label">
-                                Backtest:
-                                <select
-                                    className="alloc-select"
-                                    value={String(nDisplayYears)}
-                                    onChange={(e) => onDisplayYearsChange(e.target.value)}
-                                    disabled={!hasData}
-                                    title="How many recent years to chart (out-of-sample backtest beyond per-stock stats lookback)"
-                                >
-                                    {!arrYearOptions.includes(nDisplayYears) && nDisplayYears > 0 && (
-                                        <option value={String(nDisplayYears)}>{nDisplayYears}y</option>
-                                    )}
-                                    {arrYearOptions.map(n => (
-                                        <option key={n} value={String(n)}>{n}y</option>
-                                    ))}
-                                    <option value="max">Max</option>
-                                </select>
-                            </label>
-                        )}
-
-                        {/* Year selector — always visible (line chart + export CSV use it; bar chart ignores) */}
-                        {showYearCombo && (
+                        <label
+                            className="alloc-label"
+                            style={{ visibility: viewMode === 'bar' && onDisplayYearsChange && stocks.length > 0 ? 'visible' : 'hidden' }}
+                        >
+                            Backtest:
                             <select
-                                value={selectedYear}
-                                onChange={(e) => onYearChange(e.target.value)}
+                                className="alloc-select"
+                                value={String(nDisplayYears)}
+                                onChange={(e) => onDisplayYearsChange && onDisplayYearsChange(e.target.value)}
                                 disabled={!hasData}
-                                title="Select a year to display, or average across all years"
+                                title="How many recent years to chart (out-of-sample backtest beyond per-stock stats lookback)"
                             >
-                                <option value="Average">Average</option>
-                                {sortedYearsList.map(y => (
-                                    <option key={y.year} value={y.year}>{y.year}</option>
+                                {!arrYearOptions.includes(nDisplayYears) && nDisplayYears > 0 && (
+                                    <option value={String(nDisplayYears)}>{nDisplayYears}y</option>
+                                )}
+                                {arrYearOptions.map(n => (
+                                    <option key={n} value={String(n)}>{n}y</option>
                                 ))}
+                                <option value="max">Max</option>
                             </select>
-                        )}
+                        </label>
+
+                        {/* Year selector — line mode only */}
+                        <select
+                            style={{ visibility: showYearCombo ? 'visible' : 'hidden' }}
+                            value={selectedYear}
+                            onChange={(e) => onYearChange(e.target.value)}
+                            disabled={!hasData}
+                            title="Select a year to display, or average across all years"
+                        >
+                            <option value="Average">Average</option>
+                            {sortedYearsList.map(y => (
+                                <option key={y.year} value={y.year}>{y.year}</option>
+                            ))}
+                        </select>
 
                         {selectedStock && (
                             <span className="stock-count" style={{ color: '#2196F3' }}>
