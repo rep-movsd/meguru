@@ -1294,9 +1294,9 @@ class BasketGraph extends Component {
                 if (n > nMaxDataYears) nMaxDataYears = n;
             }
         }
-        // Generate dropdown options: 5, 10, 15, 20, 25.
+        // Generate dropdown options: 2, 3, 4, 5, 10, 15, 20, 25.
         // Always show full set; data-cap only used to decide if "Max" expands beyond 25.
-        const arrYearOptions = [5, 10, 15, 20, 25];
+        const arrYearOptions = [2, 3, 4, 5, 10, 15, 20, 25];
         const nDisplayYears = Number.isFinite(displayYears) ? displayYears : 10;
 
         return (
