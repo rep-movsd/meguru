@@ -48,7 +48,7 @@ str exportTradeCalendarCsv(CREF(CBasket) basket) {
         CAUTOREF arrStats = basket.getWindowStats(arrStocks[i]);
         for(CAUTOREF ws : arrStats) {
             dctEvents[ws.iBeg][i] = "BUY";
-            dctEvents[ws.iEnd][i] = "SELL";
+            dctEvents[ws.iEnd][i] = format("SELL {:+.1f}%", ws.pctExpected);
         }
     }
 
